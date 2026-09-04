@@ -1,0 +1,19 @@
+{
+  "database": "data/store.db",
+  "dry_run": true,
+  "profit": {
+    "weekly_target_krw": 5000000,
+    "minimum_contribution_margin_rate": 0.18,
+    "return_reserve_rate": 0.05,
+    "ad_cost_rate": 0.10,
+    "marketplace_fee_rate": 0.06
+  },
+  "workers": {
+    "lease_seconds": 300,
+    "max_attempts": 3
+  },
+  "codex": {
+    "enabled": false,
+    "sandbox": "workspace-write"
+  }
+}
