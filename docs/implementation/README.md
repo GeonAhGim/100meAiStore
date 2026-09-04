@@ -7,3 +7,6 @@ Phase 1 is limited to a local DEMO foundation and the first control-plane
 vertical slice. It does not authorize live marketplace, supplier, payment, or
 cloud side effects.
 
+Phase 2 persistence and failure-injection acceptance criteria are tracked in
+[`phase2-test-plan.md`](phase2-test-plan.md). Passing a smaller unit-test subset
+does not imply that the complete Phase 2 release gate has passed.
