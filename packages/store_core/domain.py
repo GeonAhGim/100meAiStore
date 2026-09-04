@@ -149,3 +149,26 @@ class AuditEvent:
     metadata: Mapping[str, Any]
     prev_hash: str | None
     event_hash: str
+
+
+class OutboxState(str, Enum):
+    PENDING = "pending"
+    LEASED = "leased"
+    COMPLETED = "completed"
+
+
+@dataclass
+class OutboxEvent:
+    id: str
+    tenant_id: str
+    topic: str
+    aggregate_ref: str
+    payload: Mapping[str, Any]
+    idempotency_key: str
+    state: OutboxState
+    created_at: datetime
+    checkpoint: Mapping[str, Any] = field(default_factory=dict)
+    lease_owner: str | None = None
+    lease_until: datetime | None = None
+    fencing_token: int = 0
+    completed_at: datetime | None = None

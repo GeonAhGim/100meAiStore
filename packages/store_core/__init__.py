@@ -7,9 +7,11 @@ from .domain import (
     CommandState,
     Role,
     TenantContext,
+    OutboxState,
 )
 from .errors import AuthorizationError, ConflictError, NotFoundError, TenantBoundaryError
 from .service import StoreControlPlane
+from .sqlite_repository import SQLiteRepository
 
 __all__ = [
     "ApprovalKind",
@@ -23,4 +25,6 @@ __all__ = [
     "StoreControlPlane",
     "TenantBoundaryError",
     "TenantContext",
+    "OutboxState",
+    "SQLiteRepository",
 ]

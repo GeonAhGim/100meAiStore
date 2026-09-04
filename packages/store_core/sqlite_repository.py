@@ -1,0 +1,201 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+from contextlib import contextmanager
+from datetime import datetime
+from pathlib import Path
+from typing import Iterator
+
+from .domain import (
+    Approval, ApprovalKind, ApprovalState, AuditEvent, Command, CommandState,
+    Membership, OutboxEvent, OutboxState, Role, Tenant, User,
+)
+from .errors import ConflictError, NotFoundError, TenantBoundaryError
+
+
+MIGRATIONS = ((1, """
+CREATE TABLE tenants(id TEXT PRIMARY KEY, legal_name TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE users(id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL);
+CREATE TABLE memberships(tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, roles_json TEXT NOT NULL,
+ active INTEGER NOT NULL, version INTEGER NOT NULL, PRIMARY KEY(tenant_id,user_id));
+CREATE TABLE commands(id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, kind TEXT NOT NULL, target_ref TEXT NOT NULL,
+ payload_json TEXT NOT NULL, payload_digest TEXT NOT NULL, idempotency_key TEXT NOT NULL, state TEXT NOT NULL,
+ created_at TEXT NOT NULL, supersedes_id TEXT, UNIQUE(tenant_id,idempotency_key));
+CREATE INDEX commands_tenant_id_id ON commands(tenant_id,id);
+CREATE TABLE approvals(id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, command_id TEXT NOT NULL, kind TEXT NOT NULL,
+ state TEXT NOT NULL, requested_at TEXT NOT NULL, expires_at TEXT NOT NULL, evidence_json TEXT NOT NULL,
+ decided_by TEXT, decision_reason TEXT, UNIQUE(tenant_id,command_id));
+CREATE INDEX approvals_tenant_command ON approvals(tenant_id,command_id);
+CREATE TABLE audit_events(sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, tenant_id TEXT NOT NULL,
+ occurred_at TEXT NOT NULL, actor_ref TEXT NOT NULL, action TEXT NOT NULL, target_ref TEXT NOT NULL, outcome TEXT NOT NULL,
+ correlation_id TEXT NOT NULL, metadata_json TEXT NOT NULL, prev_hash TEXT, event_hash TEXT NOT NULL);
+CREATE INDEX audit_tenant_sequence ON audit_events(tenant_id,sequence);
+CREATE TABLE outbox(id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, topic TEXT NOT NULL, aggregate_ref TEXT NOT NULL,
+ payload_json TEXT NOT NULL, idempotency_key TEXT NOT NULL, state TEXT NOT NULL, created_at TEXT NOT NULL,
+ checkpoint_json TEXT NOT NULL, lease_owner TEXT, lease_until TEXT, fencing_token INTEGER NOT NULL DEFAULT 0,
+ completed_at TEXT, UNIQUE(tenant_id,idempotency_key));
+CREATE INDEX outbox_tenant_state ON outbox(tenant_id,state,created_at);
+"""),)
+
+
+def _dt(value: str | None) -> datetime | None:
+    return datetime.fromisoformat(value) if value else None
+
+
+class SQLiteRepository:
+    """Durable DEMO adapter. Every aggregate query includes a tenant predicate."""
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = str(path)
+        self.connection = sqlite3.connect(self.path, isolation_level=None)
+        self.connection.row_factory = sqlite3.Row
+        self.connection.execute("PRAGMA foreign_keys=ON")
+        self.connection.execute("PRAGMA journal_mode=WAL")
+        self._depth = 0
+        self._migrate()
+
+    def close(self) -> None:
+        self.connection.close()
+
+    def _migrate(self) -> None:
+        self.connection.execute("CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")
+        applied = {r[0] for r in self.connection.execute("SELECT version FROM schema_migrations")}
+        for version, sql in MIGRATIONS:
+            if version not in applied:
+                with self.connection:
+                    self.connection.executescript(sql)
+                    self.connection.execute("INSERT INTO schema_migrations VALUES (?,?)", (version, datetime.now().astimezone().isoformat()))
+
+    @contextmanager
+    def transaction(self) -> Iterator[SQLiteRepository]:
+        savepoint = f"uow_{self._depth}"
+        if self._depth == 0:
+            self.connection.execute("BEGIN IMMEDIATE")
+        else:
+            self.connection.execute(f"SAVEPOINT {savepoint}")
+        self._depth += 1
+        try:
+            yield self
+        except Exception:
+            self._depth -= 1
+            if self._depth == 0:
+                self.connection.execute("ROLLBACK")
+            else:
+                self.connection.execute(f"ROLLBACK TO {savepoint}")
+                self.connection.execute(f"RELEASE {savepoint}")
+            raise
+        else:
+            self._depth -= 1
+            if self._depth == 0:
+                self.connection.execute("COMMIT")
+            else:
+                self.connection.execute(f"RELEASE {savepoint}")
+
+    def add_tenant(self, value: Tenant) -> None:
+        self.connection.execute("INSERT INTO tenants VALUES (?,?,?)", (value.id, value.legal_name, value.created_at.isoformat()))
+
+    def add_user(self, value: User) -> None:
+        try:
+            self.connection.execute("INSERT INTO users VALUES (?,?,?)", (value.id, value.email, value.created_at.isoformat()))
+        except sqlite3.IntegrityError as exc:
+            raise ConflictError("email already registered") from exc
+
+    def find_user_by_email(self, email: str) -> User | None:
+        row = self.connection.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
+        return User(row["id"], row["email"], _dt(row["created_at"])) if row else None  # type: ignore[arg-type]
+
+    def get_user(self, user_id: str) -> User:
+        row = self.connection.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+        if not row: raise NotFoundError("user not found")
+        return User(row["id"], row["email"], _dt(row["created_at"]))  # type: ignore[arg-type]
+
+    def save_membership(self, value: Membership) -> None:
+        self.connection.execute("""INSERT INTO memberships VALUES (?,?,?,?,?) ON CONFLICT(tenant_id,user_id) DO UPDATE SET
+ roles_json=excluded.roles_json,active=excluded.active,version=excluded.version""",
+            (value.tenant_id,value.user_id,json.dumps(sorted(r.value for r in value.roles)),int(value.active),value.version))
+
+    def get_membership(self, tenant_id: str, user_id: str) -> Membership:
+        row = self.connection.execute("SELECT * FROM memberships WHERE tenant_id=? AND user_id=?", (tenant_id,user_id)).fetchone()
+        if not row: raise NotFoundError("membership not found")
+        return Membership(row["tenant_id"],row["user_id"],frozenset(Role(v) for v in json.loads(row["roles_json"])),bool(row["active"]),row["version"])
+
+    def tenant_memberships(self, tenant_id: str):
+        rows = self.connection.execute("SELECT user_id FROM memberships WHERE tenant_id=?", (tenant_id,)).fetchall()
+        return tuple(self.get_membership(tenant_id,row["user_id"]) for row in rows)
+
+    def save_command(self, c: Command) -> None:
+        self.connection.execute("""INSERT INTO commands VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
+ state=excluded.state,supersedes_id=excluded.supersedes_id,payload_json=excluded.payload_json,payload_digest=excluded.payload_digest""",
+            (c.id,c.tenant_id,c.kind.value,c.target_ref,json.dumps(c.payload,ensure_ascii=False,sort_keys=True),c.payload_digest,c.idempotency_key,c.state.value,c.created_at.isoformat(),c.supersedes_id))
+
+    def get_command(self, tenant_id: str, command_id: str) -> Command:
+        row = self.connection.execute("SELECT * FROM commands WHERE tenant_id=? AND id=?",(tenant_id,command_id)).fetchone()
+        if not row:
+            if self.connection.execute("SELECT 1 FROM commands WHERE id=?",(command_id,)).fetchone(): raise TenantBoundaryError("cross-tenant command access denied")
+            raise NotFoundError("command not found")
+        return Command(row["id"],row["tenant_id"],ApprovalKind(row["kind"]),row["target_ref"],json.loads(row["payload_json"]),row["payload_digest"],row["idempotency_key"],CommandState(row["state"]),_dt(row["created_at"]),row["supersedes_id"])  # type: ignore[arg-type]
+
+    def command_id_for_key(self, tenant_id: str, key: str) -> str | None:
+        row=self.connection.execute("SELECT id FROM commands WHERE tenant_id=? AND idempotency_key=?",(tenant_id,key)).fetchone()
+        return row["id"] if row else None
+
+    def bind_command_key(self, tenant_id: str, idempotency_key: str, command_id: str) -> None:
+        # The unique binding is stored with the command row.
+        if self.command_id_for_key(tenant_id,idempotency_key) != command_id: raise ConflictError("command idempotency binding mismatch")
+
+    def save_approval(self, a: Approval) -> None:
+        self.connection.execute("""INSERT INTO approvals VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
+ state=excluded.state,decided_by=excluded.decided_by,decision_reason=excluded.decision_reason""",
+            (a.id,a.tenant_id,a.command_id,a.kind.value,a.state.value,a.requested_at.isoformat(),a.expires_at.isoformat(),json.dumps(a.evidence,ensure_ascii=False,sort_keys=True),a.decided_by,a.decision_reason))
+
+    def get_approval_for_command(self, tenant_id: str, command_id: str) -> Approval:
+        self.get_command(tenant_id,command_id)
+        r=self.connection.execute("SELECT * FROM approvals WHERE tenant_id=? AND command_id=?",(tenant_id,command_id)).fetchone()
+        if not r: raise NotFoundError("approval not found")
+        return Approval(r["id"],r["tenant_id"],r["command_id"],ApprovalKind(r["kind"]),ApprovalState(r["state"]),_dt(r["requested_at"]),_dt(r["expires_at"]),tuple(json.loads(r["evidence_json"])),r["decided_by"],r["decision_reason"])  # type: ignore[arg-type]
+
+    def append_audit(self, e: AuditEvent) -> None:
+        self.connection.execute("INSERT INTO audit_events(id,tenant_id,occurred_at,actor_ref,action,target_ref,outcome,correlation_id,metadata_json,prev_hash,event_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (e.id,e.tenant_id,e.occurred_at.isoformat(),e.actor_ref,e.action,e.target_ref,e.outcome,e.correlation_id,json.dumps(e.metadata,ensure_ascii=False,sort_keys=True),e.prev_hash,e.event_hash))
+
+    def audits_for(self, tenant_id: str) -> tuple[AuditEvent,...]:
+        rows=self.connection.execute("SELECT * FROM audit_events WHERE tenant_id=? ORDER BY sequence",(tenant_id,)).fetchall()
+        return tuple(AuditEvent(r["id"],r["tenant_id"],_dt(r["occurred_at"]),r["actor_ref"],r["action"],r["target_ref"],r["outcome"],r["correlation_id"],json.loads(r["metadata_json"]),r["prev_hash"],r["event_hash"]) for r in rows)  # type: ignore[arg-type]
+
+    def append_outbox(self, e: OutboxEvent) -> None:
+        try:
+            self.connection.execute("INSERT INTO outbox VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",(e.id,e.tenant_id,e.topic,e.aggregate_ref,json.dumps(e.payload,ensure_ascii=False,sort_keys=True),e.idempotency_key,e.state.value,e.created_at.isoformat(),json.dumps(e.checkpoint,ensure_ascii=False,sort_keys=True),e.lease_owner,e.lease_until.isoformat() if e.lease_until else None,e.fencing_token,e.completed_at.isoformat() if e.completed_at else None))
+        except sqlite3.IntegrityError as exc: raise ConflictError("outbox idempotency key already exists") from exc
+
+    def _outbox(self, r: sqlite3.Row) -> OutboxEvent:
+        return OutboxEvent(r["id"],r["tenant_id"],r["topic"],r["aggregate_ref"],json.loads(r["payload_json"]),r["idempotency_key"],OutboxState(r["state"]),_dt(r["created_at"]),json.loads(r["checkpoint_json"]),r["lease_owner"],_dt(r["lease_until"]),r["fencing_token"],_dt(r["completed_at"]))  # type: ignore[arg-type]
+
+    def outbox_for(self, tenant_id: str) -> tuple[OutboxEvent,...]:
+        return tuple(self._outbox(r) for r in self.connection.execute("SELECT * FROM outbox WHERE tenant_id=? ORDER BY created_at,id",(tenant_id,)))
+
+    def claim_outbox(self, tenant_id: str, event_id: str, worker_id: str, now: datetime, lease_until: datetime) -> OutboxEvent:
+        with self.transaction():
+            r=self.connection.execute("SELECT * FROM outbox WHERE tenant_id=? AND id=?",(tenant_id,event_id)).fetchone()
+            if not r:
+                if self.connection.execute("SELECT 1 FROM outbox WHERE id=?",(event_id,)).fetchone(): raise TenantBoundaryError("cross-tenant outbox access denied")
+                raise NotFoundError("outbox event not found")
+            e=self._outbox(r)
+            if e.state==OutboxState.COMPLETED: raise ConflictError("outbox event already completed")
+            if e.lease_until and e.lease_until>now and e.lease_owner!=worker_id: raise ConflictError("outbox event already leased")
+            token=e.fencing_token+1
+            self.connection.execute("UPDATE outbox SET state=?,lease_owner=?,lease_until=?,fencing_token=? WHERE tenant_id=? AND id=?",(OutboxState.LEASED.value,worker_id,lease_until.isoformat(),token,tenant_id,event_id))
+            e.state,e.lease_owner,e.lease_until,e.fencing_token=OutboxState.LEASED,worker_id,lease_until,token
+            return e
+
+    def checkpoint_outbox(self, tenant_id: str, event_id: str, worker_id: str, fencing_token: int, checkpoint: dict, now: datetime, completed: bool=False) -> OutboxEvent:
+        with self.transaction():
+            r=self.connection.execute("SELECT * FROM outbox WHERE tenant_id=? AND id=?",(tenant_id,event_id)).fetchone()
+            if not r: raise NotFoundError("outbox event not found")
+            e=self._outbox(r)
+            if e.state!=OutboxState.LEASED or e.lease_owner!=worker_id or e.fencing_token!=fencing_token or not e.lease_until or e.lease_until<=now: raise ConflictError("stale or expired outbox lease")
+            state=OutboxState.COMPLETED if completed else OutboxState.LEASED
+            self.connection.execute("UPDATE outbox SET checkpoint_json=?,state=?,completed_at=?,lease_owner=?,lease_until=? WHERE tenant_id=? AND id=?",(json.dumps(checkpoint,sort_keys=True),state.value,now.isoformat() if completed else None,None if completed else worker_id,None if completed else e.lease_until.isoformat(),tenant_id,event_id))
+            e.checkpoint,e.state=dict(checkpoint),state
+            if completed: e.completed_at,e.lease_owner,e.lease_until=now,None,None
+            return e
