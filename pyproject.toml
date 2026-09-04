@@ -1,8 +1,12 @@
 [project]
-name = "smart-store-aios"
+name = "100me-ai-store"
 version = "0.1.0"
-description = "Policy-first worker system for online consignment commerce"
+description = "Approval-first multi-tenant operations platform for online consignment commerce"
 requires-python = ">=3.10"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
 
 [project.scripts]
 store-aios = "smart_store_aios.cli:main"
@@ -10,3 +14,6 @@ store-aios = "smart_store_aios.cli:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.setuptools.packages.find]
+include = ["packages*", "smart_store_aios*"]
+exclude = ["data*", "docs*", "tests*"]

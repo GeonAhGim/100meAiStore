@@ -1,12 +1,15 @@
 # 100meAiStore
 
-스마트스토어와 쿠팡을 우선 지원하는 AI 기반 무재고 위탁판매 운영 플랫폼입니다. 현재 단계는 **아키텍처 기준선 확정**이며 실제 상품 등록, 발주, 결제는 활성화하지 않습니다.
+스마트스토어와 쿠팡을 우선 지원하는 AI 기반 무재고 위탁판매 운영 플랫폼입니다. 현재 단계는 **로컬 DEMO 기반 구현**이며 실제 상품 등록, 발주, 결제는 활성화하지 않습니다.
 
 ## 현재 상태
 
 - 확정 요구사항: [docs/100meAiStore-requirements-v1.md](docs/100meAiStore-requirements-v1.md)
 - 쉬운 아키텍처 설명: [docs/architecture/00-summary-ko.md](docs/architecture/00-summary-ko.md)
 - 구현용 전체 아키텍처: [docs/architecture/README.md](docs/architecture/README.md)
+- Phase 1 구현 기반: [docs/implementation/phase1-foundation.md](docs/implementation/phase1-foundation.md)
+- prototype 전환 평가: [docs/implementation/phase1-prototype-assessment.md](docs/implementation/phase1-prototype-assessment.md)
+- 핵심 도메인 상태: [packages/store_core/IMPLEMENTATION_STATUS.md](packages/store_core/IMPLEMENTATION_STATUS.md)
 - 기존 `smart_store_aios` Python 코드는 초기 정책·큐 실험용 prototype이며 새 아키텍처의 구현 기준이 아닙니다.
 
 ## 제품 목표
