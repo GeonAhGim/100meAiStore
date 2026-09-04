@@ -45,6 +45,7 @@ CREATE INDEX outbox_claimable ON outbox(tenant_id,state,available_at,created_at)
 CREATE TRIGGER audit_events_no_update BEFORE UPDATE ON audit_events BEGIN SELECT RAISE(ABORT,'audit events are append-only'); END;
 CREATE TRIGGER audit_events_no_delete BEFORE DELETE ON audit_events BEGIN SELECT RAISE(ABORT,'audit events are append-only'); END;
 """))
+LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 MAX_ERROR_LENGTH = 500
 _SECRET = re.compile(r"(?i)(api[_-]?key|authorization|token|password|secret)(\s*[:=]\s*)([^\s,;]+)")
@@ -63,7 +64,11 @@ def _dt(value: str | None) -> datetime | None:
 
 
 class SQLiteRepository:
-    """Durable DEMO adapter. Every aggregate query includes a tenant predicate."""
+    """Durable DEMO adapter. Every aggregate query includes a tenant predicate.
+
+    One instance/connection is owned by one thread. Concurrency uses independent
+    instances; ``_depth`` tracks savepoints only within that connection.
+    """
 
     def __init__(self, path: str | Path) -> None:
         self.path = str(path)
@@ -72,7 +77,11 @@ class SQLiteRepository:
         self.connection.execute("PRAGMA foreign_keys=ON")
         self.connection.execute("PRAGMA journal_mode=WAL")
         self._depth = 0
-        self._migrate()
+        try:
+            self._migrate()
+        except Exception:
+            self.connection.close()
+            raise
 
     def close(self) -> None:
         self.connection.close()
@@ -80,11 +89,42 @@ class SQLiteRepository:
     def _migrate(self) -> None:
         self.connection.execute("CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")
         applied = {r[0] for r in self.connection.execute("SELECT version FROM schema_migrations")}
+        if applied and max(applied) > LATEST_SCHEMA_VERSION:
+            raise ConflictError(
+                f"database schema {max(applied)} is newer than supported {LATEST_SCHEMA_VERSION}"
+            )
         for version, sql in MIGRATIONS:
             if version not in applied:
-                with self.connection:
-                    self.connection.executescript(sql)
-                    self.connection.execute("INSERT INTO schema_migrations VALUES (?,?)", (version, datetime.now().astimezone().isoformat()))
+                # executescript commits implicitly unless transaction control is
+                # embedded in the script. Keep DDL and its version marker atomic.
+                applied_at = datetime.now().astimezone().isoformat().replace("'", "''")
+                script = (
+                    "BEGIN IMMEDIATE;\n" + sql + "\n"
+                    f"INSERT INTO schema_migrations VALUES ({version},'{applied_at}');\n"
+                    "COMMIT;"
+                )
+                try:
+                    self.connection.executescript(script)
+                except Exception:
+                    if self.connection.in_transaction:
+                        self.connection.execute("ROLLBACK")
+                    raise
+
+    def readiness(self, expected_schema_version: int = LATEST_SCHEMA_VERSION) -> dict[str, object]:
+        """Fail-closed storage readiness check with no external side effects."""
+        versions = [row[0] for row in self.connection.execute("SELECT version FROM schema_migrations")]
+        actual = max(versions, default=0)
+        if actual != expected_schema_version or actual > LATEST_SCHEMA_VERSION:
+            raise ConflictError(
+                f"schema version mismatch: expected {expected_schema_version}, found {actual}"
+            )
+        integrity = self.connection.execute("PRAGMA integrity_check").fetchone()[0]
+        if integrity != "ok":
+            raise ConflictError(f"sqlite integrity check failed: {integrity}")
+        foreign_keys = self.connection.execute("PRAGMA foreign_key_check").fetchall()
+        if foreign_keys:
+            raise ConflictError("sqlite foreign key check failed")
+        return {"ready": True, "schema_version": actual, "integrity": integrity}
 
     @contextmanager
     def transaction(self) -> Iterator[SQLiteRepository]:

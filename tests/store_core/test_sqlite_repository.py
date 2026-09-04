@@ -3,11 +3,16 @@ from __future__ import annotations
 import tempfile
 import unittest
 import sqlite3
+import json
+import subprocess
+import sys
+import threading
+from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from packages.store_core import ApprovalKind, ApprovalState, ConflictError, SQLiteRepository, StoreControlPlane, TenantBoundaryError
-from packages.store_core.sqlite_repository import MIGRATIONS, MAX_ERROR_LENGTH
+from packages.store_core.sqlite_repository import LATEST_SCHEMA_VERSION, MIGRATIONS, MAX_ERROR_LENGTH
 
 
 class Clock:
@@ -172,6 +177,101 @@ class SQLiteRepositoryTest(unittest.TestCase):
         self.clock.now = delayed.available_at
         self.assertEqual(first_event.id, repo.claim_next_outbox(master.tenant_id, "w3", self.clock.now, self.clock.now + timedelta(minutes=1)).id)
         repo.close()
+
+    def test_readiness_and_unsupported_newer_schema_fail_closed(self):
+        repo, _ = self.open()
+        self.assertEqual(
+            {"ready": True, "schema_version": LATEST_SCHEMA_VERSION, "integrity": "ok"},
+            repo.readiness(),
+        )
+        with self.assertRaisesRegex(ConflictError, "schema version mismatch"):
+            repo.readiness(expected_schema_version=LATEST_SCHEMA_VERSION + 1)
+        repo.connection.execute(
+            "INSERT INTO schema_migrations VALUES (?,?)",
+            (LATEST_SCHEMA_VERSION + 1, self.clock.now.isoformat()),
+        )
+        repo.close()
+        with self.assertRaisesRegex(ConflictError, "newer than supported"):
+            SQLiteRepository(self.path)
+
+    def test_uow_rolls_back_when_audit_append_fails(self):
+        repo, app = self.open()
+        master = app.bootstrap_tenant("Audit rollback", "audit-rollback@example.test")
+        original = repo.append_audit
+        repo.append_audit = lambda event: (_ for _ in ()).throw(RuntimeError("audit failpoint"))
+        with self.assertRaisesRegex(RuntimeError, "audit failpoint"):
+            app.create_command(master, ApprovalKind.PRODUCT, "product:audit-fail", {}, "audit-fail:v1")
+        repo.append_audit = original
+        self.assertIsNone(repo.command_id_for_key(master.tenant_id, "audit-fail:v1"))
+        self.assertEqual(0, len(repo.outbox_for(master.tenant_id)))
+        self.assertEqual(1, len(repo.audits_for(master.tenant_id)))
+        repo.close()
+
+    def test_migration_ddl_and_version_marker_roll_back_together(self):
+        repo, _ = self.open()
+        repo.close()
+        broken = MIGRATIONS + ((3, "CREATE TABLE must_not_survive(id TEXT); THIS IS INVALID;"),)
+        with patch("packages.store_core.sqlite_repository.MIGRATIONS", broken):
+            with self.assertRaises(sqlite3.DatabaseError):
+                SQLiteRepository(self.path)
+        connection = sqlite3.connect(self.path)
+        self.assertIsNone(connection.execute("SELECT name FROM sqlite_master WHERE name='must_not_survive'").fetchone())
+        self.assertIsNone(connection.execute("SELECT version FROM schema_migrations WHERE version=3").fetchone())
+        connection.close()
+
+    def test_real_process_commit_ack_loss_recovers_by_idempotency(self):
+        code = r'''import json, os, sys
+from packages.store_core import ApprovalKind, SQLiteRepository, StoreControlPlane
+repo=SQLiteRepository(sys.argv[1]); app=StoreControlPlane(repo)
+ctx=app.bootstrap_tenant("Crash process", "crash-process@example.test")
+command,_=app.create_command(ctx,ApprovalKind.PRODUCT,"product:ack",{"safe":True},"ack-loss:v1")
+print(json.dumps({"tenant":ctx.tenant_id,"user":ctx.user_id,"version":ctx.membership_version,"command":command.id}),flush=True)
+os._exit(23)
+'''
+        result = subprocess.run([sys.executable, "-c", code, str(self.path)], cwd=Path(__file__).parents[2], capture_output=True, text=True)
+        self.assertEqual(23, result.returncode)
+        facts = json.loads(result.stdout.strip())
+        repo, app = self.open()
+        context = app.context_for(facts["tenant"], facts["user"])
+        command, _ = app.create_command(context, ApprovalKind.PRODUCT, "product:ack", {"safe": True}, "ack-loss:v1")
+        self.assertEqual(facts["command"], command.id)
+        self.assertEqual(1, len(repo.outbox_for(facts["tenant"])))
+        repo.close()
+
+    def test_independent_connections_claim_each_event_once_under_barrier(self):
+        repo, app = self.open()
+        master = app.bootstrap_tenant("Concurrent", "concurrent@example.test")
+        for index in range(8):
+            app.create_command(master, ApprovalKind.PRODUCT, f"product:{index}", {}, f"concurrent:{index}")
+        repo.close()
+        barrier = threading.Barrier(4)
+        claimed: list[str] = []
+        errors: list[BaseException] = []
+        lock = threading.Lock()
+
+        def worker(index: int) -> None:
+            local = SQLiteRepository(self.path)
+            try:
+                barrier.wait()
+                while True:
+                    event = local.claim_next_outbox(master.tenant_id, f"worker-{index}", self.clock.now, self.clock.now + timedelta(minutes=1))
+                    if event is None:
+                        break
+                    local.checkpoint_outbox(master.tenant_id, event.id, f"worker-{index}", event.fencing_token, {"worker": index}, self.clock.now, completed=True)
+                    with lock:
+                        claimed.append(event.id)
+            except BaseException as exc:
+                with lock:
+                    errors.append(exc)
+            finally:
+                local.close()
+
+        threads = [threading.Thread(target=worker, args=(index,)) for index in range(4)]
+        for thread in threads: thread.start()
+        for thread in threads: thread.join(timeout=10)
+        self.assertFalse(errors)
+        self.assertEqual(8, len(claimed))
+        self.assertEqual(8, len(set(claimed)))
 
 
 if __name__ == "__main__": unittest.main()
