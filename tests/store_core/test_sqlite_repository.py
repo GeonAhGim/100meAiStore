@@ -32,6 +32,16 @@ class SQLiteRepositoryTest(unittest.TestCase):
         repo = SQLiteRepository(self.path)
         return repo, StoreControlPlane(repo, self.clock)
 
+    def create_v2_database(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.path)
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute("CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")
+        for version, sql in MIGRATIONS[:2]:
+            connection.executescript(sql)
+            connection.execute("INSERT INTO schema_migrations VALUES (?,?)", (version, self.clock.now.isoformat()))
+        connection.commit()
+        return connection
+
     def test_restart_restores_tenant_membership_command_approval_audit_and_outbox(self):
         repo, app = self.open()
         master = app.bootstrap_tenant("Durable", "master@example.test")
@@ -148,7 +158,7 @@ class SQLiteRepositoryTest(unittest.TestCase):
         connection.close()
         repo, app = self.open()
         versions = [r[0] for r in repo.connection.execute("SELECT version FROM schema_migrations ORDER BY version")]
-        self.assertEqual([1, 2], versions)
+        self.assertEqual([1, 2, 3], versions)
         master = app.bootstrap_tenant("Migrated", "migrated@example.test")
         app.create_command(master, ApprovalKind.PRODUCT, "done:1", {}, "done:1")
         event = repo.claim_next_outbox(master.tenant_id, "worker", self.clock.now, self.clock.now + timedelta(minutes=1))
@@ -194,6 +204,54 @@ class SQLiteRepositoryTest(unittest.TestCase):
         with self.assertRaisesRegex(ConflictError, "newer than supported"):
             SQLiteRepository(self.path)
 
+    def test_v2_relational_data_is_preserved_and_foreign_keys_are_clean(self):
+        connection = self.create_v2_database()
+        now = self.clock.now.isoformat()
+        connection.execute("INSERT INTO tenants VALUES ('tenant-a','Existing tenant',?)", (now,))
+        connection.execute("INSERT INTO users VALUES ('user-a','existing@example.test',?)", (now,))
+        connection.execute("INSERT INTO memberships VALUES ('tenant-a','user-a','[\"master\"]',1,1)")
+        connection.execute("INSERT INTO commands VALUES ('command-a','tenant-a','product','product:a','{}','digest','idem','awaiting_approval',?,NULL)", (now,))
+        connection.execute("INSERT INTO approvals VALUES ('approval-a','tenant-a','command-a','product','pending',?,?, '[]',NULL,NULL)", (now, now))
+        connection.execute("INSERT INTO audit_events(id,tenant_id,occurred_at,actor_ref,action,target_ref,outcome,correlation_id,metadata_json,prev_hash,event_hash) VALUES ('audit-a','tenant-a',?,'user-a','test','tenant-a','ok','corr','{}',NULL,'hash')", (now,))
+        connection.execute("INSERT INTO outbox(id,tenant_id,topic,aggregate_ref,payload_json,idempotency_key,state,created_at,checkpoint_json,lease_owner,lease_until,fencing_token,completed_at,attempts,available_at,last_error) VALUES ('outbox-a','tenant-a','test','command-a','{}','outbox-idem','pending',?,'{}',NULL,NULL,0,NULL,0,?,NULL)", (now, now))
+        connection.commit(); connection.close()
+
+        repo, _ = self.open()
+        self.assertEqual("command-a", repo.get_command("tenant-a", "command-a").id)
+        self.assertEqual("approval-a", repo.get_approval_for_command("tenant-a", "command-a").id)
+        self.assertEqual("outbox-a", repo.outbox_for("tenant-a")[0].id)
+        self.assertEqual([], repo.connection.execute("PRAGMA foreign_key_check").fetchall())
+        self.assertEqual(3, repo.readiness()["schema_version"])
+        repo.close()
+
+    def test_v3_migration_rejects_orphan_and_rolls_back_to_reopenable_v2(self):
+        connection = self.create_v2_database()
+        now = self.clock.now.isoformat()
+        connection.execute("INSERT INTO commands VALUES ('orphan','missing','product','x','{}','digest','orphan-key','awaiting_approval',?,NULL)", (now,))
+        connection.commit(); connection.close()
+        with self.assertRaises(sqlite3.IntegrityError):
+            SQLiteRepository(self.path)
+        connection = sqlite3.connect(self.path)
+        self.assertEqual([1, 2], [r[0] for r in connection.execute("SELECT version FROM schema_migrations ORDER BY version")])
+        self.assertEqual(1, connection.execute("SELECT COUNT(*) FROM commands WHERE id='orphan'").fetchone()[0])
+        self.assertIsNone(connection.execute("SELECT name FROM sqlite_master WHERE name='commands_v3'").fetchone())
+        connection.execute("DELETE FROM commands WHERE id='orphan'")
+        connection.commit(); connection.close()
+        repo, _ = self.open()
+        self.assertEqual(3, repo.readiness()["schema_version"])
+        repo.close()
+
+    def test_cross_tenant_composite_approval_fk_is_rejected(self):
+        repo, app = self.open()
+        first = app.bootstrap_tenant("FK A", "fka@example.test")
+        second = app.bootstrap_tenant("FK B", "fkb@example.test")
+        command, _ = app.create_command(first, ApprovalKind.PRODUCT, "product:fk", {}, "fk:v1")
+        now = self.clock.now.isoformat()
+        with self.assertRaises(sqlite3.IntegrityError):
+            repo.connection.execute("INSERT INTO approvals VALUES ('cross-approval',?,?,?,?,?,?,?,NULL,NULL)", (second.tenant_id, command.id, 'product', 'pending', now, now, '[]'))
+        self.assertEqual([], repo.connection.execute("PRAGMA foreign_key_check").fetchall())
+        repo.close()
+
     def test_uow_rolls_back_when_audit_append_fails(self):
         repo, app = self.open()
         master = app.bootstrap_tenant("Audit rollback", "audit-rollback@example.test")
@@ -210,13 +268,13 @@ class SQLiteRepositoryTest(unittest.TestCase):
     def test_migration_ddl_and_version_marker_roll_back_together(self):
         repo, _ = self.open()
         repo.close()
-        broken = MIGRATIONS + ((3, "CREATE TABLE must_not_survive(id TEXT); THIS IS INVALID;"),)
+        broken = MIGRATIONS + ((4, "CREATE TABLE must_not_survive(id TEXT); THIS IS INVALID;"),)
         with patch("packages.store_core.sqlite_repository.MIGRATIONS", broken):
             with self.assertRaises(sqlite3.DatabaseError):
                 SQLiteRepository(self.path)
         connection = sqlite3.connect(self.path)
         self.assertIsNone(connection.execute("SELECT name FROM sqlite_master WHERE name='must_not_survive'").fetchone())
-        self.assertIsNone(connection.execute("SELECT version FROM schema_migrations WHERE version=3").fetchone())
+        self.assertIsNone(connection.execute("SELECT version FROM schema_migrations WHERE version=4").fetchone())
         connection.close()
 
     def test_real_process_commit_ack_loss_recovers_by_idempotency(self):

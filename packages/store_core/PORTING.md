@@ -16,5 +16,16 @@ The PostgreSQL implementation must:
 - expose append-only audit permissions to the application role;
 - add an outbox before any external adapter can be enabled.
 
+The SQLite DEMO adapter now enforces foreign keys for memberships, commands,
+approvals, audit events and outbox rows. In particular, approvals use composite
+`(tenant_id, command_id)` references so a valid command ID from another tenant
+cannot be attached. Migration v3 rebuilds the tenant-owned tables atomically;
+orphaned legacy rows abort the migration and leave the v2 database intact.
+
+SQLite does not replace PostgreSQL row-level security. Each repository instance
+owns one connection on one thread, and concurrent workers require independent
+connections. PostgreSQL must preserve the same composite ownership constraints
+in addition to RLS and transaction-local tenant settings.
+
 This slice intentionally has no HTTP, database, marketplace, payment, email, or
 AI integration. It cannot perform a real purchase or publish a product.

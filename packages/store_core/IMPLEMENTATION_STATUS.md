@@ -1,4 +1,4 @@
-# Phase 1 slice status
+# Phase 2 storage slice status
 
 Implemented and tested:
 
@@ -9,13 +9,16 @@ Implemented and tested:
 - idempotent command creation and collision rejection;
 - material-change supersession with mandatory reapproval;
 - immutable-view, per-tenant SHA-256 hash-chained audit events.
+- durable SQLite DEMO storage with versioned, atomic migrations;
+- relational tenant/user/command ownership enforced by SQLite foreign keys;
+- transactional command, approval, audit and outbox writes;
+- restart-safe outbox leases, fencing, checkpoints, retries and dead-letter state;
+- readiness checks for schema compatibility, integrity and foreign-key violations.
 
 Not yet a production durability claim:
 
-- `InMemoryRepository` loses state at process exit. It is deliberately marked
-  DEMO-only and cannot satisfy the restart recovery release gate.
-- The next storage slice must implement the contract in `PORTING.md` with
-  PostgreSQL (or a temporary SQLite adapter), then prove restart recovery of
-  memberships, pending approvals, idempotency keys and audit-chain heads.
+- `InMemoryRepository` still loses state at process exit and remains test-only.
+- `SQLiteRepository` satisfies local DEMO restart recovery but is not the
+  production multi-instance database; PostgreSQL/RLS remains the production gate.
 - There is no external API, payment, marketplace write, notification or AI tool
   execution in this package.

@@ -44,6 +44,70 @@ ALTER TABLE outbox ADD COLUMN last_error TEXT;
 CREATE INDEX outbox_claimable ON outbox(tenant_id,state,available_at,created_at);
 CREATE TRIGGER audit_events_no_update BEFORE UPDATE ON audit_events BEGIN SELECT RAISE(ABORT,'audit events are append-only'); END;
 CREATE TRIGGER audit_events_no_delete BEFORE DELETE ON audit_events BEGIN SELECT RAISE(ABORT,'audit events are append-only'); END;
+"""),(3, """
+PRAGMA defer_foreign_keys=ON;
+CREATE TABLE memberships_v3(
+ tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, roles_json TEXT NOT NULL, active INTEGER NOT NULL, version INTEGER NOT NULL,
+ PRIMARY KEY(tenant_id,user_id),
+ FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT,
+ FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE RESTRICT);
+INSERT INTO memberships_v3 SELECT * FROM memberships;
+
+CREATE TABLE commands_v3(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, kind TEXT NOT NULL, target_ref TEXT NOT NULL,
+ payload_json TEXT NOT NULL, payload_digest TEXT NOT NULL, idempotency_key TEXT NOT NULL, state TEXT NOT NULL,
+ created_at TEXT NOT NULL, supersedes_id TEXT,
+ UNIQUE(tenant_id,idempotency_key), UNIQUE(tenant_id,id),
+ FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT,
+ FOREIGN KEY(tenant_id,supersedes_id) REFERENCES commands_v3(tenant_id,id) DEFERRABLE INITIALLY DEFERRED);
+INSERT INTO commands_v3 SELECT * FROM commands;
+
+CREATE TABLE approvals_v3(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, command_id TEXT NOT NULL, kind TEXT NOT NULL,
+ state TEXT NOT NULL, requested_at TEXT NOT NULL, expires_at TEXT NOT NULL, evidence_json TEXT NOT NULL,
+ decided_by TEXT, decision_reason TEXT, UNIQUE(tenant_id,command_id),
+ FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT,
+ FOREIGN KEY(tenant_id,command_id) REFERENCES commands_v3(tenant_id,id) ON DELETE RESTRICT,
+ FOREIGN KEY(decided_by) REFERENCES users(id) ON DELETE RESTRICT,
+ FOREIGN KEY(tenant_id,decided_by) REFERENCES memberships_v3(tenant_id,user_id) ON DELETE RESTRICT);
+INSERT INTO approvals_v3 SELECT * FROM approvals;
+
+CREATE TABLE audit_events_v3(
+ sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, tenant_id TEXT NOT NULL,
+ occurred_at TEXT NOT NULL, actor_ref TEXT NOT NULL, action TEXT NOT NULL, target_ref TEXT NOT NULL, outcome TEXT NOT NULL,
+ correlation_id TEXT NOT NULL, metadata_json TEXT NOT NULL, prev_hash TEXT, event_hash TEXT NOT NULL,
+ FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT);
+INSERT INTO audit_events_v3 SELECT * FROM audit_events;
+
+CREATE TABLE outbox_v3(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, topic TEXT NOT NULL, aggregate_ref TEXT NOT NULL,
+ payload_json TEXT NOT NULL, idempotency_key TEXT NOT NULL, state TEXT NOT NULL, created_at TEXT NOT NULL,
+ checkpoint_json TEXT NOT NULL, lease_owner TEXT, lease_until TEXT, fencing_token INTEGER NOT NULL DEFAULT 0,
+ completed_at TEXT, attempts INTEGER NOT NULL DEFAULT 0, available_at TEXT, last_error TEXT,
+ UNIQUE(tenant_id,idempotency_key),
+ FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT);
+INSERT INTO outbox_v3(rowid,id,tenant_id,topic,aggregate_ref,payload_json,idempotency_key,state,created_at,
+ checkpoint_json,lease_owner,lease_until,fencing_token,completed_at,attempts,available_at,last_error)
+ SELECT rowid,id,tenant_id,topic,aggregate_ref,payload_json,idempotency_key,state,created_at,
+ checkpoint_json,lease_owner,lease_until,fencing_token,completed_at,attempts,available_at,last_error FROM outbox;
+
+DROP TABLE approvals;
+DROP TABLE memberships;
+DROP TABLE audit_events;
+DROP TABLE outbox;
+DROP TABLE commands;
+ALTER TABLE commands_v3 RENAME TO commands;
+ALTER TABLE memberships_v3 RENAME TO memberships;
+ALTER TABLE approvals_v3 RENAME TO approvals;
+ALTER TABLE audit_events_v3 RENAME TO audit_events;
+ALTER TABLE outbox_v3 RENAME TO outbox;
+CREATE INDEX commands_tenant_id_id ON commands(tenant_id,id);
+CREATE INDEX approvals_tenant_command ON approvals(tenant_id,command_id);
+CREATE INDEX audit_tenant_sequence ON audit_events(tenant_id,sequence);
+CREATE INDEX outbox_tenant_state ON outbox(tenant_id,state,created_at);
+CREATE INDEX outbox_claimable ON outbox(tenant_id,state,available_at,created_at);
+CREATE TRIGGER audit_events_no_update BEFORE UPDATE ON audit_events BEGIN SELECT RAISE(ABORT,'audit events are append-only'); END;
+CREATE TRIGGER audit_events_no_delete BEFORE DELETE ON audit_events BEGIN SELECT RAISE(ABORT,'audit events are append-only'); END;
 """))
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
