@@ -154,7 +154,9 @@ class AuditEvent:
 class OutboxState(str, Enum):
     PENDING = "pending"
     LEASED = "leased"
+    RETRY = "retry"
     COMPLETED = "completed"
+    DEAD = "dead"
 
 
 @dataclass
@@ -172,3 +174,6 @@ class OutboxEvent:
     lease_until: datetime | None = None
     fencing_token: int = 0
     completed_at: datetime | None = None
+    attempts: int = 0
+    available_at: datetime | None = None
+    last_error: str | None = None

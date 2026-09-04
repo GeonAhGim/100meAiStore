@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
@@ -36,7 +37,25 @@ CREATE TABLE outbox(id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, topic TEXT NOT
  checkpoint_json TEXT NOT NULL, lease_owner TEXT, lease_until TEXT, fencing_token INTEGER NOT NULL DEFAULT 0,
  completed_at TEXT, UNIQUE(tenant_id,idempotency_key));
 CREATE INDEX outbox_tenant_state ON outbox(tenant_id,state,created_at);
-"""),)
+"""),(2, """
+ALTER TABLE outbox ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE outbox ADD COLUMN available_at TEXT;
+ALTER TABLE outbox ADD COLUMN last_error TEXT;
+CREATE INDEX outbox_claimable ON outbox(tenant_id,state,available_at,created_at);
+CREATE TRIGGER audit_events_no_update BEFORE UPDATE ON audit_events BEGIN SELECT RAISE(ABORT,'audit events are append-only'); END;
+CREATE TRIGGER audit_events_no_delete BEFORE DELETE ON audit_events BEGIN SELECT RAISE(ABORT,'audit events are append-only'); END;
+"""))
+
+MAX_ERROR_LENGTH = 500
+_SECRET = re.compile(r"(?i)(api[_-]?key|authorization|token|password|secret)(\s*[:=]\s*)([^\s,;]+)")
+
+
+def _safe_error(value: str) -> str:
+    return _SECRET.sub(lambda m: f"{m.group(1)}{m.group(2)}[REDACTED]", value)[:MAX_ERROR_LENGTH]
+
+
+def _backoff_seconds(attempts: int) -> int:
+    return min(3600, 30 * (2 ** max(0, attempts - 1)))
 
 
 def _dt(value: str | None) -> datetime | None:
@@ -165,11 +184,14 @@ class SQLiteRepository:
 
     def append_outbox(self, e: OutboxEvent) -> None:
         try:
-            self.connection.execute("INSERT INTO outbox VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",(e.id,e.tenant_id,e.topic,e.aggregate_ref,json.dumps(e.payload,ensure_ascii=False,sort_keys=True),e.idempotency_key,e.state.value,e.created_at.isoformat(),json.dumps(e.checkpoint,ensure_ascii=False,sort_keys=True),e.lease_owner,e.lease_until.isoformat() if e.lease_until else None,e.fencing_token,e.completed_at.isoformat() if e.completed_at else None))
+            self.connection.execute("""INSERT INTO outbox
+            (id,tenant_id,topic,aggregate_ref,payload_json,idempotency_key,state,created_at,checkpoint_json,
+             lease_owner,lease_until,fencing_token,completed_at,attempts,available_at,last_error)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(e.id,e.tenant_id,e.topic,e.aggregate_ref,json.dumps(e.payload,ensure_ascii=False,sort_keys=True),e.idempotency_key,e.state.value,e.created_at.isoformat(),json.dumps(e.checkpoint,ensure_ascii=False,sort_keys=True),e.lease_owner,e.lease_until.isoformat() if e.lease_until else None,e.fencing_token,e.completed_at.isoformat() if e.completed_at else None,e.attempts,(e.available_at or e.created_at).isoformat(),e.last_error))
         except sqlite3.IntegrityError as exc: raise ConflictError("outbox idempotency key already exists") from exc
 
     def _outbox(self, r: sqlite3.Row) -> OutboxEvent:
-        return OutboxEvent(r["id"],r["tenant_id"],r["topic"],r["aggregate_ref"],json.loads(r["payload_json"]),r["idempotency_key"],OutboxState(r["state"]),_dt(r["created_at"]),json.loads(r["checkpoint_json"]),r["lease_owner"],_dt(r["lease_until"]),r["fencing_token"],_dt(r["completed_at"]))  # type: ignore[arg-type]
+        return OutboxEvent(r["id"],r["tenant_id"],r["topic"],r["aggregate_ref"],json.loads(r["payload_json"]),r["idempotency_key"],OutboxState(r["state"]),_dt(r["created_at"]),json.loads(r["checkpoint_json"]),r["lease_owner"],_dt(r["lease_until"]),r["fencing_token"],_dt(r["completed_at"]),r["attempts"],_dt(r["available_at"]),r["last_error"])  # type: ignore[arg-type]
 
     def outbox_for(self, tenant_id: str) -> tuple[OutboxEvent,...]:
         return tuple(self._outbox(r) for r in self.connection.execute("SELECT * FROM outbox WHERE tenant_id=? ORDER BY created_at,id",(tenant_id,)))
@@ -181,12 +203,23 @@ class SQLiteRepository:
                 if self.connection.execute("SELECT 1 FROM outbox WHERE id=?",(event_id,)).fetchone(): raise TenantBoundaryError("cross-tenant outbox access denied")
                 raise NotFoundError("outbox event not found")
             e=self._outbox(r)
-            if e.state==OutboxState.COMPLETED: raise ConflictError("outbox event already completed")
-            if e.lease_until and e.lease_until>now and e.lease_owner!=worker_id: raise ConflictError("outbox event already leased")
-            token=e.fencing_token+1
-            self.connection.execute("UPDATE outbox SET state=?,lease_owner=?,lease_until=?,fencing_token=? WHERE tenant_id=? AND id=?",(OutboxState.LEASED.value,worker_id,lease_until.isoformat(),token,tenant_id,event_id))
-            e.state,e.lease_owner,e.lease_until,e.fencing_token=OutboxState.LEASED,worker_id,lease_until,token
+            if e.state in {OutboxState.COMPLETED,OutboxState.DEAD}: raise ConflictError("outbox event is terminal")
+            if e.state==OutboxState.RETRY and e.available_at and e.available_at>now: raise ConflictError("outbox event is not available")
+            if e.lease_until and e.lease_until>now: raise ConflictError("outbox event already leased")
+            token,attempts=e.fencing_token+1,e.attempts+1
+            self.connection.execute("UPDATE outbox SET state=?,lease_owner=?,lease_until=?,fencing_token=?,attempts=?,last_error=NULL WHERE tenant_id=? AND id=?",(OutboxState.LEASED.value,worker_id,lease_until.isoformat(),token,attempts,tenant_id,event_id))
+            e.state,e.lease_owner,e.lease_until,e.fencing_token,e.attempts,e.last_error=OutboxState.LEASED,worker_id,lease_until,token,attempts,None
             return e
+
+    def claim_next_outbox(self, tenant_id: str, worker_id: str, now: datetime, lease_until: datetime) -> OutboxEvent | None:
+        with self.transaction():
+            row=self.connection.execute("""SELECT o.id FROM outbox o WHERE o.tenant_id=? AND
+             ((o.state IN (?,?) AND COALESCE(o.available_at,o.created_at)<=?) OR (o.state=? AND o.lease_until<=?))
+             AND NOT EXISTS (SELECT 1 FROM outbox prior WHERE prior.tenant_id=o.tenant_id
+               AND prior.aggregate_ref=o.aggregate_ref AND prior.rowid<o.rowid AND prior.state NOT IN (?,?))
+             ORDER BY o.rowid LIMIT 1""",
+             (tenant_id,OutboxState.PENDING.value,OutboxState.RETRY.value,now.isoformat(),OutboxState.LEASED.value,now.isoformat(),OutboxState.COMPLETED.value,OutboxState.DEAD.value)).fetchone()
+            return self.claim_outbox(tenant_id,row["id"],worker_id,now,lease_until) if row else None
 
     def checkpoint_outbox(self, tenant_id: str, event_id: str, worker_id: str, fencing_token: int, checkpoint: dict, now: datetime, completed: bool=False) -> OutboxEvent:
         with self.transaction():
@@ -198,4 +231,19 @@ class SQLiteRepository:
             self.connection.execute("UPDATE outbox SET checkpoint_json=?,state=?,completed_at=?,lease_owner=?,lease_until=? WHERE tenant_id=? AND id=?",(json.dumps(checkpoint,sort_keys=True),state.value,now.isoformat() if completed else None,None if completed else worker_id,None if completed else e.lease_until.isoformat(),tenant_id,event_id))
             e.checkpoint,e.state=dict(checkpoint),state
             if completed: e.completed_at,e.lease_owner,e.lease_until=now,None,None
+            return e
+
+    def fail_outbox(self, tenant_id: str, event_id: str, worker_id: str, fencing_token: int, error: str, now: datetime, max_attempts: int = 5) -> OutboxEvent:
+        if max_attempts < 1: raise ValueError("max_attempts must be positive")
+        with self.transaction():
+            r=self.connection.execute("SELECT * FROM outbox WHERE tenant_id=? AND id=?",(tenant_id,event_id)).fetchone()
+            if not r: raise NotFoundError("outbox event not found")
+            e=self._outbox(r)
+            if e.state!=OutboxState.LEASED or e.lease_owner!=worker_id or e.fencing_token!=fencing_token or not e.lease_until or e.lease_until<=now: raise ConflictError("stale or expired outbox lease")
+            state=OutboxState.DEAD if e.attempts>=max_attempts else OutboxState.RETRY
+            from datetime import timedelta
+            available=now if state==OutboxState.DEAD else now+timedelta(seconds=_backoff_seconds(e.attempts))
+            safe=_safe_error(str(error))
+            self.connection.execute("UPDATE outbox SET state=?,available_at=?,last_error=?,lease_owner=NULL,lease_until=NULL WHERE tenant_id=? AND id=?",(state.value,available.isoformat(),safe,tenant_id,event_id))
+            e.state,e.available_at,e.last_error,e.lease_owner,e.lease_until=state,available,safe,None,None
             return e
