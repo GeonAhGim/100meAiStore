@@ -1,18 +1,21 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from copy import deepcopy
+from threading import RLock
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Iterable
 
 from .domain import AgentStatusSnapshot, Approval, AuditEvent, Command, Membership, OutboxEvent, OutboxState, Tenant, User
 from .errors import ConflictError, NotFoundError, TenantBoundaryError
+from .domain import AdapterCapabilityManifest, InboxMessage, InboxState
 
 
 class InMemoryRepository:
     """DEMO adapter. Every tenant-owned lookup requires an explicit tenant id.
 
-    The service layer owns transaction semantics for this in-memory adapter. A
+    The service layer groups writes using the snapshot-backed transaction. A
     PostgreSQL adapter must implement the same methods inside one transaction,
     add tenant predicates to every query, and enable/test row-level security.
     """
@@ -28,12 +31,74 @@ class InMemoryRepository:
         self.outbox: dict[tuple[str, str], OutboxEvent] = {}
         self.outbox_idempotency: dict[tuple[str, str], str] = {}
         self.agent_status: dict[tuple[str, str], AgentStatusSnapshot] = {}
+        self.inbox: dict[tuple[str, str], InboxMessage] = {}
+        self.manifests: dict[tuple[str, str, str], AdapterCapabilityManifest] = {}
+        self._lock = RLock()
 
     @contextmanager
     def transaction(self):
-        # Compatibility UoW: the original DEMO adapter retains object identity.
-        # Durable atomic rollback is supplied by SQLite/PostgreSQL adapters.
-        yield self
+        with self._lock:
+            snapshot = deepcopy({k: v for k, v in self.__dict__.items() if k != '_lock'})
+            try:
+                yield self
+            except BaseException:
+                # Preserve legacy aggregate references when a rejected operation
+                # did not mutate them; inbox reads themselves are detached.
+                for name, previous in snapshot.items():
+                    current = self.__dict__[name]
+                    if isinstance(current, dict):
+                        for key in list(current):
+                            if key not in previous:
+                                del current[key]
+                        for key, value in previous.items():
+                            if key not in current or current[key] != value:
+                                current[key] = value
+                    else:
+                        self.__dict__[name] = previous
+                raise
+
+    def save_adapter_manifest(self, manifest: AdapterCapabilityManifest) -> None:
+        if manifest.tenant_id not in self.tenants:
+            raise NotFoundError('tenant not found')
+        self.manifests[(manifest.tenant_id, manifest.provider, manifest.connection_id)] = deepcopy(manifest)
+
+    def get_adapter_manifest(self, tenant_id: str, provider: str, connection_id: str) -> AdapterCapabilityManifest:
+        try:
+            return deepcopy(self.manifests[(tenant_id, provider, connection_id)])
+        except KeyError as exc:
+            raise NotFoundError('adapter manifest not found') from exc
+
+    def receive_inbox(self, message: InboxMessage) -> tuple[InboxMessage, bool]:
+        with self.transaction():
+            for prior in self.inbox_for(message.tenant_id):
+                if (prior.provider, prior.connection_id, prior.external_event_id) == (message.provider, message.connection_id, message.external_event_id):
+                    if (prior.payload_digest, prior.schema_version) != (message.payload_digest, message.schema_version):
+                        raise ConflictError('inbound identity reused with different content')
+                    return prior, True
+            if message.tenant_id not in self.tenants:
+                raise NotFoundError('tenant not found')
+            if (message.tenant_id, message.id) in self.inbox:
+                raise ConflictError('inbox id already exists')
+            self.inbox[(message.tenant_id, message.id)] = deepcopy(message)
+            return deepcopy(message), False
+
+    def get_inbox(self, tenant_id: str, inbox_id: str) -> InboxMessage:
+        try:
+            return deepcopy(self.inbox[(tenant_id, inbox_id)])
+        except KeyError as exc:
+            raise NotFoundError('inbox message not found') from exc
+
+    def inbox_for(self, tenant_id: str) -> tuple[InboxMessage, ...]:
+        return tuple(deepcopy(v) for (tid, _), v in self.inbox.items() if tid == tenant_id)
+
+    def mark_inbox_processed(self, tenant_id: str, inbox_id: str, expected_version: int, processed_at: datetime) -> InboxMessage:
+        with self.transaction():
+            value = self.get_inbox(tenant_id, inbox_id)
+            if value.version != expected_version or value.state != InboxState.RECEIVED:
+                raise ConflictError('inbox state/version conflict')
+            value.state, value.version, value.processed_at = InboxState.PROCESSED, value.version + 1, processed_at
+            self.inbox[(tenant_id, inbox_id)] = deepcopy(value)
+            return value
 
     def add_tenant(self, tenant: Tenant) -> None:
         self.tenants[tenant.id] = tenant

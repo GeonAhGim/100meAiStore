@@ -186,6 +186,8 @@ class InboxState(str, Enum):
 
 @dataclass
 class InboxMessage:
+    """Durable delivery receipt; PROCESSED means accepted for downstream routing."""
+
     id: str
     tenant_id: str
     provider: str

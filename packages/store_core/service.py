@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Mapping, Sequence
 from uuid import uuid4
@@ -29,6 +30,7 @@ from .domain import (
 from .errors import AuthorizationError, ConflictError, NotFoundError
 from .dashboard import DashboardProjection
 from .repository import InMemoryRepository
+from .domain import AdapterCapability, AdapterCapabilityManifest, InboxMessage, InboxState
 
 
 def _canonical(value: Any) -> str:
@@ -49,6 +51,77 @@ class StoreControlPlane:
     ) -> None:
         self.repo = repository or InMemoryRepository()
         self._clock = clock or (lambda: datetime.now(timezone.utc))
+
+    @staticmethod
+    def _inbound_identifier(value: str) -> str:
+        if not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,254}', value):
+            raise ConflictError('invalid opaque inbound identifier')
+        return value
+
+    def register_adapter_manifest(self, context: TenantContext, manifest: AdapterCapabilityManifest) -> None:
+        with self.repo.transaction():
+            self.require(context, Capability.TENANT_ADMIN)
+            if manifest.tenant_id != context.tenant_id:
+                raise AuthorizationError('manifest tenant mismatch')
+            for value in (manifest.provider, manifest.connection_id, manifest.adapter_version):
+                self._inbound_identifier(value)
+            if any(not isinstance(c, AdapterCapability) for c in manifest.capabilities) or any(type(v) is not int or v < 1 for v in manifest.inbound_schema_versions):
+                raise ConflictError('invalid manifest capabilities/schema versions')
+            if manifest.updated_at.tzinfo is None:
+                raise ConflictError('manifest timestamp must be timezone aware')
+            self.repo.save_adapter_manifest(manifest)
+            self._audit(context.tenant_id, context.user_id, 'adapter.manifest_registered', manifest.connection_id, 'succeeded', {'adapter_version': manifest.adapter_version})
+
+    def get_inbox(self, context: TenantContext, inbox_id: str) -> InboxMessage:
+        self.require(context, Capability.TENANT_ADMIN)
+        return self.repo.get_inbox(context.tenant_id, inbox_id)
+
+    def inbox_for(self, context: TenantContext) -> tuple[InboxMessage, ...]:
+        self.require(context, Capability.TENANT_ADMIN)
+        return self.repo.inbox_for(context.tenant_id)
+
+    def receive_inbound(self, context: TenantContext, provider: str, connection_id: str,
+                        external_event_id: str, schema_version: int, payload_digest: str,
+                        raw_payload_ref: str | None = None) -> tuple[InboxMessage, bool]:
+        with self.repo.transaction():
+            self.require(context, Capability.TENANT_ADMIN)
+            for value in (provider, connection_id, external_event_id):
+                self._inbound_identifier(value)
+            if type(schema_version) is not int or schema_version < 1:
+                raise ConflictError('invalid inbound schema version')
+            if not isinstance(payload_digest, str) or not re.fullmatch('[0-9a-f]{64}', payload_digest):
+                raise ConflictError('invalid SHA-256 digest')
+            if raw_payload_ref is not None:
+                self._inbound_identifier(raw_payload_ref)
+            manifest = self.repo.get_adapter_manifest(context.tenant_id, provider, connection_id)
+            if AdapterCapability.INBOUND_EVENTS not in manifest.capabilities or schema_version not in manifest.inbound_schema_versions:
+                raise ConflictError('unsupported inbound capability/schema')
+            now = self._clock()
+            message, replayed = self.repo.receive_inbox(InboxMessage(str(uuid4()), context.tenant_id,
+                provider, connection_id, external_event_id, schema_version, now, payload_digest, raw_payload_ref))
+            if not replayed:
+                self._audit(context.tenant_id, context.user_id, 'inbox.received', message.id, 'accepted', {'payload_digest': payload_digest})
+                self._inbox_outbox(message, 'inbox.process_requested', 'process', now)
+            return message, replayed
+
+    def _inbox_outbox(self, message: InboxMessage, topic: str, suffix: str, now: datetime) -> None:
+        self.repo.append_outbox(OutboxEvent(str(uuid4()), message.tenant_id, topic, message.id,
+            {'inbox_id': message.id, 'payload_digest': message.payload_digest}, f'inbox:{message.id}:{suffix}', OutboxState.PENDING, now))
+
+    def process_inbound(self, context: TenantContext, inbox_id: str, expected_version: int) -> tuple[InboxMessage, bool]:
+        """Accept a receipt for downstream routing; never execute an order."""
+        with self.repo.transaction():
+            self.require(context, Capability.TENANT_ADMIN)
+            if type(expected_version) is not int or expected_version < 1:
+                raise ConflictError('invalid expected version')
+            message = self.repo.get_inbox(context.tenant_id, inbox_id)
+            if message.state == InboxState.PROCESSED:
+                return message, True
+            now = self._clock()
+            message = self.repo.mark_inbox_processed(context.tenant_id, inbox_id, expected_version, now)
+            self._inbox_outbox(message, 'inbound.accepted', 'processed', now)
+            self._audit(context.tenant_id, context.user_id, 'inbox.processed', message.id, 'accepted', {'payload_digest': message.payload_digest})
+            return message, False
 
     def dashboard_snapshot(self, context: TenantContext, *, project_root: str | None = None) -> dict[str, Any]:
         """Return a tenant-scoped, read-only dashboard projection.

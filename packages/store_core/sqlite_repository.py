@@ -198,6 +198,61 @@ class SQLiteRepository:
     def close(self) -> None:
         self.connection.close()
 
+    def save_adapter_manifest(self, manifest: AdapterCapabilityManifest) -> None:
+        self.connection.execute('''INSERT INTO adapter_capability_manifests VALUES (?,?,?,?,?,?,?)
+            ON CONFLICT(tenant_id,provider,connection_id) DO UPDATE SET
+            adapter_version=excluded.adapter_version,capabilities_json=excluded.capabilities_json,
+            inbound_schema_versions_json=excluded.inbound_schema_versions_json,updated_at=excluded.updated_at''',
+            (manifest.tenant_id, manifest.provider, manifest.connection_id, manifest.adapter_version,
+             json.dumps(sorted(c.value for c in manifest.capabilities)), json.dumps(sorted(manifest.inbound_schema_versions)), manifest.updated_at.isoformat()))
+
+    def get_adapter_manifest(self, tenant_id: str, provider: str, connection_id: str) -> AdapterCapabilityManifest:
+        row = self.connection.execute('SELECT * FROM adapter_capability_manifests WHERE tenant_id=? AND provider=? AND connection_id=?', (tenant_id, provider, connection_id)).fetchone()
+        if row is None:
+            raise NotFoundError('adapter manifest not found')
+        return AdapterCapabilityManifest(tenant_id, provider, connection_id, row['adapter_version'],
+            frozenset(AdapterCapability(c) for c in json.loads(row['capabilities_json'])),
+            frozenset(json.loads(row['inbound_schema_versions_json'])), _dt(row['updated_at']))
+
+    @staticmethod
+    def _inbox(row: sqlite3.Row) -> InboxMessage:
+        return InboxMessage(row['id'], row['tenant_id'], row['provider'], row['connection_id'], row['external_event_id'],
+            row['schema_version'], _dt(row['received_at']), row['payload_digest'], row['raw_payload_ref'],
+            InboxState(row['state']), row['version'], _dt(row['processed_at']))
+
+    def receive_inbox(self, message: InboxMessage) -> tuple[InboxMessage, bool]:
+        with self.transaction():
+            row = self.connection.execute('SELECT * FROM inbox_messages WHERE tenant_id=? AND provider=? AND connection_id=? AND external_event_id=?',
+                (message.tenant_id, message.provider, message.connection_id, message.external_event_id)).fetchone()
+            if row:
+                prior = self._inbox(row)
+                if (prior.payload_digest, prior.schema_version) != (message.payload_digest, message.schema_version):
+                    raise ConflictError('inbound identity reused with different content')
+                return prior, True
+            self.connection.execute('INSERT INTO inbox_messages VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+                (message.id, message.tenant_id, message.provider, message.connection_id, message.external_event_id,
+                 message.schema_version, message.received_at.isoformat(), message.payload_digest, message.raw_payload_ref,
+                 message.state.value, message.version, message.processed_at.isoformat() if message.processed_at else None))
+            return self.get_inbox(message.tenant_id, message.id), False
+
+    def get_inbox(self, tenant_id: str, inbox_id: str) -> InboxMessage:
+        row = self.connection.execute('SELECT * FROM inbox_messages WHERE tenant_id=? AND id=?', (tenant_id, inbox_id)).fetchone()
+        if row is None:
+            raise NotFoundError('inbox message not found')
+        return self._inbox(row)
+
+    def inbox_for(self, tenant_id: str) -> tuple[InboxMessage, ...]:
+        return tuple(self._inbox(row) for row in self.connection.execute('SELECT * FROM inbox_messages WHERE tenant_id=? ORDER BY received_at,id', (tenant_id,)))
+
+    def mark_inbox_processed(self, tenant_id: str, inbox_id: str, expected_version: int, processed_at: datetime) -> InboxMessage:
+        with self.transaction():
+            self.get_inbox(tenant_id, inbox_id)
+            changed = self.connection.execute('UPDATE inbox_messages SET state=?,version=version+1,processed_at=? WHERE tenant_id=? AND id=? AND version=? AND state=?',
+                (InboxState.PROCESSED.value, processed_at.isoformat(), tenant_id, inbox_id, expected_version, InboxState.RECEIVED.value)).rowcount
+            if changed != 1:
+                raise ConflictError('inbox state/version conflict')
+            return self.get_inbox(tenant_id, inbox_id)
+
     def _migrate(self) -> None:
         versions = [version for version, _ in MIGRATIONS]
         if any(version <= 0 for version in versions) or versions != sorted(set(versions)):
