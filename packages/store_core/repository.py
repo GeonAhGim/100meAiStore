@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from typing import Iterable
 
-from .domain import Approval, AuditEvent, Command, Membership, OutboxEvent, OutboxState, Tenant, User
+from .domain import AgentStatusSnapshot, Approval, AuditEvent, Command, Membership, OutboxEvent, OutboxState, Tenant, User
 from .errors import ConflictError, NotFoundError, TenantBoundaryError
 
 
@@ -27,6 +27,7 @@ class InMemoryRepository:
         self.audit_events: dict[str, list[AuditEvent]] = defaultdict(list)
         self.outbox: dict[tuple[str, str], OutboxEvent] = {}
         self.outbox_idempotency: dict[tuple[str, str], str] = {}
+        self.agent_status: dict[tuple[str, str], AgentStatusSnapshot] = {}
 
     @contextmanager
     def transaction(self):
@@ -141,3 +142,9 @@ class InMemoryRepository:
 
     def audits_for(self, tenant_id: str) -> tuple[AuditEvent, ...]:
         return tuple(self.audit_events[tenant_id])
+
+    def save_agent_status(self, status: AgentStatusSnapshot) -> None:
+        self.agent_status[(status.tenant_id, status.agent_id)] = status
+
+    def agent_status_for(self, tenant_id: str) -> tuple[AgentStatusSnapshot, ...]:
+        return tuple(status for (tid, _), status in sorted(self.agent_status.items()) if tid == tenant_id)

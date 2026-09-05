@@ -13,6 +13,8 @@ from .domain import (
     ApprovalKind,
     ApprovalState,
     AuditEvent,
+    AgentState,
+    AgentStatusSnapshot,
     Capability,
     Command,
     CommandState,
@@ -25,6 +27,7 @@ from .domain import (
     User,
 )
 from .errors import AuthorizationError, ConflictError, NotFoundError
+from .dashboard import DashboardProjection
 from .repository import InMemoryRepository
 
 
@@ -47,6 +50,16 @@ class StoreControlPlane:
         self.repo = repository or InMemoryRepository()
         self._clock = clock or (lambda: datetime.now(timezone.utc))
 
+    def dashboard_snapshot(self, context: TenantContext, *, project_root: str | None = None) -> dict[str, Any]:
+        """Return a tenant-scoped, read-only dashboard projection.
+
+        Dashboard reads are available to active tenant members and never call a
+        model or external service.  The membership check happens before the
+        projection queries any tenant-owned rows.
+        """
+        self._membership(context)
+        return DashboardProjection(self.repo, project_root=project_root).snapshot(context, now=self._clock())
+
     def bootstrap_tenant(self, legal_name: str, master_email: str) -> TenantContext:
         with self.repo.transaction():
             now = self._clock()
@@ -56,6 +69,15 @@ class StoreControlPlane:
             self.repo.add_user(user)
             membership = Membership(tenant.id, user.id, frozenset({Role.MASTER}))
             self.repo.save_membership(membership)
+            # Seed explicit, persisted slots so a fresh tenant dashboard shows
+            # root/PM/worker status as UNKNOWN until a real heartbeat arrives;
+            # this is evidence-neutral and survives a restart.
+            if hasattr(self.repo, "save_agent_status"):
+                for agent_id, role in (("root", "orchestrator"), ("codex_pm_luna", "pm"), ("worker", "worker")):
+                    self.repo.save_agent_status(AgentStatusSnapshot(
+                        tenant.id, agent_id, role, AgentState.UNKNOWN, None, None, None, None,
+                        None, None, None, None, None, False, now,
+                    ))
             self._audit(tenant.id, user.id, "tenant.bootstrap", tenant.id, "succeeded", {})
         return TenantContext(tenant.id, user.id, membership.version)
 

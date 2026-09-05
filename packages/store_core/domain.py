@@ -209,6 +209,35 @@ class AdapterCapability(str, Enum):
     INVENTORY_READ = "inventory_read"
 
 
+class AgentState(str, Enum):
+    RUNNING = "running"
+    WAITING = "waiting"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    BLOCKED = "blocked"
+    USAGE_LIMITED = "usage_limited"
+    UNKNOWN = "unknown"
+
+
+@dataclass
+class AgentStatusSnapshot:
+    tenant_id: str
+    agent_id: str
+    role: str
+    state: AgentState
+    current_task: str | None
+    started_at: datetime | None
+    last_heartbeat_at: datetime | None
+    ended_at: datetime | None
+    last_message: str | None
+    last_commit: str | None
+    test_result: str | None
+    next_task: str | None
+    blocker: str | None
+    usage_limited: bool
+    updated_at: datetime
+
+
 @dataclass(frozen=True)
 class AdapterCapabilityManifest:
     tenant_id: str

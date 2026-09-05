@@ -9,6 +9,7 @@ from .domain import (
     TenantContext,
     OutboxState,
 )
+from .dashboard import DashboardProjection
 from .errors import AuthorizationError, ConflictError, NotFoundError, TenantBoundaryError
 from .service import StoreControlPlane
 from .sqlite_repository import SQLiteRepository
@@ -27,4 +28,5 @@ __all__ = [
     "TenantContext",
     "OutboxState",
     "SQLiteRepository",
+    "DashboardProjection",
 ]

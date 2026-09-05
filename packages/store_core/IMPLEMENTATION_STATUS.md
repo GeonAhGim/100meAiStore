@@ -14,6 +14,9 @@ Implemented and tested:
 - transactional command, approval, audit and outbox writes;
 - restart-safe outbox leases, fencing, checkpoints, retries and dead-letter state;
 - readiness checks for schema compatibility, integrity and foreign-key violations.
+- local zero-AI dashboard projection/API with tenant authorization, readiness,
+  outbox/inbox counts, stale heartbeat detection, and durable agent status
+  checkpoints (schema v5).
 
 Not yet a production durability claim:
 

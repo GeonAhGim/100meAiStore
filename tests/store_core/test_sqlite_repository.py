@@ -163,7 +163,7 @@ class SQLiteRepositoryTest(unittest.TestCase):
         connection.close()
         repo, app = self.open()
         versions = [r[0] for r in repo.connection.execute("SELECT version FROM schema_migrations ORDER BY version")]
-        self.assertEqual([1, 2, 3, 4], versions)
+        self.assertEqual([1, 2, 3, 4, 5], versions)
         master = app.bootstrap_tenant("Migrated", "migrated@example.test")
         app.create_command(master, ApprovalKind.PRODUCT, "done:1", {}, "done:1")
         event = repo.claim_next_outbox(master.tenant_id, "worker", self.clock.now, self.clock.now + timedelta(minutes=1))
@@ -273,13 +273,13 @@ class SQLiteRepositoryTest(unittest.TestCase):
     def test_migration_ddl_and_version_marker_roll_back_together(self):
         repo, _ = self.open()
         repo.close()
-        broken = MIGRATIONS + ((5, "CREATE TABLE must_not_survive(id TEXT); THIS IS INVALID;"),)
+        broken = MIGRATIONS + ((6, "CREATE TABLE must_not_survive(id TEXT); THIS IS INVALID;"),)
         with patch("packages.store_core.sqlite_repository.MIGRATIONS", broken):
             with self.assertRaises(sqlite3.DatabaseError):
                 SQLiteRepository(self.path)
         connection = sqlite3.connect(self.path)
         self.assertIsNone(connection.execute("SELECT name FROM sqlite_master WHERE name='must_not_survive'").fetchone())
-        self.assertIsNone(connection.execute("SELECT version FROM schema_migrations WHERE version=5").fetchone())
+        self.assertIsNone(connection.execute("SELECT version FROM schema_migrations WHERE version=6").fetchone())
         connection.close()
 
     def test_real_process_commit_ack_loss_recovers_by_idempotency(self):

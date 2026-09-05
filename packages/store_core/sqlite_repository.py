@@ -10,7 +10,7 @@ from typing import Iterator
 
 from .domain import (
     Approval, ApprovalKind, ApprovalState, AuditEvent, Command, CommandState,
-    AdapterCapability, AdapterCapabilityManifest, InboxMessage, InboxState,
+    AdapterCapability, AdapterCapabilityManifest, AgentState, AgentStatusSnapshot, InboxMessage, InboxState,
     Membership, OutboxEvent, OutboxState, Role, Tenant, User,
 )
 from .errors import ConflictError, NotFoundError, TenantBoundaryError
@@ -123,6 +123,14 @@ CREATE TABLE adapter_capability_manifests(
  capabilities_json TEXT NOT NULL, inbound_schema_versions_json TEXT NOT NULL, updated_at TEXT NOT NULL,
  PRIMARY KEY(tenant_id,provider,connection_id),
  FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT);
+"""), (5, """
+CREATE TABLE agent_status_snapshots(
+ tenant_id TEXT NOT NULL, agent_id TEXT NOT NULL, role TEXT NOT NULL, state TEXT NOT NULL,
+ current_task TEXT, started_at TEXT, last_heartbeat_at TEXT, ended_at TEXT, last_message TEXT,
+ last_commit TEXT, test_result TEXT, next_task TEXT, blocker TEXT, usage_limited INTEGER NOT NULL,
+ updated_at TEXT NOT NULL, PRIMARY KEY(tenant_id,agent_id),
+ FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT);
+CREATE INDEX agent_status_tenant_updated ON agent_status_snapshots(tenant_id,updated_at);
 """))
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -232,6 +240,43 @@ class SQLiteRepository:
         if foreign_keys:
             raise ConflictError("sqlite foreign key check failed")
         return {"ready": True, "schema_version": actual, "integrity": integrity}
+
+    def save_agent_status(self, status: AgentStatusSnapshot) -> None:
+        """Persist the latest worker/PM heartbeat as a tenant-owned checkpoint."""
+        self.connection.execute(
+            """INSERT INTO agent_status_snapshots
+            (tenant_id,agent_id,role,state,current_task,started_at,last_heartbeat_at,ended_at,last_message,
+             last_commit,test_result,next_task,blocker,usage_limited,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(tenant_id,agent_id) DO UPDATE SET
+             role=excluded.role,state=excluded.state,current_task=excluded.current_task,
+             started_at=excluded.started_at,last_heartbeat_at=excluded.last_heartbeat_at,ended_at=excluded.ended_at,
+             last_message=excluded.last_message,last_commit=excluded.last_commit,test_result=excluded.test_result,
+             next_task=excluded.next_task,blocker=excluded.blocker,usage_limited=excluded.usage_limited,
+             updated_at=excluded.updated_at""",
+            (status.tenant_id, status.agent_id, status.role, status.state.value, status.current_task,
+             status.started_at.isoformat() if status.started_at else None,
+             status.last_heartbeat_at.isoformat() if status.last_heartbeat_at else None,
+             status.ended_at.isoformat() if status.ended_at else None, status.last_message,
+             status.last_commit, status.test_result, status.next_task, status.blocker, int(status.usage_limited),
+             status.updated_at.isoformat()),
+        )
+
+    @staticmethod
+    def _agent_status(row: sqlite3.Row) -> AgentStatusSnapshot:
+        return AgentStatusSnapshot(
+            tenant_id=row["tenant_id"], agent_id=row["agent_id"], role=row["role"], state=AgentState(row["state"]),
+            current_task=row["current_task"], started_at=_dt(row["started_at"]),
+            last_heartbeat_at=_dt(row["last_heartbeat_at"]), ended_at=_dt(row["ended_at"]),
+            last_message=row["last_message"], last_commit=row["last_commit"], test_result=row["test_result"],
+            next_task=row["next_task"], blocker=row["blocker"], usage_limited=bool(row["usage_limited"]),
+            updated_at=_dt(row["updated_at"]),  # type: ignore[arg-type]
+        )
+
+    def agent_status_for(self, tenant_id: str) -> tuple[AgentStatusSnapshot, ...]:
+        return tuple(self._agent_status(row) for row in self.connection.execute(
+            "SELECT * FROM agent_status_snapshots WHERE tenant_id=? ORDER BY agent_id", (tenant_id,)
+        ))
 
     @contextmanager
     def transaction(self) -> Iterator[SQLiteRepository]:
