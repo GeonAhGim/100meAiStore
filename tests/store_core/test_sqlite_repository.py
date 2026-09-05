@@ -25,11 +25,16 @@ class SQLiteRepositoryTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.path = Path(self.temp.name) / "demo.sqlite3"
         self.clock = Clock()
+        self.repositories = []
 
-    def tearDown(self): self.temp.cleanup()
+    def tearDown(self):
+        for repo in reversed(self.repositories):
+            repo.close()
+        self.temp.cleanup()
 
     def open(self):
         repo = SQLiteRepository(self.path)
+        self.repositories.append(repo)
         return repo, StoreControlPlane(repo, self.clock)
 
     def create_v2_database(self) -> sqlite3.Connection:
@@ -158,7 +163,7 @@ class SQLiteRepositoryTest(unittest.TestCase):
         connection.close()
         repo, app = self.open()
         versions = [r[0] for r in repo.connection.execute("SELECT version FROM schema_migrations ORDER BY version")]
-        self.assertEqual([1, 2, 3], versions)
+        self.assertEqual([1, 2, 3, 4], versions)
         master = app.bootstrap_tenant("Migrated", "migrated@example.test")
         app.create_command(master, ApprovalKind.PRODUCT, "done:1", {}, "done:1")
         event = repo.claim_next_outbox(master.tenant_id, "worker", self.clock.now, self.clock.now + timedelta(minutes=1))
@@ -221,7 +226,7 @@ class SQLiteRepositoryTest(unittest.TestCase):
         self.assertEqual("approval-a", repo.get_approval_for_command("tenant-a", "command-a").id)
         self.assertEqual("outbox-a", repo.outbox_for("tenant-a")[0].id)
         self.assertEqual([], repo.connection.execute("PRAGMA foreign_key_check").fetchall())
-        self.assertEqual(3, repo.readiness()["schema_version"])
+        self.assertEqual(LATEST_SCHEMA_VERSION, repo.readiness()["schema_version"])
         repo.close()
 
     def test_v3_migration_rejects_orphan_and_rolls_back_to_reopenable_v2(self):
@@ -238,7 +243,7 @@ class SQLiteRepositoryTest(unittest.TestCase):
         connection.execute("DELETE FROM commands WHERE id='orphan'")
         connection.commit(); connection.close()
         repo, _ = self.open()
-        self.assertEqual(3, repo.readiness()["schema_version"])
+        self.assertEqual(LATEST_SCHEMA_VERSION, repo.readiness()["schema_version"])
         repo.close()
 
     def test_cross_tenant_composite_approval_fk_is_rejected(self):
@@ -268,13 +273,13 @@ class SQLiteRepositoryTest(unittest.TestCase):
     def test_migration_ddl_and_version_marker_roll_back_together(self):
         repo, _ = self.open()
         repo.close()
-        broken = MIGRATIONS + ((4, "CREATE TABLE must_not_survive(id TEXT); THIS IS INVALID;"),)
+        broken = MIGRATIONS + ((5, "CREATE TABLE must_not_survive(id TEXT); THIS IS INVALID;"),)
         with patch("packages.store_core.sqlite_repository.MIGRATIONS", broken):
             with self.assertRaises(sqlite3.DatabaseError):
                 SQLiteRepository(self.path)
         connection = sqlite3.connect(self.path)
         self.assertIsNone(connection.execute("SELECT name FROM sqlite_master WHERE name='must_not_survive'").fetchone())
-        self.assertIsNone(connection.execute("SELECT version FROM schema_migrations WHERE version=4").fetchone())
+        self.assertIsNone(connection.execute("SELECT version FROM schema_migrations WHERE version=5").fetchone())
         connection.close()
 
     def test_real_process_commit_ack_loss_recovers_by_idempotency(self):

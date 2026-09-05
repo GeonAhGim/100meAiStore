@@ -177,3 +177,44 @@ class OutboxEvent:
     attempts: int = 0
     available_at: datetime | None = None
     last_error: str | None = None
+
+
+class InboxState(str, Enum):
+    RECEIVED = "received"
+    PROCESSED = "processed"
+
+
+@dataclass
+class InboxMessage:
+    id: str
+    tenant_id: str
+    provider: str
+    connection_id: str
+    external_event_id: str
+    schema_version: int
+    received_at: datetime
+    payload_digest: str
+    raw_payload_ref: str | None
+    state: InboxState = InboxState.RECEIVED
+    version: int = 1
+    processed_at: datetime | None = None
+
+
+class AdapterCapability(str, Enum):
+    INBOUND_EVENTS = "inbound_events"
+    ORDERS_READ = "orders_read"
+    ORDERS_WRITE = "orders_write"
+    PRODUCTS_READ = "products_read"
+    PRODUCTS_WRITE = "products_write"
+    INVENTORY_READ = "inventory_read"
+
+
+@dataclass(frozen=True)
+class AdapterCapabilityManifest:
+    tenant_id: str
+    provider: str
+    connection_id: str
+    adapter_version: str
+    capabilities: frozenset[AdapterCapability]
+    inbound_schema_versions: frozenset[int]
+    updated_at: datetime

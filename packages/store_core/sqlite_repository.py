@@ -10,6 +10,7 @@ from typing import Iterator
 
 from .domain import (
     Approval, ApprovalKind, ApprovalState, AuditEvent, Command, CommandState,
+    AdapterCapability, AdapterCapabilityManifest, InboxMessage, InboxState,
     Membership, OutboxEvent, OutboxState, Role, Tenant, User,
 )
 from .errors import ConflictError, NotFoundError, TenantBoundaryError
@@ -108,6 +109,20 @@ CREATE INDEX outbox_tenant_state ON outbox(tenant_id,state,created_at);
 CREATE INDEX outbox_claimable ON outbox(tenant_id,state,available_at,created_at);
 CREATE TRIGGER audit_events_no_update BEFORE UPDATE ON audit_events BEGIN SELECT RAISE(ABORT,'audit events are append-only'); END;
 CREATE TRIGGER audit_events_no_delete BEFORE DELETE ON audit_events BEGIN SELECT RAISE(ABORT,'audit events are append-only'); END;
+"""),(4, """
+CREATE TABLE inbox_messages(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, provider TEXT NOT NULL, connection_id TEXT NOT NULL,
+ external_event_id TEXT NOT NULL, schema_version INTEGER NOT NULL CHECK(schema_version>0), received_at TEXT NOT NULL,
+ payload_digest TEXT NOT NULL CHECK(length(payload_digest)=64), raw_payload_ref TEXT, state TEXT NOT NULL,
+ version INTEGER NOT NULL CHECK(version>0), processed_at TEXT,
+ UNIQUE(tenant_id,provider,connection_id,external_event_id),
+ FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT);
+CREATE INDEX inbox_tenant_state_received ON inbox_messages(tenant_id,state,received_at,id);
+CREATE TABLE adapter_capability_manifests(
+ tenant_id TEXT NOT NULL, provider TEXT NOT NULL, connection_id TEXT NOT NULL, adapter_version TEXT NOT NULL,
+ capabilities_json TEXT NOT NULL, inbound_schema_versions_json TEXT NOT NULL, updated_at TEXT NOT NULL,
+ PRIMARY KEY(tenant_id,provider,connection_id),
+ FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT);
 """))
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -121,6 +136,31 @@ def _safe_error(value: str) -> str:
 
 def _backoff_seconds(attempts: int) -> int:
     return min(3600, 30 * (2 ** max(0, attempts - 1)))
+
+
+def _required_identifier(value: str, label: str) -> str:
+    normalized = value.strip()
+    if not normalized or len(normalized) > 255 or any(c in normalized for c in "\r\n\0"):
+        raise ConflictError(f"invalid {label}")
+    return normalized
+
+
+def _payload_digest(value: str) -> str:
+    normalized = value.lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", normalized):
+        raise ConflictError("payload_digest must be a SHA-256 hex digest")
+    return normalized
+
+
+def _raw_ref(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    # Only an opaque identifier is accepted. URLs, JSON and inline content could
+    # accidentally persist credentials or customer PII.
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}", normalized) or "//" in normalized:
+        raise ConflictError("raw_payload_ref must be an opaque non-content reference")
+    return normalized
 
 
 def _dt(value: str | None) -> datetime | None:
@@ -151,6 +191,9 @@ class SQLiteRepository:
         self.connection.close()
 
     def _migrate(self) -> None:
+        versions = [version for version, _ in MIGRATIONS]
+        if any(version <= 0 for version in versions) or versions != sorted(set(versions)):
+            raise sqlite3.DatabaseError("migration versions must be strictly increasing and unique")
         self.connection.execute("CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")
         applied = {r[0] for r in self.connection.execute("SELECT version FROM schema_migrations")}
         if applied and max(applied) > LATEST_SCHEMA_VERSION:
