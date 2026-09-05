@@ -10,6 +10,7 @@ from typing import Iterable
 from .domain import AgentStatusSnapshot, Approval, AuditEvent, Command, Membership, OutboxEvent, OutboxState, Tenant, User
 from .errors import ConflictError, NotFoundError, TenantBoundaryError
 from .domain import AdapterCapabilityManifest, InboxMessage, InboxState, ApprovalIntent, ExecutionPreparation
+from .domain import DemoExecutionControl, ExecutionAttempt, AttemptObservation
 
 
 class InMemoryRepository:
@@ -36,6 +37,53 @@ class InMemoryRepository:
         self._lock = RLock()
         self.approval_intents: dict[tuple[str, str], ApprovalIntent] = {}
         self.execution_preparations: dict[tuple[str, str], ExecutionPreparation] = {}
+        self.demo_controls: dict[tuple[str, str], DemoExecutionControl] = {}
+        self.attempts: dict[tuple[str, str], ExecutionAttempt] = {}
+        self.observations: dict[tuple[str, str], list[AttemptObservation]] = defaultdict(list)
+
+    def save_demo_control(self, value: DemoExecutionControl) -> None:
+        self.get_command(value.tenant_id, value.command_id)
+        self.demo_controls[(value.tenant_id, value.command_id)] = value
+
+    def get_demo_control(self, tenant_id: str, command_id: str) -> DemoExecutionControl:
+        try:
+            return self.demo_controls[(tenant_id, command_id)]
+        except KeyError as exc:
+            raise NotFoundError('demo execution control missing') from exc
+
+    def insert_attempt(self, value: ExecutionAttempt) -> None:
+        preparation = self.get_execution_preparation(value.tenant_id, value.command_id)
+        if preparation is None or preparation.id != value.preparation_id:
+            raise NotFoundError('preparation not found')
+        if self.attempt_for_key(value.tenant_id, value.operation_key) or (value.tenant_id, value.id) in self.attempts:
+            raise ConflictError('attempt already exists')
+        self.attempts[(value.tenant_id, value.id)] = deepcopy(value)
+
+    def get_attempt(self, tenant_id: str, attempt_id: str) -> ExecutionAttempt:
+        try:
+            return deepcopy(self.attempts[(tenant_id, attempt_id)])
+        except KeyError as exc:
+            raise NotFoundError('attempt not found') from exc
+
+    def attempt_for_key(self, tenant_id: str, operation_key: str) -> ExecutionAttempt | None:
+        return next((deepcopy(value) for (tid, _), value in self.attempts.items() if tid == tenant_id and value.operation_key == operation_key), None)
+
+    def update_attempt(self, value: ExecutionAttempt, expected_version: int) -> None:
+        current = self.get_attempt(value.tenant_id, value.id)
+        if current.version != expected_version or value.version != expected_version + 1:
+            raise ConflictError('attempt version conflict')
+        self.attempts[(value.tenant_id, value.id)] = deepcopy(value)
+
+    def append_observation(self, value: AttemptObservation) -> None:
+        self.get_attempt(value.tenant_id, value.attempt_id)
+        rows = self.observations[(value.tenant_id, value.attempt_id)]
+        if any(row.id == value.id for row in rows):
+            raise ConflictError('observation already exists')
+        rows.append(value)
+
+    def observations_for(self, tenant_id: str, attempt_id: str) -> tuple[AttemptObservation, ...]:
+        self.get_attempt(tenant_id, attempt_id)
+        return tuple(self.observations[(tenant_id, attempt_id)])
 
     def save_approval_intent(self, intent: ApprovalIntent) -> None:
         self.get_command(intent.tenant_id, intent.command_id)

@@ -110,7 +110,7 @@ class ApprovalIntentTests(unittest.TestCase):
             app.decide(ctx, command.id, True, 'checked')
 
     def test_ap10_v5_upgrade_preserves_membership_and_immutable_intent(self):
-        from packages.store_core.sqlite_repository import MIGRATIONS
+        from packages.store_core.sqlite_repository import MIGRATIONS, LATEST_SCHEMA_VERSION
         legacy_path = Path(self.temp.name) / 'v5.sqlite3'
         with patch('packages.store_core.sqlite_repository.MIGRATIONS', MIGRATIONS[:5]):
             legacy = SQLiteRepository(legacy_path)
@@ -121,7 +121,7 @@ class ApprovalIntentTests(unittest.TestCase):
         try:
             app = StoreControlPlane(upgraded)
             self.assertEqual(ctx, app.context_for(ctx.tenant_id, ctx.user_id))
-            self.assertEqual(6, upgraded.readiness()['schema_version'])
+            self.assertEqual(LATEST_SCHEMA_VERSION, upgraded.readiness()['schema_version'])
             command, _ = self.request(app, ctx)
             with self.assertRaises(sqlite3.IntegrityError):
                 upgraded.connection.execute('UPDATE approval_intents SET target_version=2 WHERE tenant_id=? AND command_id=?', (ctx.tenant_id, command.id))

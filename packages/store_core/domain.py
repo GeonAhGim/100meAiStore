@@ -223,6 +223,8 @@ class InboxMessage:
 
 
 class AdapterCapability(str, Enum):
+    DEMO_EXECUTE = "demo_execute"
+    DEMO_LOOKUP = "demo_lookup"
     INBOUND_EVENTS = "inbound_events"
     ORDERS_READ = "orders_read"
     ORDERS_WRITE = "orders_write"
@@ -269,3 +271,54 @@ class AdapterCapabilityManifest:
     capabilities: frozenset[AdapterCapability]
     inbound_schema_versions: frozenset[int]
     updated_at: datetime
+
+
+class AttemptState(str, Enum):
+    PREPARED = 'prepared'
+    DISPATCHING = 'dispatching'
+    UNKNOWN = 'unknown'
+    RECONCILING = 'reconciling'
+    VERIFIED_SUCCESS = 'verified_success'
+    VERIFIED_FAILURE = 'verified_failure'
+    MANUAL_REVIEW = 'manual_review'
+
+
+@dataclass(frozen=True)
+class DemoExecutionControl:
+    tenant_id: str
+    command_id: str
+    policy_version: int
+    target_version: int
+    stopped: bool
+
+
+@dataclass
+class ExecutionAttempt:
+    id: str
+    tenant_id: str
+    command_id: str
+    preparation_id: str
+    operation_key: str
+    intent_digest: str
+    adapter_version: str
+    provider: str
+    connection_id: str
+    state: AttemptState = AttemptState.PREPARED
+    version: int = 1
+    lease_owner: str | None = None
+    lease_until: datetime | None = None
+    fencing_token: int = 0
+    provider_reference: str | None = None
+    last_observed_at: datetime | None = None
+    next_check_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class AttemptObservation:
+    id: str
+    tenant_id: str
+    attempt_id: str
+    observation_kind: str
+    response_digest: str
+    observed_at: datetime
+    correlation_id: str

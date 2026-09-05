@@ -1,6 +1,8 @@
 # CORE-03 UNKNOWN reconciliation — next implementation packet
 
-Status: specified, not implemented. Resume from verified CORE-02 commit `5c9ae06`. Continue this safe packet automatically; it is not waiting for user approval. Actual external provider writes remain outside the packet.
+Status: local DEMO implementation and acceptance tests recorded in `core03-evidence.md`. Specification started from verified CORE-02 commit `5c9ae06`. Actual external provider writes remain outside the packet.
+
+Implementation refinement: `DemoExecutionControlPlane` is an explicit StoreControlPlane subclass. A master configures durable demo policy/target/stop snapshots using `set_demo_control`; missing controls fail closed. Attempts additionally store provider/connection_id so capability checks bind to the specific manifest. DEMO_EXECUTE and DEMO_LOOKUP are explicit capabilities. Only the concrete DurableSyntheticProvider type is accepted by dispatch/reconciliation, with a distinct SQLite file from the control ledger. This is deliberately not a general production adapter gateway.
 
 ## Scope and prerequisites
 
@@ -23,6 +25,8 @@ operation_key is deterministic over tenant, command and logical operation versio
 `reconcile_attempt` performs read-only synthetic lookup by operation_key. Results are FOUND_SUCCESS, FOUND_FAILURE, ABSENT or INCONCLUSIVE. FOUND results produce verified terminals. INCONCLUSIVE stays UNKNOWN and schedules bounded backoff or MANUAL_REVIEW. ABSENT permits another dispatch only when the adapter explicitly supplies an authoritative absence/consistency guarantee and the original approval still passes all gates. Otherwise MANUAL_REVIEW. Cancellation, expiry or changed policy prevents further dispatch but does not erase evidence of an earlier possible effect.
 
 Transitions: PREPARED → DISPATCHING → VERIFIED_SUCCESS / VERIFIED_FAILURE / UNKNOWN; recovered DISPATCHING → UNKNOWN; UNKNOWN → RECONCILING → verified / UNKNOWN / MANUAL_REVIEW. No automatic UNKNOWN → PREPARED based on timeout alone.
+
+An authoritative ABSENT result from RECONCILING may return to PREPARED after rechecking approval/control. It retains the same operation key. Five inconclusive observations lead to MANUAL_REVIEW, with bounded exponential delay between lookups. Duplicate result callbacks after lease release are rejected; they create no extra observation or effect.
 
 ## Synthetic adapter
 

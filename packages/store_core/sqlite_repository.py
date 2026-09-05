@@ -13,6 +13,7 @@ from .domain import (
     AdapterCapability, AdapterCapabilityManifest, AgentState, AgentStatusSnapshot, InboxMessage, InboxState,
     Membership, OutboxEvent, OutboxState, Role, Tenant, User,
     ApprovalIntent, ExecutionPreparation,
+    DemoExecutionControl, ExecutionAttempt, AttemptObservation, AttemptState,
 )
 from .errors import ConflictError, NotFoundError, TenantBoundaryError
 
@@ -147,6 +148,29 @@ CREATE TRIGGER approval_intents_no_update BEFORE UPDATE ON approval_intents BEGI
 CREATE TRIGGER approval_intents_no_delete BEFORE DELETE ON approval_intents BEGIN SELECT RAISE(ABORT,'approval intents are immutable'); END;
 CREATE TRIGGER execution_preparations_no_update BEFORE UPDATE ON execution_preparations BEGIN SELECT RAISE(ABORT,'execution preparations are immutable'); END;
 CREATE TRIGGER execution_preparations_no_delete BEFORE DELETE ON execution_preparations BEGIN SELECT RAISE(ABORT,'execution preparations are immutable'); END;
+"""), (7, """
+CREATE UNIQUE INDEX preparation_tenant_command_id ON execution_preparations(tenant_id,command_id,id);
+CREATE TABLE demo_execution_controls(
+ tenant_id TEXT NOT NULL, command_id TEXT NOT NULL, policy_version INTEGER NOT NULL CHECK(policy_version>0),
+ target_version INTEGER NOT NULL CHECK(target_version>0), stopped INTEGER NOT NULL CHECK(stopped IN (0,1)),
+ PRIMARY KEY(tenant_id,command_id), FOREIGN KEY(tenant_id,command_id) REFERENCES commands(tenant_id,id));
+CREATE TABLE execution_attempts(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, command_id TEXT NOT NULL, preparation_id TEXT NOT NULL,
+ operation_key TEXT NOT NULL, intent_digest TEXT NOT NULL, adapter_version TEXT NOT NULL,
+ provider TEXT NOT NULL, connection_id TEXT NOT NULL, state TEXT NOT NULL, version INTEGER NOT NULL CHECK(version>0),
+ lease_owner TEXT, lease_until TEXT, fencing_token INTEGER NOT NULL CHECK(fencing_token>=0),
+ provider_reference TEXT, last_observed_at TEXT, next_check_at TEXT,
+ UNIQUE(tenant_id,id), UNIQUE(tenant_id,operation_key), UNIQUE(tenant_id,command_id),
+ FOREIGN KEY(tenant_id,command_id,preparation_id) REFERENCES execution_preparations(tenant_id,command_id,id),
+ FOREIGN KEY(tenant_id,provider,connection_id) REFERENCES adapter_capability_manifests(tenant_id,provider,connection_id));
+CREATE INDEX attempt_tenant_recovery ON execution_attempts(tenant_id,state,next_check_at,lease_until);
+CREATE TABLE attempt_observations(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, attempt_id TEXT NOT NULL, observation_kind TEXT NOT NULL,
+ response_digest TEXT NOT NULL, observed_at TEXT NOT NULL, correlation_id TEXT NOT NULL,
+ FOREIGN KEY(tenant_id,attempt_id) REFERENCES execution_attempts(tenant_id,id));
+CREATE INDEX observations_tenant_attempt ON attempt_observations(tenant_id,attempt_id);
+CREATE TRIGGER attempt_observations_no_update BEFORE UPDATE ON attempt_observations BEGIN SELECT RAISE(ABORT,'observations are append-only'); END;
+CREATE TRIGGER attempt_observations_no_delete BEFORE DELETE ON attempt_observations BEGIN SELECT RAISE(ABORT,'observations are append-only'); END;
 """))
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -213,6 +237,65 @@ class SQLiteRepository:
 
     def close(self) -> None:
         self.connection.close()
+
+    def save_demo_control(self, value: DemoExecutionControl) -> None:
+        self.connection.execute('''INSERT INTO demo_execution_controls VALUES (?,?,?,?,?)
+            ON CONFLICT(tenant_id,command_id) DO UPDATE SET policy_version=excluded.policy_version,
+            target_version=excluded.target_version,stopped=excluded.stopped''',
+            (value.tenant_id, value.command_id, value.policy_version, value.target_version, int(value.stopped)))
+
+    def get_demo_control(self, tenant_id: str, command_id: str) -> DemoExecutionControl:
+        row = self.connection.execute('SELECT * FROM demo_execution_controls WHERE tenant_id=? AND command_id=?', (tenant_id, command_id)).fetchone()
+        if row is None:
+            raise NotFoundError('demo execution control missing')
+        return DemoExecutionControl(tenant_id, command_id, row['policy_version'], row['target_version'], bool(row['stopped']))
+
+    @staticmethod
+    def _attempt(row: sqlite3.Row) -> ExecutionAttempt:
+        return ExecutionAttempt(row['id'], row['tenant_id'], row['command_id'], row['preparation_id'], row['operation_key'],
+            row['intent_digest'], row['adapter_version'], row['provider'], row['connection_id'], AttemptState(row['state']),
+            row['version'], row['lease_owner'], _dt(row['lease_until']), row['fencing_token'], row['provider_reference'],
+            _dt(row['last_observed_at']), _dt(row['next_check_at']))
+
+    def get_attempt(self, tenant_id: str, attempt_id: str) -> ExecutionAttempt:
+        row = self.connection.execute('SELECT * FROM execution_attempts WHERE tenant_id=? AND id=?', (tenant_id, attempt_id)).fetchone()
+        if row is None:
+            raise NotFoundError('attempt not found')
+        return self._attempt(row)
+
+    def attempt_for_key(self, tenant_id: str, operation_key: str) -> ExecutionAttempt | None:
+        row = self.connection.execute('SELECT * FROM execution_attempts WHERE tenant_id=? AND operation_key=?', (tenant_id, operation_key)).fetchone()
+        return self._attempt(row) if row else None
+
+    def insert_attempt(self, value: ExecutionAttempt) -> None:
+        self.connection.execute('INSERT INTO execution_attempts VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            (value.id, value.tenant_id, value.command_id, value.preparation_id, value.operation_key, value.intent_digest,
+             value.adapter_version, value.provider, value.connection_id, value.state.value, value.version,
+             value.lease_owner, value.lease_until.isoformat() if value.lease_until else None, value.fencing_token,
+             value.provider_reference, value.last_observed_at.isoformat() if value.last_observed_at else None,
+             value.next_check_at.isoformat() if value.next_check_at else None))
+
+    def update_attempt(self, value: ExecutionAttempt, expected_version: int) -> None:
+        if value.version != expected_version + 1:
+            raise ConflictError('attempt version conflict')
+        changed = self.connection.execute('''UPDATE execution_attempts SET state=?,version=?,lease_owner=?,lease_until=?,
+            fencing_token=?,provider_reference=?,last_observed_at=?,next_check_at=? WHERE tenant_id=? AND id=? AND version=?''',
+            (value.state.value, value.version, value.lease_owner, value.lease_until.isoformat() if value.lease_until else None,
+             value.fencing_token, value.provider_reference, value.last_observed_at.isoformat() if value.last_observed_at else None,
+             value.next_check_at.isoformat() if value.next_check_at else None, value.tenant_id, value.id, expected_version)).rowcount
+        if changed != 1:
+            raise ConflictError('attempt version conflict')
+
+    def append_observation(self, value: AttemptObservation) -> None:
+        self.connection.execute('INSERT INTO attempt_observations VALUES (?,?,?,?,?,?,?)',
+            (value.id, value.tenant_id, value.attempt_id, value.observation_kind, value.response_digest,
+             value.observed_at.isoformat(), value.correlation_id))
+
+    def observations_for(self, tenant_id: str, attempt_id: str) -> tuple[AttemptObservation, ...]:
+        self.get_attempt(tenant_id, attempt_id)
+        return tuple(AttemptObservation(row['id'], tenant_id, attempt_id, row['observation_kind'], row['response_digest'],
+            _dt(row['observed_at']), row['correlation_id']) for row in self.connection.execute(
+            'SELECT * FROM attempt_observations WHERE tenant_id=? AND attempt_id=? ORDER BY rowid', (tenant_id, attempt_id)))
 
     def save_approval_intent(self, intent: ApprovalIntent) -> None:
         self.connection.execute('INSERT INTO approval_intents VALUES (?,?,?,?,?,?)',
