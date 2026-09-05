@@ -196,9 +196,9 @@ class DevDashboardCollector:
                 "rate_limit_percent": None, "measured": False}}
 
     def _merge_records(self, item: dict[str, Any], records: list[tuple[datetime, str, dict[str, Any]]]) -> None:
-        for stamp, kind, payload in sorted(
-            records, key=lambda record: (record[0], record[1], json.dumps(record[2], sort_keys=True, default=str))
-        ):
+        # Stable ordering keeps the JSONL sequence when timestamps coincide.
+        # Sorting by event name can replay task_started after its messages.
+        for stamp, kind, payload in sorted(records, key=lambda record: record[0]):
             item["last_event_at"] = _iso(stamp)
             event = {"at": stamp.isoformat(), "type": kind}
             if kind == "task_started":
