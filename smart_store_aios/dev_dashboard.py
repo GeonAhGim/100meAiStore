@@ -112,9 +112,34 @@ class DevDashboardCollector:
             "agents": sessions,
             "cli_worker": cli_status,
             "repository": self._repository_state(),
+            "progress": self._development_progress(),
             "status_contract": {"running": "active recent session", "signal_lost": f"non-terminal session older than {STALE_AFTER_SECONDS}s",
                                 "execution_not_observed": "no matching CLI session", "usage_limited": "session terminal error/rate limit evidence"},
         }
+
+    def _development_progress(self) -> dict[str, Any]:
+        """Read explicit evidence-backed work state; do not infer it from activity."""
+        path = self.project_root / "docs" / "implementation" / "development-progress.json"
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+            items = value.get("items", [])
+            if not isinstance(items, list):
+                raise ValueError("items must be a list")
+        except (OSError, UnicodeError, ValueError, TypeError):
+            return {"available": False, "total": None, "completed": None, "in_progress": None,
+                    "pending": None, "blocked": None, "percent": None, "items": []}
+        allowed = {"completed", "in_progress", "pending", "blocked"}
+        safe_items = [{"id": _redact(x.get("id"), 20), "title": _redact(x.get("title"), 120),
+                       "status": x["status"], "evidence": _redact(x.get("evidence"), 180) or None}
+                      for x in items if isinstance(x, dict) and x.get("status") in allowed]
+        total = len(safe_items)
+        completed = sum(x["status"] == "completed" for x in safe_items)
+        return {"available": bool(total), "basis": _redact(value.get("basis"), 180),
+                "updated_at": value.get("updated_at"), "total": total, "completed": completed,
+                "in_progress": sum(x["status"] == "in_progress" for x in safe_items),
+                "pending": sum(x["status"] == "pending" for x in safe_items),
+                "blocked": sum(x["status"] == "blocked" for x in safe_items),
+                "percent": round(completed * 100 / total) if total else None, "items": safe_items}
 
     def _session_files(self) -> list[Path]:
         sessions_root = self.codex_home / "sessions"

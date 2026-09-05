@@ -17,6 +17,20 @@ def record(path: Path, payload: dict, stamp: str = "2026-09-05T03:50:00+00:00", 
 
 
 class DevDashboardCollectorTest(unittest.TestCase):
+    def test_progress_counts_only_completed_manifest_items(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            progress = root / "docs" / "implementation" / "development-progress.json"
+            progress.parent.mkdir(parents=True)
+            progress.write_text(json.dumps({"basis": "backlog", "items": [
+                {"id": "B01", "title": "done", "status": "completed"},
+                {"id": "B02", "title": "working", "status": "in_progress"},
+                {"id": "B03", "title": "later", "status": "pending"}
+            ]}), encoding="utf-8")
+            result = DevDashboardCollector(root, root / "codex").collect()["progress"]
+            self.assertEqual((3, 1, 1, 1, 33), (result["total"], result["completed"],
+                                                   result["in_progress"], result["pending"], result["percent"]))
+
     def test_exact_cwd_merge_classifies_app_pm_and_redacts_messages(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
