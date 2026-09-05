@@ -11,6 +11,7 @@ build-backend = "setuptools.build_meta"
 [project.scripts]
 store-aios = "smart_store_aios.cli:main"
 store-aios-dashboard = "smart_store_aios.dashboard:main"
+store-aios-dev-dashboard = "smart_store_aios.dev_dashboard:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -18,3 +19,6 @@ testpaths = ["tests"]
 [tool.setuptools.packages.find]
 include = ["packages*", "smart_store_aios*"]
 exclude = ["data*", "docs*", "tests*"]
+
+[tool.setuptools.package-data]
+smart_store_aios = ["*.html"]
