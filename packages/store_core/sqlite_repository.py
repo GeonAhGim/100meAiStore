@@ -12,6 +12,7 @@ from .domain import (
     Approval, ApprovalKind, ApprovalState, AuditEvent, Command, CommandState,
     AdapterCapability, AdapterCapabilityManifest, AgentState, AgentStatusSnapshot, InboxMessage, InboxState,
     Membership, OutboxEvent, OutboxState, Role, Tenant, User,
+    ApprovalIntent, ExecutionPreparation,
 )
 from .errors import ConflictError, NotFoundError, TenantBoundaryError
 
@@ -131,6 +132,21 @@ CREATE TABLE agent_status_snapshots(
  updated_at TEXT NOT NULL, PRIMARY KEY(tenant_id,agent_id),
  FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT);
 CREATE INDEX agent_status_tenant_updated ON agent_status_snapshots(tenant_id,updated_at);
+"""), (6, """
+CREATE TABLE approval_intents(
+ tenant_id TEXT NOT NULL, command_id TEXT NOT NULL, canonical_digest TEXT NOT NULL,
+ policy_version INTEGER NOT NULL CHECK(policy_version>0), target_version INTEGER NOT NULL CHECK(target_version>0),
+ created_at TEXT NOT NULL, PRIMARY KEY(tenant_id,command_id),
+ FOREIGN KEY(tenant_id,command_id) REFERENCES commands(tenant_id,id) ON DELETE RESTRICT);
+CREATE TABLE execution_preparations(
+ id TEXT NOT NULL UNIQUE, tenant_id TEXT NOT NULL, command_id TEXT NOT NULL, canonical_digest TEXT NOT NULL,
+ prepared_by TEXT NOT NULL, prepared_at TEXT NOT NULL, PRIMARY KEY(tenant_id,command_id),
+ FOREIGN KEY(tenant_id,command_id) REFERENCES approval_intents(tenant_id,command_id) ON DELETE RESTRICT,
+ FOREIGN KEY(tenant_id,prepared_by) REFERENCES memberships(tenant_id,user_id) ON DELETE RESTRICT);
+CREATE TRIGGER approval_intents_no_update BEFORE UPDATE ON approval_intents BEGIN SELECT RAISE(ABORT,'approval intents are immutable'); END;
+CREATE TRIGGER approval_intents_no_delete BEFORE DELETE ON approval_intents BEGIN SELECT RAISE(ABORT,'approval intents are immutable'); END;
+CREATE TRIGGER execution_preparations_no_update BEFORE UPDATE ON execution_preparations BEGIN SELECT RAISE(ABORT,'execution preparations are immutable'); END;
+CREATE TRIGGER execution_preparations_no_delete BEFORE DELETE ON execution_preparations BEGIN SELECT RAISE(ABORT,'execution preparations are immutable'); END;
 """))
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -197,6 +213,22 @@ class SQLiteRepository:
 
     def close(self) -> None:
         self.connection.close()
+
+    def save_approval_intent(self, intent: ApprovalIntent) -> None:
+        self.connection.execute('INSERT INTO approval_intents VALUES (?,?,?,?,?,?)',
+            (intent.tenant_id, intent.command_id, intent.canonical_digest, intent.policy_version, intent.target_version, intent.created_at.isoformat()))
+
+    def get_approval_intent(self, tenant_id: str, command_id: str) -> ApprovalIntent | None:
+        row = self.connection.execute('SELECT * FROM approval_intents WHERE tenant_id=? AND command_id=?', (tenant_id, command_id)).fetchone()
+        return ApprovalIntent(tenant_id, command_id, row['canonical_digest'], row['policy_version'], row['target_version'], _dt(row['created_at'])) if row else None
+
+    def save_execution_preparation(self, value: ExecutionPreparation) -> None:
+        self.connection.execute('INSERT INTO execution_preparations VALUES (?,?,?,?,?,?)',
+            (value.id, value.tenant_id, value.command_id, value.canonical_digest, value.prepared_by, value.prepared_at.isoformat()))
+
+    def get_execution_preparation(self, tenant_id: str, command_id: str) -> ExecutionPreparation | None:
+        row = self.connection.execute('SELECT * FROM execution_preparations WHERE tenant_id=? AND command_id=?', (tenant_id, command_id)).fetchone()
+        return ExecutionPreparation(row['id'], tenant_id, command_id, row['canonical_digest'], row['prepared_by'], _dt(row['prepared_at'])) if row else None
 
     def save_adapter_manifest(self, manifest: AdapterCapabilityManifest) -> None:
         self.connection.execute('''INSERT INTO adapter_capability_manifests VALUES (?,?,?,?,?,?,?)

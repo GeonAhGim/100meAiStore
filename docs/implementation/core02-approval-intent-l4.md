@@ -4,11 +4,13 @@ Implementation entry: after CORE-01 `f7d82ac`. This packet prepares an immutable
 
 ## Data and canonical representation
 
-Add SQLite migration 6; migrations 1–5 stay unchanged. `approval_intents` uses `(tenant_id, command_id)` as its primary key and a composite foreign key to commands. Columns: canonical_digest, policy_version, target_version, created_at. The digest covers kind, target_ref, the entire payload, the approval evidence list, policy_version and target_version. Amount/currency/supplier fields are therefore bound whenever present in the proposed payload. Validation of per-kind financial payload schema is a later ORDER/FINANCE contract, not implied by digest binding.
+Add SQLite migration 6; migrations 1–5 stay unchanged. `approval_intents` uses `(tenant_id, command_id)` as its primary key and a composite foreign key to commands. Columns: canonical_digest, policy_version, target_version, created_at. The digest covers kind, target_ref, the entire payload, the approval evidence list, expires_at, policy_version and target_version. Amount/currency/supplier fields are therefore bound whenever present in the proposed payload. Validation of per-kind financial payload schema is a later ORDER/FINANCE contract, not implied by digest binding.
 
 `execution_preparations` uses `(tenant_id, command_id)` as its primary key and references the intent with the same tenant. Columns: id (unique), canonical_digest, prepared_by, prepared_at. One logical command has at most one preparation; no actual SENT/SUCCESS status is introduced. CORE-03 will add execution attempts through a new migration and explicit state machine.
 
 Frozen domain objects: ApprovalIntent and ExecutionPreparation. Repositories return detached immutable values. Save intent inserts only; reusing a command with a different intent conflicts. Preparing twice returns the existing preparation only after all current authority and version checks pass.
+
+Canonicalization accepts JSON values only, finite numbers, and string dictionary keys; no fallback object stringification. Invalid payload/evidence fails before any write. Expiry is bound as an ISO timestamp string to prevent silent extension of approval lifetime.
 
 ## Service methods
 

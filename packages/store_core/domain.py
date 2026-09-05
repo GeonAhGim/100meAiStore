@@ -79,6 +79,26 @@ class ApprovalState(str, Enum):
 
 
 @dataclass(frozen=True)
+class ApprovalIntent:
+    tenant_id: str
+    command_id: str
+    canonical_digest: str
+    policy_version: int
+    target_version: int
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class ExecutionPreparation:
+    id: str
+    tenant_id: str
+    command_id: str
+    canonical_digest: str
+    prepared_by: str
+    prepared_at: datetime
+
+
+@dataclass(frozen=True)
 class TenantContext:
     tenant_id: str
     user_id: str

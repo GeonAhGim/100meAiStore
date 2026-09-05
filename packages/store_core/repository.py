@@ -9,7 +9,7 @@ from typing import Iterable
 
 from .domain import AgentStatusSnapshot, Approval, AuditEvent, Command, Membership, OutboxEvent, OutboxState, Tenant, User
 from .errors import ConflictError, NotFoundError, TenantBoundaryError
-from .domain import AdapterCapabilityManifest, InboxMessage, InboxState
+from .domain import AdapterCapabilityManifest, InboxMessage, InboxState, ApprovalIntent, ExecutionPreparation
 
 
 class InMemoryRepository:
@@ -34,6 +34,29 @@ class InMemoryRepository:
         self.inbox: dict[tuple[str, str], InboxMessage] = {}
         self.manifests: dict[tuple[str, str, str], AdapterCapabilityManifest] = {}
         self._lock = RLock()
+        self.approval_intents: dict[tuple[str, str], ApprovalIntent] = {}
+        self.execution_preparations: dict[tuple[str, str], ExecutionPreparation] = {}
+
+    def save_approval_intent(self, intent: ApprovalIntent) -> None:
+        self.get_command(intent.tenant_id, intent.command_id)
+        key = (intent.tenant_id, intent.command_id)
+        if key in self.approval_intents:
+            raise ConflictError('approval intent already exists')
+        self.approval_intents[key] = intent
+
+    def get_approval_intent(self, tenant_id: str, command_id: str) -> ApprovalIntent | None:
+        return self.approval_intents.get((tenant_id, command_id))
+
+    def save_execution_preparation(self, value: ExecutionPreparation) -> None:
+        key = (value.tenant_id, value.command_id)
+        if key not in self.approval_intents:
+            raise NotFoundError('approval intent not found')
+        if key in self.execution_preparations:
+            raise ConflictError('execution already prepared')
+        self.execution_preparations[key] = value
+
+    def get_execution_preparation(self, tenant_id: str, command_id: str) -> ExecutionPreparation | None:
+        return self.execution_preparations.get((tenant_id, command_id))
 
     @contextmanager
     def transaction(self):

@@ -30,7 +30,7 @@ from .domain import (
 from .errors import AuthorizationError, ConflictError, NotFoundError
 from .dashboard import DashboardProjection
 from .repository import InMemoryRepository
-from .domain import AdapterCapability, AdapterCapabilityManifest, InboxMessage, InboxState
+from .domain import AdapterCapability, AdapterCapabilityManifest, InboxMessage, InboxState, ApprovalIntent, ExecutionPreparation
 
 
 def _canonical(value: Any) -> str:
@@ -39,6 +39,26 @@ def _canonical(value: Any) -> str:
 
 def _digest(value: Any) -> str:
     return hashlib.sha256(_canonical(value).encode("utf-8")).hexdigest()
+
+
+def _strict_intent_digest(value: Any) -> str:
+    def validate(item: Any) -> None:
+        if isinstance(item, dict):
+            if any(type(key) is not str for key in item):
+                raise ValueError('intent keys must be strings')
+            for child in item.values():
+                validate(child)
+        elif isinstance(item, (list, tuple)):
+            for child in item:
+                validate(child)
+        elif item is not None and type(item) not in (str, int, float, bool):
+            raise TypeError('intent must contain JSON values')
+    try:
+        validate(value)
+        encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False)
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise ConflictError('intent must contain finite JSON values with string keys') from exc
+    return hashlib.sha256(encoded.encode('utf-8')).hexdigest()
 
 
 class StoreControlPlane:
@@ -132,6 +152,73 @@ class StoreControlPlane:
         """
         self._membership(context)
         return DashboardProjection(self.repo, project_root=project_root).snapshot(context, now=self._clock())
+
+    @staticmethod
+    def _intent_digest(command: Command, approval: Approval, policy_version: int, target_version: int) -> str:
+        return _strict_intent_digest({'kind': command.kind.value, 'target_ref': command.target_ref, 'payload': command.payload,
+            'evidence': approval.evidence, 'expires_at': approval.expires_at.isoformat(),
+            'policy_version': policy_version, 'target_version': target_version})
+
+    def _check_intent(self, command: Command, approval: Approval, intent: ApprovalIntent) -> None:
+        if self._intent_digest(command, approval, intent.policy_version, intent.target_version) != intent.canonical_digest:
+            raise ConflictError('approval intent changed; new approval required')
+
+    def request_approval(self, context: TenantContext, kind: ApprovalKind, target_ref: str,
+                         payload: Mapping[str, Any], idempotency_key: str, policy_version: int,
+                         target_version: int, evidence: Sequence[Mapping[str, Any]] = ()) -> tuple[Command, Approval]:
+        with self.repo.transaction():
+            if any(type(v) is not int or v < 1 for v in (policy_version, target_version)):
+                raise ConflictError('positive policy and target versions required')
+            _strict_intent_digest({'payload': payload, 'evidence': evidence, 'target_ref': target_ref})
+            command, approval = self.create_command(context, kind, target_ref, payload, idempotency_key, evidence)
+            # Include the newly supplied evidence on replay, not merely the stored evidence.
+            digest = _strict_intent_digest({'kind': kind.value, 'target_ref': target_ref, 'payload': payload,
+                'evidence': evidence, 'expires_at': approval.expires_at.isoformat(),
+                'policy_version': policy_version, 'target_version': target_version})
+            prior = self.repo.get_approval_intent(context.tenant_id, command.id)
+            if prior:
+                if prior.canonical_digest != digest:
+                    raise ConflictError('idempotent approval intent mismatch')
+                self._check_intent(command, approval, prior)
+            else:
+                if approval.state != ApprovalState.PENDING or self._intent_digest(command, approval, policy_version, target_version) != digest:
+                    raise ConflictError('cannot attach changed intent to existing approval')
+                self.repo.save_approval_intent(ApprovalIntent(context.tenant_id, command.id, digest, policy_version, target_version, self._clock()))
+            return command, approval
+
+    def prepare_execution(self, context: TenantContext, command_id: str, policy_version: int,
+                          target_version: int) -> tuple[ExecutionPreparation, bool]:
+        with self.repo.transaction():
+            self._membership(context)
+            command = self.repo.get_command(context.tenant_id, command_id)
+            capability = APPROVAL_CAPABILITY[command.kind]
+            self.require(context, capability)
+            approval = self.repo.get_approval_for_command(context.tenant_id, command_id)
+            intent = self.repo.get_approval_intent(context.tenant_id, command_id)
+            if intent is None:
+                raise ConflictError('immutable approval intent required')
+            if command.state != CommandState.APPROVED or approval.state != ApprovalState.APPROVED:
+                raise ConflictError('approval is not executable')
+            now = self._clock()
+            if now >= approval.expires_at:
+                raise ConflictError('approval expired')
+            if any(type(v) is not int or v < 1 for v in (policy_version, target_version)) or (policy_version, target_version) != (intent.policy_version, intent.target_version):
+                raise ConflictError('policy/target version changed; new approval required')
+            self._check_intent(command, approval, intent)
+            if not approval.decided_by:
+                raise ConflictError('approval has no deciding member')
+            approver = self.context_for(context.tenant_id, approval.decided_by)
+            self.require(approver, capability)
+            prior = self.repo.get_execution_preparation(context.tenant_id, command_id)
+            if prior:
+                return prior, True
+            result = ExecutionPreparation(str(uuid4()), context.tenant_id, command_id, intent.canonical_digest, context.user_id, now)
+            self.repo.save_execution_preparation(result)
+            self._audit(context.tenant_id, context.user_id, 'execution.prepared', command_id, 'accepted', {'intent_digest': intent.canonical_digest})
+            self.repo.append_outbox(OutboxEvent(str(uuid4()), context.tenant_id, 'execution.prepared', command_id,
+                {'command_id': command_id, 'preparation_id': result.id, 'intent_digest': intent.canonical_digest},
+                f'execution.prepared:{command_id}', OutboxState.PENDING, now))
+            return result, False
 
     def bootstrap_tenant(self, legal_name: str, master_email: str) -> TenantContext:
         with self.repo.transaction():
@@ -287,6 +374,9 @@ class StoreControlPlane:
         command = self.repo.get_command(context.tenant_id, command_id)
         approval = self.repo.get_approval_for_command(context.tenant_id, command_id)
         self.require(context, APPROVAL_CAPABILITY[command.kind])
+        intent = self.repo.get_approval_intent(context.tenant_id, command_id)
+        if intent is not None:
+            self._check_intent(command, approval, intent)
         if approval.state != ApprovalState.PENDING:
             raise ConflictError("approval is no longer pending")
         now = self._clock()
