@@ -107,7 +107,7 @@ class DevDashboardCollectorTest(unittest.TestCase):
                 server.server_close()
 
     def test_read_only_api_and_static_polling_contract(self):
-        self.assertIn("setInterval(load,10000)", INDEX_HTML)
+        self.assertIn("setInterval(load,15000)", INDEX_HTML)
         self.assertNotIn("if(busy||document.hidden)", INDEX_HTML)
         self.assertNotIn("tenant_id", INDEX_HTML)
         with tempfile.TemporaryDirectory() as temp:
