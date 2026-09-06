@@ -1,7 +1,13 @@
 {
-  "schema_version": 1,
-  "basis": "docs/architecture/11-adr-risks-backlog.md#implementation-backlog-dependency-ordered",
-  "updated_at": "2026-09-06T17:45:00+09:00",
+  "schema_version": 2,
+  "basis": "docs/implementation/live-phase2-backlog.md",
+  "updated_at": "2026-09-06",
+  "default_phase": "demo_foundation",
+  "phases": [
+    {"id":"demo_foundation","title":"DEMO 기반"},
+    {"id":"live_readiness","title":"Phase 2 · 실연동 준비"}
+  ],
+  "availability_note": "실제 판매채널 연결 미확인 · LIVE 미승인 · 진행률은 작업 패키지 수 기준",
   "items": [
     {"id":"B01","title":"테넌트·권한·세션·정책·감사","status":"completed","evidence":"docs/implementation/core01-evidence.md"},
     {"id":"B02","title":"상품 원본·표준·채널 투영 및 계보","status":"completed","evidence":"docs/implementation/b02-demo-catalog-l4.md"},
@@ -13,6 +19,18 @@
     {"id":"B08","title":"도구 게이트웨이·에이전트 원장·BYOK·예산 중단","status":"completed","evidence":"docs/implementation/b08-demo-gateway-l4.md"},
     {"id":"B09","title":"알림 대체 경로와 장애 확인","status":"completed","evidence":"docs/implementation/b09-demo-notifications-l4.md"},
     {"id":"B10","title":"중단·복구·백업·위협 테스트·비용 상한","status":"completed","evidence":"docs/implementation/b10-demo-safety-l4.md"},
-    {"id":"B11","title":"Discovery→Shadow→Assisted→Bounded 증거 패키지","status":"completed","evidence":"docs/implementation/b11-demo-evidence-package-l4.md"}
+    {"id":"B11","title":"Discovery→Shadow→Assisted→Bounded 증거 패키지","status":"completed","evidence":"docs/implementation/b11-demo-evidence-package-l4.md"},
+    {"id":"P2-01","phase":"live_readiness","title":"공식 계약 조사·전체 제품 백로그","status":"completed","evidence":"docs/implementation/live-phase2-backlog.md"},
+    {"id":"P2-02","phase":"live_readiness","title":"무자격증명 요청·오류 계약 테스트","status":"in_progress","evidence":"docs/implementation/live-phase2-backlog.md"},
+    {"id":"P2-03","phase":"live_readiness","title":"채널 주문 스키마·정규화·페이징","status":"pending","evidence":null},
+    {"id":"P2-04","phase":"live_readiness","title":"오프라인 인증·재시도·커서 검증","status":"pending","evidence":null},
+    {"id":"P2-05","phase":"live_readiness","title":"공급처 파일·수동 처리 계약","status":"pending","evidence":null},
+    {"id":"P2-06","phase":"live_readiness","title":"채널 정산·장부 매핑 검증","status":"pending","evidence":null},
+    {"id":"P2-07","phase":"live_readiness","title":"개인정보·보존·라이선스 검토 패키지","status":"pending","evidence":null},
+    {"id":"P2-08","phase":"live_readiness","title":"상품·재고·송장·클레임 오프라인 계약","status":"pending","evidence":null},
+    {"id":"P2-09","phase":"live_readiness","title":"운영 DB·인증·PWA·복구 준비","status":"pending","evidence":null},
+    {"id":"P2-10","phase":"live_readiness","title":"승인된 실제 채널·공급처 Discovery","status":"blocked","evidence":"docs/implementation/live-phase2-backlog.md","approval_gate":"G1/G2/G3"},
+    {"id":"P2-11","phase":"live_readiness","title":"승인된 읽기 전용 Shadow 운영","status":"blocked","evidence":"docs/implementation/live-phase2-backlog.md","approval_gate":"G1/G3/G5"},
+    {"id":"P2-12","phase":"live_readiness","title":"승인·범위 제한 실운영 검증","status":"blocked","evidence":"docs/implementation/live-phase2-backlog.md","approval_gate":"G4/G5"}
   ]
 }

@@ -17,6 +17,26 @@ def record(path: Path, payload: dict, stamp: str = "2026-09-05T03:50:00+00:00", 
 
 
 class DevDashboardCollectorTest(unittest.TestCase):
+    def test_phase_totals_keep_demo_completion_separate_from_product(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            manifest = root / "docs" / "implementation" / "development-progress.json"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text(json.dumps({
+                "default_phase": "demo", "phases": [
+                    {"id": "demo", "title": "DEMO"}, {"id": "live", "title": "LIVE readiness"}],
+                "availability_note": "Unverified channels",
+                "items": [{"id": "B01", "status": "completed"},
+                          {"id": "P2-01", "phase": "live", "status": "pending"},
+                          {"id": "P2-02", "phase": "live", "status": "blocked", "approval_gate": "G1"}]
+            }), encoding="utf-8")
+            progress = DevDashboardCollector(root, root / "codex").collect()["progress"]
+            self.assertEqual(33, progress["percent"])
+            self.assertEqual([100, 0], [x["percent"] for x in progress["phases"]])
+            self.assertEqual(1, progress["blocked"])
+            self.assertEqual("G1", progress["items"][-1]["approval_gate"])
+            self.assertEqual("Unverified channels", progress["availability_note"])
+
     def test_progress_counts_only_completed_manifest_items(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

@@ -130,11 +130,25 @@ class DevDashboardCollector:
                     "pending": None, "blocked": None, "percent": None, "items": []}
         allowed = {"completed", "in_progress", "pending", "blocked"}
         safe_items = [{"id": _redact(x.get("id"), 20), "title": _redact(x.get("title"), 120),
-                       "status": x["status"], "evidence": _redact(x.get("evidence"), 180) or None}
+                       "status": x["status"], "evidence": _redact(x.get("evidence"), 180) or None,
+                       "phase": _redact(x.get("phase", value.get("default_phase")), 40),
+                       "approval_gate": _redact(x.get("approval_gate"), 60) or None}
                       for x in items if isinstance(x, dict) and x.get("status") in allowed]
         total = len(safe_items)
         completed = sum(x["status"] == "completed" for x in safe_items)
+        phases = []
+        phase_definitions = value.get("phases", [])
+        for phase in phase_definitions if isinstance(phase_definitions, list) else []:
+            if not isinstance(phase, dict) or not isinstance(phase.get("id"), str):
+                continue
+            phase_id = _redact(phase["id"], 40)
+            members = [x for x in safe_items if x["phase"] == phase_id]
+            done = sum(x["status"] == "completed" for x in members)
+            phases.append({"id": phase_id, "title": _redact(phase.get("title"), 100),
+                           "total": len(members), "completed": done,
+                           "percent": round(done * 100 / len(members)) if members else None})
         return {"available": bool(total), "basis": _redact(value.get("basis"), 180),
+                "phases": phases, "availability_note": _redact(value.get("availability_note"), 200),
                 "updated_at": value.get("updated_at"), "total": total, "completed": completed,
                 "in_progress": sum(x["status"] == "in_progress" for x in safe_items),
                 "pending": sum(x["status"] == "pending" for x in safe_items),
