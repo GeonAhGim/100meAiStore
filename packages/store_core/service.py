@@ -314,6 +314,29 @@ class StoreControlPlane:
         self.require(context, Capability.TENANT_ADMIN)
         return self.repo.budget_entries_for(context.tenant_id)
 
+    def set_demo_notification_preference(self, context: TenantContext, notification_key: str,
+                                         channels: Sequence[str] = ("app_push", "email", "chatgpt"), muted: bool = False) -> Any:
+        from .notifications import set_demo_notification_preference
+        return set_demo_notification_preference(self, context, notification_key, channels, muted)
+
+    def notify_demo(self, context: TenantContext, notification_key: str, payload: Mapping[str, Any],
+                    idempotency_key: str, failed_channels: Sequence[str] = ()) -> dict[str, Any]:
+        from .notifications import notify_demo
+        return notify_demo(self, context, notification_key, payload, idempotency_key, failed_channels)
+
+    def acknowledge_demo_incident(self, context: TenantContext, incident_id: str, note: str,
+                                  idempotency_key: str) -> tuple[Any, bool]:
+        from .notifications import acknowledge_demo_incident
+        return acknowledge_demo_incident(self, context, incident_id, note, idempotency_key)
+
+    def notification_deliveries(self, context: TenantContext) -> tuple[Any, ...]:
+        self.require(context, Capability.TENANT_ADMIN)
+        return self.repo.notification_deliveries_for(context.tenant_id)
+
+    def incident_acknowledgements(self, context: TenantContext, incident_id: str) -> tuple[Any, ...]:
+        self.require(context, Capability.TENANT_ADMIN)
+        return self.repo.acknowledgements_for(context.tenant_id, incident_id)
+
     def dashboard_snapshot(self, context: TenantContext, *, project_root: str | None = None) -> dict[str, Any]:
         """Return a tenant-scoped, read-only dashboard projection.
 

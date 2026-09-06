@@ -19,6 +19,7 @@ from .domain import DemoSettlementBatch, DemoSettlementLine, DemoRealizedProfit,
 from .domain import DemoCatalogImport, DemoCatalogSnapshot, DemoCanonicalProduct, DemoProductLineage, DemoChannelOffer
 from .domain import DemoExecutionControl, ExecutionAttempt, AttemptObservation
 from .domain import DemoToolCommand, DemoAgentRun, DemoByokReference, DemoBudgetPolicy, DemoBudgetLedgerEntry
+from .domain import DemoNotificationPreference, DemoNotificationDelivery, DemoIncidentAcknowledgement
 
 
 class InMemoryRepository:
@@ -71,6 +72,37 @@ class InMemoryRepository:
         self.byok_references: dict[tuple[str, str], DemoByokReference] = {}
         self.budget_policies: dict[str, DemoBudgetPolicy] = {}
         self.budget_ledger: dict[tuple[str, str], DemoBudgetLedgerEntry] = {}
+        self.notification_preferences: dict[tuple[str, str], DemoNotificationPreference] = {}
+        self.notification_deliveries: dict[tuple[str, str], DemoNotificationDelivery] = {}
+        self.incident_acknowledgements: dict[tuple[str, str], DemoIncidentAcknowledgement] = {}
+
+    def save_notification_preference(self, value: DemoNotificationPreference) -> DemoNotificationPreference:
+        prior = self.notification_preferences.get((value.tenant_id, value.notification_key))
+        if prior and value.version != prior.version + 1: raise ConflictError("notification preference version conflict")
+        self.notification_preferences[(value.tenant_id, value.notification_key)] = deepcopy(value); return deepcopy(value)
+
+    def get_notification_preference(self, tenant_id: str, key: str) -> DemoNotificationPreference | None:
+        return deepcopy(self.notification_preferences.get((tenant_id, key)))
+
+    def save_notification_delivery(self, value: DemoNotificationDelivery) -> tuple[DemoNotificationDelivery, bool]:
+        prior = next((row for (tid, _), row in self.notification_deliveries.items() if tid == value.tenant_id and row.idempotency_key == value.idempotency_key), None)
+        if prior:
+            if prior.payload_json != value.payload_json: raise ConflictError("notification idempotency key reused")
+            return deepcopy(prior), True
+        self.notification_deliveries[(value.tenant_id, value.id)] = deepcopy(value); return deepcopy(value), False
+
+    def notification_deliveries_for(self, tenant_id: str) -> tuple[DemoNotificationDelivery, ...]:
+        return tuple(deepcopy(row) for (tid, _), row in self.notification_deliveries.items() if tid == tenant_id)
+
+    def save_incident_acknowledgement(self, value: DemoIncidentAcknowledgement) -> tuple[DemoIncidentAcknowledgement, bool]:
+        prior = next((row for (tid, _), row in self.incident_acknowledgements.items() if tid == value.tenant_id and row.idempotency_key == value.idempotency_key), None)
+        if prior:
+            if prior.incident_id != value.incident_id: raise ConflictError("acknowledgement idempotency key reused")
+            return deepcopy(prior), True
+        self.incident_acknowledgements[(value.tenant_id, value.id)] = deepcopy(value); return deepcopy(value), False
+
+    def acknowledgements_for(self, tenant_id: str, incident_id: str) -> tuple[DemoIncidentAcknowledgement, ...]:
+        return tuple(deepcopy(row) for (tid, _), row in self.incident_acknowledgements.items() if tid == tenant_id and row.incident_id == incident_id)
 
     def save_tool_command(self, value: DemoToolCommand) -> tuple[DemoToolCommand, bool]:
         prior = next((row for (tid, _), row in self.tool_commands.items() if tid == value.tenant_id and row.idempotency_key == value.idempotency_key), None)

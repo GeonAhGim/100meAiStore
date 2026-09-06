@@ -22,6 +22,7 @@ from .domain import (
     DemoSettlementBatch, DemoSettlementLine, DemoRealizedProfit, SettlementStatus,
     DemoCatalogImport, DemoCatalogSnapshot, DemoCanonicalProduct, DemoProductLineage, DemoChannelOffer,
     DemoToolCommand, DemoAgentRun, DemoByokReference, DemoBudgetPolicy, DemoBudgetLedgerEntry,
+    DemoNotificationPreference, DemoNotificationDelivery, DemoIncidentAcknowledgement,
 )
 from .errors import ConflictError, NotFoundError, TenantBoundaryError
 
@@ -340,6 +341,21 @@ CREATE TABLE demo_budget_ledger(
  occurred_at TEXT NOT NULL, idempotency_key TEXT NOT NULL, UNIQUE(tenant_id,id), UNIQUE(tenant_id,idempotency_key),
  FOREIGN KEY(tenant_id,run_id) REFERENCES demo_agent_runs(tenant_id,id) ON DELETE RESTRICT);
 CREATE INDEX demo_budget_ledger_tenant_time ON demo_budget_ledger(tenant_id,occurred_at);
+"""), (16, """
+CREATE TABLE demo_notification_preferences(
+ tenant_id TEXT NOT NULL, notification_key TEXT NOT NULL, channels_json TEXT NOT NULL,
+ muted INTEGER NOT NULL CHECK(muted IN (0,1)), version INTEGER NOT NULL CHECK(version>0),
+ PRIMARY KEY(tenant_id,notification_key), FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT);
+CREATE TABLE demo_notification_deliveries(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, notification_key TEXT NOT NULL, channel TEXT NOT NULL,
+ payload_json TEXT NOT NULL, state TEXT NOT NULL, attempt INTEGER NOT NULL CHECK(attempt>0), fallback_from TEXT,
+ idempotency_key TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(tenant_id,id), UNIQUE(tenant_id,idempotency_key),
+ FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT);
+CREATE TABLE demo_incident_acknowledgements(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, incident_id TEXT NOT NULL, acknowledged_by TEXT NOT NULL,
+ note TEXT NOT NULL, idempotency_key TEXT NOT NULL, acknowledged_at TEXT NOT NULL,
+ UNIQUE(tenant_id,id), UNIQUE(tenant_id,idempotency_key), FOREIGN KEY(tenant_id,acknowledged_by) REFERENCES memberships(tenant_id,user_id) ON DELETE RESTRICT);
+CREATE INDEX demo_notification_deliveries_tenant_time ON demo_notification_deliveries(tenant_id,created_at);
 """))
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -981,6 +997,46 @@ class SQLiteRepository:
         if foreign_keys:
             raise ConflictError("sqlite foreign key check failed")
         return {"ready": True, "schema_version": actual, "integrity": integrity}
+
+    def save_notification_preference(self, value: DemoNotificationPreference) -> DemoNotificationPreference:
+        row = self.connection.execute("SELECT * FROM demo_notification_preferences WHERE tenant_id=? AND notification_key=?", (value.tenant_id, value.notification_key)).fetchone()
+        if row and value.version != row['version'] + 1: raise ConflictError('notification preference version conflict')
+        self.connection.execute("INSERT INTO demo_notification_preferences VALUES (?,?,?,?,?) ON CONFLICT(tenant_id,notification_key) DO UPDATE SET channels_json=excluded.channels_json,muted=excluded.muted,version=excluded.version", (value.tenant_id, value.notification_key, json.dumps(value.channels), int(value.muted), value.version))
+        return value
+
+    def get_notification_preference(self, tenant_id: str, key: str) -> DemoNotificationPreference | None:
+        row = self.connection.execute("SELECT * FROM demo_notification_preferences WHERE tenant_id=? AND notification_key=?", (tenant_id, key)).fetchone()
+        return DemoNotificationPreference(row['tenant_id'], row['notification_key'], tuple(json.loads(row['channels_json'])), bool(row['muted']), row['version']) if row else None
+
+    @staticmethod
+    def _notification_delivery(row: sqlite3.Row) -> DemoNotificationDelivery:
+        return DemoNotificationDelivery(row['id'], row['tenant_id'], row['notification_key'], row['channel'], row['payload_json'], row['state'], row['attempt'], row['fallback_from'], row['idempotency_key'], _dt(row['created_at']))
+
+    def save_notification_delivery(self, value: DemoNotificationDelivery) -> tuple[DemoNotificationDelivery, bool]:
+        row = self.connection.execute("SELECT * FROM demo_notification_deliveries WHERE tenant_id=? AND idempotency_key=?", (value.tenant_id, value.idempotency_key)).fetchone()
+        if row:
+            prior = self._notification_delivery(row)
+            if prior.payload_json != value.payload_json: raise ConflictError('notification idempotency key reused')
+            return prior, True
+        try: self.connection.execute("INSERT INTO demo_notification_deliveries VALUES (?,?,?,?,?,?,?,?,?,?)", (value.id, value.tenant_id, value.notification_key, value.channel, value.payload_json, value.state, value.attempt, value.fallback_from, value.idempotency_key, value.created_at.isoformat()))
+        except sqlite3.IntegrityError as exc: raise ConflictError('notification delivery already exists') from exc
+        return value, False
+
+    def notification_deliveries_for(self, tenant_id: str) -> tuple[DemoNotificationDelivery, ...]:
+        return tuple(self._notification_delivery(row) for row in self.connection.execute("SELECT * FROM demo_notification_deliveries WHERE tenant_id=? ORDER BY created_at,id", (tenant_id,)))
+
+    def save_incident_acknowledgement(self, value: DemoIncidentAcknowledgement) -> tuple[DemoIncidentAcknowledgement, bool]:
+        row = self.connection.execute("SELECT * FROM demo_incident_acknowledgements WHERE tenant_id=? AND idempotency_key=?", (value.tenant_id, value.idempotency_key)).fetchone()
+        if row:
+            prior = DemoIncidentAcknowledgement(row['id'], row['tenant_id'], row['incident_id'], row['acknowledged_by'], row['note'], row['idempotency_key'], _dt(row['acknowledged_at']))
+            if prior.incident_id != value.incident_id: raise ConflictError('acknowledgement idempotency key reused')
+            return prior, True
+        try: self.connection.execute("INSERT INTO demo_incident_acknowledgements VALUES (?,?,?,?,?,?,?)", (value.id, value.tenant_id, value.incident_id, value.acknowledged_by, value.note, value.idempotency_key, value.acknowledged_at.isoformat()))
+        except sqlite3.IntegrityError as exc: raise ConflictError('incident acknowledgement already exists') from exc
+        return value, False
+
+    def acknowledgements_for(self, tenant_id: str, incident_id: str) -> tuple[DemoIncidentAcknowledgement, ...]:
+        return tuple(DemoIncidentAcknowledgement(row['id'], row['tenant_id'], row['incident_id'], row['acknowledged_by'], row['note'], row['idempotency_key'], _dt(row['acknowledged_at'])) for row in self.connection.execute("SELECT * FROM demo_incident_acknowledgements WHERE tenant_id=? AND incident_id=? ORDER BY acknowledged_at,id", (tenant_id, incident_id)))
 
     @staticmethod
     def _tool_command(row: sqlite3.Row) -> DemoToolCommand:

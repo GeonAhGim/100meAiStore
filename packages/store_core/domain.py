@@ -614,6 +614,40 @@ class DemoBudgetLedgerEntry:
 
 
 @dataclass
+class DemoNotificationPreference:
+    tenant_id: str
+    notification_key: str
+    channels: tuple[str, ...]
+    muted: bool
+    version: int = 1
+
+
+@dataclass
+class DemoNotificationDelivery:
+    id: str
+    tenant_id: str
+    notification_key: str
+    channel: str
+    payload_json: str
+    state: str
+    attempt: int
+    fallback_from: str | None
+    idempotency_key: str
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class DemoIncidentAcknowledgement:
+    id: str
+    tenant_id: str
+    incident_id: str
+    acknowledged_by: str
+    note: str
+    idempotency_key: str
+    acknowledged_at: datetime
+
+
+@dataclass
 class RoutingDecision:
     id: str
     tenant_id: str
