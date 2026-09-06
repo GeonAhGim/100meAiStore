@@ -102,6 +102,7 @@ class DevDashboardCollectorTest(unittest.TestCase):
             server = DevDashboardServer(("127.0.0.1", 0), temp, Path(temp) / "codex")
             try:
                 self.assertIs(server.collector_factory(), server.collector_factory())
+                self.assertEqual(server.collect_snapshot()["source"]["llm_calls"], 0)
             finally:
                 server.server_close()
 

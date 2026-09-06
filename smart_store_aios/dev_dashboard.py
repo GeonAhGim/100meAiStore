@@ -11,6 +11,7 @@ import copy
 import json
 import re
 import subprocess
+import threading
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -20,6 +21,7 @@ from urllib.parse import urlparse
 
 DEFAULT_CODEX_HOME = Path.home() / ".codex"
 STALE_AFTER_SECONDS = 180
+SESSION_TAIL_BYTES = 2 * 1024 * 1024
 PROJECT = r"C:\smart_store"
 _EMAIL = re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b")
 _SECRET = re.compile(r"(?i)(api[_-]?key|authorization|bearer|password|secret|token)(\s*[:=]\s*)[^\s,;]+")
@@ -203,11 +205,17 @@ class DevDashboardCollector:
     def _read_records(path: Path) -> list[tuple[datetime, str, dict[str, Any]]]:
         records: list[tuple[datetime, str, dict[str, Any]]] = []
         try:
-            with path.open(encoding="utf-8") as stream:
-                for raw in stream:
+            with path.open("rb") as stream:
+                size = stream.seek(0, 2)
+                offset = max(0, size - SESSION_TAIL_BYTES)
+                stream.seek(offset)
+                if offset:
+                    stream.readline()  # discard a partial JSONL record
+                for raw_bytes in stream:
                     try:
+                        raw = raw_bytes.decode("utf-8")
                         record = json.loads(raw)
-                    except (TypeError, ValueError):
+                    except (TypeError, ValueError, UnicodeError):
                         continue
                     payload = record.get("payload") or {}
                     stamp = _timestamp(record.get("timestamp"))
@@ -370,8 +378,7 @@ class DevDashboardHandler(BaseHTTPRequestHandler):
                 body = INDEX_HTML.encode()
             self._send(200, "text/html; charset=utf-8", body)
         elif parsed.path == "/api/dev-dashboard":
-            collector = self.server.collector_factory()  # type: ignore[attr-defined]
-            self._send_json(200, collector.collect())
+            self._send_json(200, self.server.collect_snapshot())  # type: ignore[attr-defined]
         else:
             self._send_json(404, {"error": "not_found"})
 
@@ -393,10 +400,15 @@ class DevDashboardServer(ThreadingHTTPServer):
     def __init__(self, address: tuple[str, int], project_root: str | Path, codex_home: str | Path | None = None) -> None:
         super().__init__(address, DevDashboardHandler)
         self.collector = DevDashboardCollector(project_root, codex_home)
+        self.collect_lock = threading.Lock()
         def collector_factory() -> DevDashboardCollector:
             self.collector.now = datetime.now(timezone.utc)
             return self.collector
         self.collector_factory = collector_factory
+
+    def collect_snapshot(self) -> dict[str, Any]:
+        with self.collect_lock:
+            return self.collector_factory().collect()
 
 
 def main() -> None:
