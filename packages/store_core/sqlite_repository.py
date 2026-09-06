@@ -15,6 +15,8 @@ from .domain import (
     ApprovalIntent, ExecutionPreparation,
     DemoExecutionControl, ExecutionAttempt, AttemptObservation, AttemptState,
     NormalizedInboundPayload, AdapterPollCheckpoint,
+    ChannelOrder, OrderLine, RoutingDecision, SupplierPurchaseOrder, PurchaseLine,
+    ChannelOrderState, RoutingState, PurchaseOrderState,
 )
 from .errors import ConflictError, NotFoundError, TenantBoundaryError
 
@@ -189,6 +191,38 @@ CREATE TABLE adapter_poll_checkpoints(
  PRIMARY KEY(tenant_id,provider,connection_id),
  FOREIGN KEY(tenant_id,provider,connection_id) REFERENCES adapter_capability_manifests(tenant_id,provider,connection_id) ON DELETE RESTRICT);
 CREATE INDEX poll_checkpoints_tenant_updated ON adapter_poll_checkpoints(tenant_id,updated_at);
+"""), (9, """
+CREATE TABLE channel_orders(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, channel_id TEXT NOT NULL, external_order_key TEXT NOT NULL,
+ payload_ref TEXT NOT NULL, currency TEXT NOT NULL, total_minor INTEGER NOT NULL CHECK(total_minor>=0),
+ status TEXT NOT NULL, received_at TEXT NOT NULL, idempotency_key TEXT NOT NULL, version INTEGER NOT NULL CHECK(version>0),
+ UNIQUE(tenant_id,id), UNIQUE(tenant_id,channel_id,external_order_key), UNIQUE(tenant_id,idempotency_key),
+ FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT,
+ FOREIGN KEY(tenant_id,payload_ref) REFERENCES normalized_inbound_payloads(tenant_id,immutable_ref) ON DELETE RESTRICT);
+CREATE INDEX channel_orders_tenant_status ON channel_orders(tenant_id,status,received_at);
+CREATE TABLE order_lines(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, channel_order_id TEXT NOT NULL, sku TEXT NOT NULL,
+ quantity INTEGER NOT NULL CHECK(quantity>0), unit_minor INTEGER NOT NULL CHECK(unit_minor>=0),
+ routed_status TEXT NOT NULL, version INTEGER NOT NULL CHECK(version>0), UNIQUE(tenant_id,id),
+ FOREIGN KEY(tenant_id,channel_order_id) REFERENCES channel_orders(tenant_id,id) ON DELETE RESTRICT);
+CREATE TABLE routing_decisions(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, order_line_id TEXT NOT NULL, supplier_id TEXT NOT NULL,
+ quantity INTEGER NOT NULL CHECK(quantity>0), unit_cost_minor INTEGER NOT NULL CHECK(unit_cost_minor>=0),
+ reason TEXT NOT NULL, status TEXT NOT NULL, UNIQUE(tenant_id,order_line_id),
+ FOREIGN KEY(tenant_id,order_line_id) REFERENCES order_lines(tenant_id,id) ON DELETE RESTRICT);
+CREATE TABLE supplier_purchase_orders(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, channel_order_id TEXT NOT NULL, supplier_id TEXT NOT NULL,
+ status TEXT NOT NULL, idempotency_key TEXT NOT NULL, approval_command_id TEXT, created_at TEXT NOT NULL,
+ version INTEGER NOT NULL CHECK(version>0), UNIQUE(tenant_id,id), UNIQUE(tenant_id,channel_order_id,supplier_id), UNIQUE(tenant_id,idempotency_key),
+ FOREIGN KEY(tenant_id,channel_order_id) REFERENCES channel_orders(tenant_id,id) ON DELETE RESTRICT,
+ FOREIGN KEY(tenant_id,approval_command_id) REFERENCES commands(tenant_id,id) ON DELETE RESTRICT);
+CREATE TABLE purchase_lines(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, purchase_order_id TEXT NOT NULL, order_line_id TEXT NOT NULL,
+ quantity INTEGER NOT NULL CHECK(quantity>0), unit_cost_minor INTEGER NOT NULL CHECK(unit_cost_minor>=0),
+ UNIQUE(tenant_id,purchase_order_id,order_line_id),
+ FOREIGN KEY(tenant_id,purchase_order_id) REFERENCES supplier_purchase_orders(tenant_id,id) ON DELETE RESTRICT,
+ FOREIGN KEY(tenant_id,order_line_id) REFERENCES order_lines(tenant_id,id) ON DELETE RESTRICT);
+CREATE INDEX purchase_orders_tenant_status ON supplier_purchase_orders(tenant_id,status,created_at);
 """))
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -466,6 +500,107 @@ class SQLiteRepository:
             if changed != 1:
                 raise ConflictError('adapter poll checkpoint version conflict')
         return value
+
+    @staticmethod
+    def _channel_order(row: sqlite3.Row) -> ChannelOrder:
+        return ChannelOrder(row['id'], row['tenant_id'], row['channel_id'], row['external_order_key'], row['payload_ref'],
+            row['currency'], row['total_minor'], ChannelOrderState(row['status']), _dt(row['received_at']),
+            row['idempotency_key'], row['version'])
+
+    def save_channel_order(self, value: ChannelOrder) -> tuple[ChannelOrder, bool]:
+        row = self.connection.execute(
+            "SELECT * FROM channel_orders WHERE tenant_id=? AND (id=? OR (channel_id=? AND external_order_key=?))",
+            (value.tenant_id, value.id, value.channel_id, value.external_order_key)).fetchone()
+        if row:
+            prior = self._channel_order(row)
+            if (prior.channel_id, prior.external_order_key, prior.payload_ref, prior.total_minor, prior.currency) != (value.channel_id, value.external_order_key, value.payload_ref, value.total_minor, value.currency):
+                raise ConflictError('order identity reused with different content')
+            return prior, True
+        try:
+            self.connection.execute("INSERT INTO channel_orders VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (value.id, value.tenant_id, value.channel_id, value.external_order_key, value.payload_ref,
+                 value.currency, value.total_minor, value.status.value, value.received_at.isoformat(), value.idempotency_key, value.version))
+        except sqlite3.IntegrityError as exc:
+            raise ConflictError('order idempotency key already exists') from exc
+        return value, False
+
+    def get_channel_order(self, tenant_id: str, order_id: str) -> ChannelOrder:
+        row = self.connection.execute("SELECT * FROM channel_orders WHERE tenant_id=? AND id=?", (tenant_id, order_id)).fetchone()
+        if row is None: raise NotFoundError('order not found')
+        return self._channel_order(row)
+
+    def update_channel_order(self, value: ChannelOrder, expected_version: int) -> None:
+        if value.version != expected_version + 1: raise ConflictError('order version conflict')
+        changed = self.connection.execute("UPDATE channel_orders SET status=?,version=? WHERE tenant_id=? AND id=? AND version=?",
+            (value.status.value, value.version, value.tenant_id, value.id, expected_version)).rowcount
+        if changed != 1: raise ConflictError('order version conflict')
+
+    def save_order_line(self, value: OrderLine) -> None:
+        self.connection.execute("INSERT INTO order_lines VALUES (?,?,?,?,?,?,?,?)",
+            (value.id, value.tenant_id, value.channel_order_id, value.sku, value.quantity, value.unit_minor, value.routed_status, value.version))
+
+    def update_order_line(self, value: OrderLine, expected_version: int) -> None:
+        if value.version != expected_version + 1: raise ConflictError('order line version conflict')
+        changed = self.connection.execute("UPDATE order_lines SET routed_status=?,version=? WHERE tenant_id=? AND id=? AND version=?",
+            (value.routed_status, value.version, value.tenant_id, value.id, expected_version)).rowcount
+        if changed != 1: raise ConflictError('order line version conflict')
+
+    @staticmethod
+    def _order_line(row: sqlite3.Row) -> OrderLine:
+        return OrderLine(row['id'], row['tenant_id'], row['channel_order_id'], row['sku'], row['quantity'], row['unit_minor'], row['routed_status'], row['version'])
+
+    def order_lines_for(self, tenant_id: str, order_id: str) -> tuple[OrderLine, ...]:
+        self.get_channel_order(tenant_id, order_id)
+        return tuple(self._order_line(row) for row in self.connection.execute(
+            "SELECT * FROM order_lines WHERE tenant_id=? AND channel_order_id=? ORDER BY rowid", (tenant_id, order_id)))
+
+    def save_routing_decision(self, value: RoutingDecision) -> None:
+        try:
+            self.connection.execute("INSERT INTO routing_decisions VALUES (?,?,?,?,?,?,?,?)",
+                (value.id, value.tenant_id, value.order_line_id, value.supplier_id, value.quantity,
+                 value.unit_cost_minor, value.reason, value.status.value))
+        except sqlite3.IntegrityError as exc:
+            raise ConflictError('routing decision already exists') from exc
+
+    @staticmethod
+    def _routing(row: sqlite3.Row) -> RoutingDecision:
+        return RoutingDecision(row['id'], row['tenant_id'], row['order_line_id'], row['supplier_id'], row['quantity'], row['unit_cost_minor'], row['reason'], RoutingState(row['status']))
+
+    def routing_for(self, tenant_id: str, order_id: str) -> tuple[RoutingDecision, ...]:
+        return tuple(self._routing(row) for row in self.connection.execute(
+            "SELECT r.* FROM routing_decisions r JOIN order_lines l ON l.tenant_id=r.tenant_id AND l.id=r.order_line_id WHERE r.tenant_id=? AND l.channel_order_id=? ORDER BY r.rowid", (tenant_id, order_id)))
+
+    @staticmethod
+    def _purchase_order(row: sqlite3.Row) -> SupplierPurchaseOrder:
+        return SupplierPurchaseOrder(row['id'], row['tenant_id'], row['channel_order_id'], row['supplier_id'], PurchaseOrderState(row['status']), row['idempotency_key'], row['approval_command_id'], _dt(row['created_at']), row['version'])
+
+    def save_purchase_order(self, value: SupplierPurchaseOrder) -> tuple[SupplierPurchaseOrder, bool]:
+        row = self.connection.execute("SELECT * FROM supplier_purchase_orders WHERE tenant_id=? AND idempotency_key=?", (value.tenant_id, value.idempotency_key)).fetchone()
+        if row:
+            prior = self._purchase_order(row)
+            if (prior.channel_order_id, prior.supplier_id) != (value.channel_order_id, value.supplier_id):
+                raise ConflictError('purchase idempotency key reused')
+            return prior, True
+        try:
+            self.connection.execute("INSERT INTO supplier_purchase_orders VALUES (?,?,?,?,?,?,?,?,?)",
+                (value.id, value.tenant_id, value.channel_order_id, value.supplier_id, value.status.value,
+                 value.idempotency_key, value.approval_command_id, value.created_at.isoformat(), value.version))
+        except sqlite3.IntegrityError as exc:
+            raise ConflictError('purchase order already exists') from exc
+        return value, False
+
+    def save_purchase_line(self, value: PurchaseLine) -> None:
+        self.connection.execute("INSERT INTO purchase_lines VALUES (?,?,?,?,?,?)",
+            (value.id, value.tenant_id, value.purchase_order_id, value.order_line_id, value.quantity, value.unit_cost_minor))
+
+    def purchase_orders_for(self, tenant_id: str, order_id: str) -> tuple[SupplierPurchaseOrder, ...]:
+        self.get_channel_order(tenant_id, order_id)
+        return tuple(self._purchase_order(row) for row in self.connection.execute(
+            "SELECT * FROM supplier_purchase_orders WHERE tenant_id=? AND channel_order_id=? ORDER BY rowid", (tenant_id, order_id)))
+
+    def purchase_lines_for(self, tenant_id: str, po_id: str) -> tuple[PurchaseLine, ...]:
+        return tuple(PurchaseLine(row['id'], row['tenant_id'], row['purchase_order_id'], row['order_line_id'], row['quantity'], row['unit_cost_minor']) for row in self.connection.execute(
+            "SELECT * FROM purchase_lines WHERE tenant_id=? AND purchase_order_id=? ORDER BY rowid", (tenant_id, po_id)))
 
     def _migrate(self) -> None:
         versions = [version for version, _ in MIGRATIONS]

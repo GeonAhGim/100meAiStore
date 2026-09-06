@@ -11,6 +11,8 @@ from .domain import AgentStatusSnapshot, Approval, AuditEvent, Command, Membersh
 from .errors import ConflictError, NotFoundError, TenantBoundaryError
 from .domain import (AdapterCapabilityManifest, InboxMessage, InboxState, ApprovalIntent,
                      ExecutionPreparation, NormalizedInboundPayload, AdapterPollCheckpoint)
+from .domain import (ChannelOrder, OrderLine, RoutingDecision, SupplierPurchaseOrder, PurchaseLine,
+                     ChannelOrderState, RoutingState, PurchaseOrderState)
 from .domain import DemoExecutionControl, ExecutionAttempt, AttemptObservation
 
 
@@ -43,6 +45,11 @@ class InMemoryRepository:
         self.observations: dict[tuple[str, str], list[AttemptObservation]] = defaultdict(list)
         self.normalized_payloads: dict[tuple[str, str], NormalizedInboundPayload] = {}
         self.poll_checkpoints: dict[tuple[str, str, str], AdapterPollCheckpoint] = {}
+        self.channel_orders: dict[tuple[str, str], ChannelOrder] = {}
+        self.order_lines: dict[tuple[str, str], OrderLine] = {}
+        self.routing_decisions: dict[tuple[str, str], RoutingDecision] = {}
+        self.purchase_orders: dict[tuple[str, str], SupplierPurchaseOrder] = {}
+        self.purchase_lines: dict[tuple[str, str], PurchaseLine] = {}
 
     def save_demo_control(self, value: DemoExecutionControl) -> None:
         self.get_command(value.tenant_id, value.command_id)
@@ -204,6 +211,78 @@ class InMemoryRepository:
             raise ConflictError("adapter poll checkpoint version conflict")
         self.poll_checkpoints[key] = deepcopy(value)
         return deepcopy(value)
+
+    def save_channel_order(self, value: ChannelOrder) -> tuple[ChannelOrder, bool]:
+        key = (value.tenant_id, value.id)
+        prior = self.channel_orders.get(key)
+        existing = next((row for (tenant, _), row in self.channel_orders.items()
+                         if tenant == value.tenant_id and row.channel_id == value.channel_id
+                         and row.external_order_key == value.external_order_key), None)
+        if prior or existing:
+            prior = prior or existing
+            if (prior.channel_id, prior.external_order_key, prior.payload_ref, prior.total_minor, prior.currency) != (value.channel_id, value.external_order_key, value.payload_ref, value.total_minor, value.currency):
+                raise ConflictError("order identity reused with different content")
+            return deepcopy(prior), True
+        self.channel_orders[key] = deepcopy(value)
+        return deepcopy(value), False
+
+    def get_channel_order(self, tenant_id: str, order_id: str) -> ChannelOrder:
+        try: return deepcopy(self.channel_orders[(tenant_id, order_id)])
+        except KeyError as exc: raise NotFoundError("order not found") from exc
+
+    def update_channel_order(self, value: ChannelOrder, expected_version: int) -> None:
+        current = self.get_channel_order(value.tenant_id, value.id)
+        if current.version != expected_version or value.version != expected_version + 1: raise ConflictError("order version conflict")
+        self.channel_orders[(value.tenant_id, value.id)] = deepcopy(value)
+
+    def save_order_line(self, value: OrderLine) -> None:
+        self.order_lines[(value.tenant_id, value.id)] = deepcopy(value)
+
+    def update_order_line(self, value: OrderLine, expected_version: int) -> None:
+        current = next((v for (tid, _), v in self.order_lines.items() if tid == value.tenant_id and v.id == value.id), None)
+        if current is None: raise NotFoundError("order line not found")
+        if current.version != expected_version or value.version != expected_version + 1: raise ConflictError("order line version conflict")
+        self.order_lines[(value.tenant_id, value.id)] = deepcopy(value)
+
+    def order_lines_for(self, tenant_id: str, order_id: str) -> tuple[OrderLine, ...]:
+        self.get_channel_order(tenant_id, order_id)
+        return tuple(deepcopy(row) for (tid, _), row in self.order_lines.items()
+                     if tid == tenant_id and row.channel_order_id == order_id)
+
+    def save_routing_decision(self, value: RoutingDecision) -> None:
+        key = (value.tenant_id, value.order_line_id)
+        prior = self.routing_decisions.get(key)
+        if prior and prior != value: raise ConflictError("routing decision already exists")
+        self.routing_decisions[key] = deepcopy(value)
+
+    def routing_for(self, tenant_id: str, order_id: str) -> tuple[RoutingDecision, ...]:
+        lines = {line.id for line in self.order_lines_for(tenant_id, order_id)}
+        return tuple(deepcopy(row) for (tid, line_id), row in self.routing_decisions.items()
+                     if tid == tenant_id and line_id in lines)
+
+    def save_purchase_order(self, value: SupplierPurchaseOrder) -> tuple[SupplierPurchaseOrder, bool]:
+        existing = next((row for (tid, _), row in self.purchase_orders.items()
+                         if tid == value.tenant_id and row.idempotency_key == value.idempotency_key), None)
+        if existing:
+            if (existing.channel_order_id, existing.supplier_id) != (value.channel_order_id, value.supplier_id):
+                raise ConflictError("purchase idempotency key reused")
+            return deepcopy(existing), True
+        key = (value.tenant_id, value.id)
+        if key in self.purchase_orders: raise ConflictError("purchase order already exists")
+        self.purchase_orders[key] = deepcopy(value)
+        return deepcopy(value), False
+
+    def save_purchase_line(self, value: PurchaseLine) -> None:
+        self.purchase_lines[(value.tenant_id, value.id)] = deepcopy(value)
+
+    def purchase_orders_for(self, tenant_id: str, order_id: str) -> tuple[SupplierPurchaseOrder, ...]:
+        self.get_channel_order(tenant_id, order_id)
+        return tuple(deepcopy(row) for (tid, _), row in self.purchase_orders.items()
+                     if tid == tenant_id and row.channel_order_id == order_id)
+
+    def purchase_lines_for(self, tenant_id: str, po_id: str) -> tuple[PurchaseLine, ...]:
+        return tuple(deepcopy(row) for (tid, _), row in self.purchase_lines.items()
+                     if tid == tenant_id and row.purchase_order_id == po_id)
 
     def add_tenant(self, tenant: Tenant) -> None:
         self.tenants[tenant.id] = tenant

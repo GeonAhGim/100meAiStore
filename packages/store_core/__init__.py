@@ -18,6 +18,7 @@ from .ingestion import (
     normalize_demo_order, validate_demo_page,
 )
 from .domain import AdapterCapability, AdapterCapabilityManifest, DemoPage
+from .orders import ingest_order, propose_routing
 
 __all__ = [
     "ApprovalKind",
@@ -42,6 +43,8 @@ __all__ = [
     "AdapterCapability",
     "AdapterCapabilityManifest",
     "DemoPage",
+    "ingest_order",
+    "propose_routing",
     "normalize_demo_order",
     "validate_demo_page",
 ]

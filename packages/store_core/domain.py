@@ -327,6 +327,94 @@ class AdapterPollCheckpoint:
     last_success_at: datetime | None = None
 
 
+class ChannelOrderState(str, Enum):
+    RECEIVED = "received"
+    ACCEPTED = "accepted"
+    DUPLICATE = "duplicate"
+    ROUTING = "routing"
+    PO_PENDING = "po_pending"
+    EXCEPTION = "exception"
+    CANCELLED = "cancelled"
+
+
+class RoutingState(str, Enum):
+    PROPOSED = "proposed"
+    ACCEPTED = "accepted"
+    EXCEPTION = "exception"
+
+
+class PurchaseOrderState(str, Enum):
+    DRAFT = "draft"
+    APPROVAL_PENDING = "approval_pending"
+    APPROVED = "approved"
+    SUBMITTED = "submitted"
+    ACKNOWLEDGED = "acknowledged"
+    CANCEL_REQUESTED = "cancel_requested"
+    CANCELLED = "cancelled"
+
+
+@dataclass
+class ChannelOrder:
+    id: str
+    tenant_id: str
+    channel_id: str
+    external_order_key: str
+    payload_ref: str
+    currency: str
+    total_minor: int
+    status: ChannelOrderState
+    received_at: datetime
+    idempotency_key: str
+    version: int = 1
+
+
+@dataclass
+class OrderLine:
+    id: str
+    tenant_id: str
+    channel_order_id: str
+    sku: str
+    quantity: int
+    unit_minor: int
+    routed_status: str = "unrouted"
+    version: int = 1
+
+
+@dataclass
+class RoutingDecision:
+    id: str
+    tenant_id: str
+    order_line_id: str
+    supplier_id: str
+    quantity: int
+    unit_cost_minor: int
+    reason: str
+    status: RoutingState = RoutingState.PROPOSED
+
+
+@dataclass
+class SupplierPurchaseOrder:
+    id: str
+    tenant_id: str
+    channel_order_id: str
+    supplier_id: str
+    status: PurchaseOrderState
+    idempotency_key: str
+    approval_command_id: str | None
+    created_at: datetime
+    version: int = 1
+
+
+@dataclass
+class PurchaseLine:
+    id: str
+    tenant_id: str
+    purchase_order_id: str
+    order_line_id: str
+    quantity: int
+    unit_cost_minor: int
+
+
 class AttemptState(str, Enum):
     PREPARED = 'prepared'
     DISPATCHING = 'dispatching'

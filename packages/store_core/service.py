@@ -165,6 +165,28 @@ class StoreControlPlane:
         self.require(context, Capability.TENANT_ADMIN)
         return self.repo.get_poll_checkpoint(context.tenant_id, provider, connection_id)
 
+    def ingest_order(self, context: TenantContext, channel_id: str, payload_ref: str,
+                     idempotency_key: str | None = None) -> tuple[Any, bool]:
+        from .orders import ingest_order
+        return ingest_order(self, context, channel_id, payload_ref, idempotency_key)
+
+    def propose_routing(self, context: TenantContext, order_id: str, supplier_options: Mapping[str, Any],
+                        expected_order_version: int = 1) -> tuple[Any, ...]:
+        from .orders import propose_routing
+        return propose_routing(self, context, order_id, supplier_options, expected_order_version)
+
+    def order(self, context: TenantContext, order_id: str) -> Any:
+        self.require(context, Capability.TENANT_ADMIN)
+        return self.repo.get_channel_order(context.tenant_id, order_id)
+
+    def order_lines(self, context: TenantContext, order_id: str) -> tuple[Any, ...]:
+        self.require(context, Capability.TENANT_ADMIN)
+        return self.repo.order_lines_for(context.tenant_id, order_id)
+
+    def purchase_orders(self, context: TenantContext, order_id: str) -> tuple[Any, ...]:
+        self.require(context, Capability.TENANT_ADMIN)
+        return self.repo.purchase_orders_for(context.tenant_id, order_id)
+
     def dashboard_snapshot(self, context: TenantContext, *, project_root: str | None = None) -> dict[str, Any]:
         """Return a tenant-scoped, read-only dashboard projection.
 
