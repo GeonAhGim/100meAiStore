@@ -1,0 +1,55 @@
+# P2-09 L4: production platform readiness, local evidence only
+
+Status: implementing partial local slice. No production deployment/migration.
+
+## Observed gaps
+
+- Core persistence is SQLite; PostgreSQL repository implementation and full
+  data migration are absent. Existing local Docker has `postgres:16` image;
+  an isolated network-disabled temporary database can verify a minimal RLS
+  contract without downloads or touching the commerce database.
+- D-07 PWA shell is not implemented as a production app. Approval resources
+  contain placeholder before/profit/risk values; mobile authentication,
+  secure secret storage and complete operational UI remain unfinished.
+- GCP/host selection, actual quote, RPO/RTO, key backend, identity service and
+  production-complete dependency inventory require G3/G5. Do not invent costs.
+
+## First bounded proof
+
+Create a separate fixture SQL schema with composite tenant/order identities,
+orders and outbox, enabled/forced RLS and non-superuser/non-bypass application
+role. Missing tenant context sees no rows; tenant A cannot read/update/insert
+tenant B data; same external ID is independent across tenants. Order/outbox
+transaction rollback must leave neither committed. No production migration
+runner uses this script.
+
+Runner uses only the existing local postgres image, no network and no exposed
+ports/host-data mounts. Its database uses an ephemeral memory filesystem. It
+creates one uniquely named/labelled disposable container, reads
+back its identity/label before cleanup and removes only that owned fixture
+container. Never execute against an existing database or pull an image.
+
+Source behavior: [PostgreSQL 16 row security](https://www.postgresql.org/docs/16/ddl-rowsecurity.html).
+Owners/superusers can bypass ordinary RLS, so tests must use a non-bypass role;
+FORCE ROW LEVEL SECURITY is included but is not a substitute for that role.
+Tenant context must be set by the future authenticated service, not untrusted
+client SQL. Full application roles, migrations, pool reset and API access remain
+separate acceptance items, so P2-09 cannot be marked complete by this proof.
+
+## Local evidence, 2026-09-07
+
+`scripts/test-postgres-fixture.ps1` executed successfully with the already-cached
+image `sha256:80f4c7a5e91618546dce5b4fe60cf03b14c0f9efa7e40157278d122772ced8d2`.
+Server reported PostgreSQL 16.15 (Debian 16.15-1.pgdg13+2). The SQL emitted
+`OFFLINE_RLS_AND_ATOMICITY_PASS`: missing tenant denial, cross-tenant read/write
+denial, composite tenant identities, order/outbox rollback, no TRUNCATE grant,
+and transaction-local tenant-context reset passed as the non-bypass role.
+The uniquely identified fixture container was stopped and auto-removed; its
+memory-only synthetic data is intentionally unrecoverable. Operational data
+was never mounted or changed. This is a focused SQL proof, not a repository
+migration, application connection-pool test, backup recovery proof or PWA.
+
+Verification: 165 Python tests passed; compileall and diff whitespace checks
+passed; forbidden local-data filename and common secret-pattern scans found
+no matches. The fixture runner was rerun after adding explicit post-cleanup
+container-absence verification and passed again.
