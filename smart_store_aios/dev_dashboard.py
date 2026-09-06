@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 
 
 DEFAULT_CODEX_HOME = Path.home() / ".codex"
-STALE_AFTER_SECONDS = 30
+STALE_AFTER_SECONDS = 180
 PROJECT = r"C:\smart_store"
 _EMAIL = re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b")
 _SECRET = re.compile(r"(?i)(api[_-]?key|authorization|bearer|password|secret|token)(\s*[:=]\s*)[^\s,;]+")
@@ -340,14 +340,19 @@ class DevDashboardCollector:
         return {"changed_files": changed[:100], "recent_commits": commits, "git_observed": bool(commits or changed)}
 
 
-INDEX_HTML = Path(__file__).with_name("dev_dashboard.html").read_text(encoding="utf-8")
+INDEX_PATH = Path(__file__).with_name("dev_dashboard.html")
+INDEX_HTML = INDEX_PATH.read_text(encoding="utf-8")
 
 
 class DevDashboardHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         if parsed.path == "/":
-            self._send(200, "text/html; charset=utf-8", INDEX_HTML.encode())
+            try:
+                body = INDEX_PATH.read_bytes()
+            except OSError:
+                body = INDEX_HTML.encode()
+            self._send(200, "text/html; charset=utf-8", body)
         elif parsed.path == "/api/dev-dashboard":
             collector = self.server.collector_factory()  # type: ignore[attr-defined]
             self._send_json(200, collector.collect())
