@@ -14,6 +14,7 @@ from .domain import (AdapterCapabilityManifest, InboxMessage, InboxState, Approv
 from .domain import (ChannelOrder, OrderLine, RoutingDecision, SupplierPurchaseOrder, PurchaseLine,
                      ChannelOrderState, RoutingState, PurchaseOrderState)
 from .domain import TrackingObservation
+from .domain import DemoClaim, ClaimStatusObservation, ClaimStatus
 from .domain import DemoExecutionControl, ExecutionAttempt, AttemptObservation
 
 
@@ -52,6 +53,8 @@ class InMemoryRepository:
         self.purchase_orders: dict[tuple[str, str], SupplierPurchaseOrder] = {}
         self.purchase_lines: dict[tuple[str, str], PurchaseLine] = {}
         self.tracking_observations: dict[tuple[str, str], list[TrackingObservation]] = defaultdict(list)
+        self.claims: dict[tuple[str, str], DemoClaim] = {}
+        self.claim_status_observations: dict[tuple[str, str], list[ClaimStatusObservation]] = defaultdict(list)
 
     def save_demo_control(self, value: DemoExecutionControl) -> None:
         self.get_command(value.tenant_id, value.command_id)
@@ -264,6 +267,36 @@ class InMemoryRepository:
     def tracking_for(self, tenant_id: str, line_id: str) -> tuple[TrackingObservation, ...]:
         self.get_order_line(tenant_id, line_id)
         return tuple(deepcopy(row) for row in self.tracking_observations[(tenant_id, line_id)])
+
+    def save_claim(self, value: DemoClaim) -> tuple[DemoClaim, bool]:
+        prior = next((row for (tid, _), row in self.claims.items() if tid == value.tenant_id and row.idempotency_key == value.idempotency_key), None)
+        if prior:
+            if (prior.channel_order_id, prior.claim_type, prior.amount_minor) != (value.channel_order_id, value.claim_type, value.amount_minor): raise ConflictError("claim idempotency key reused")
+            return deepcopy(prior), True
+        self.claims[(value.tenant_id, value.id)] = deepcopy(value); return deepcopy(value), False
+
+    def get_claim(self, tenant_id: str, claim_id: str) -> DemoClaim:
+        try: return deepcopy(self.claims[(tenant_id, claim_id)])
+        except KeyError as exc: raise NotFoundError("claim not found") from exc
+
+    def update_claim(self, value: DemoClaim, expected_version: int) -> None:
+        current = self.get_claim(value.tenant_id, value.id)
+        if current.version != expected_version or value.version != expected_version + 1: raise ConflictError("claim version conflict")
+        self.claims[(value.tenant_id, value.id)] = deepcopy(value)
+
+    def save_claim_observation(self, value: ClaimStatusObservation) -> ClaimStatusObservation:
+        rows = self.claim_status_observations[(value.tenant_id, value.claim_id)]
+        prior = next((row for row in rows if (row.status_kind, row.status) == (value.status_kind, value.status)), None)
+        if prior:
+            if prior.response_digest != value.response_digest: raise ConflictError("claim status reused with different content")
+            return deepcopy(prior)
+        rows.append(deepcopy(value)); return deepcopy(value)
+
+    def claim_observation_for(self, tenant_id: str, claim_id: str, status_kind: str, status: ClaimStatus) -> ClaimStatusObservation | None:
+        return next((deepcopy(row) for row in self.claim_status_observations[(tenant_id, claim_id)] if (row.status_kind, row.status) == (status_kind, status)), None)
+
+    def claim_observations_for(self, tenant_id: str, claim_id: str) -> tuple[ClaimStatusObservation, ...]:
+        self.get_claim(tenant_id, claim_id); return tuple(deepcopy(row) for row in self.claim_status_observations[(tenant_id, claim_id)])
 
     def order_lines_for(self, tenant_id: str, order_id: str) -> tuple[OrderLine, ...]:
         self.get_channel_order(tenant_id, order_id)

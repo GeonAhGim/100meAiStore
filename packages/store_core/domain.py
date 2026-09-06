@@ -396,6 +396,42 @@ class TrackingObservation:
     response_digest: str
 
 
+class ClaimStatus(str, Enum):
+    OPEN = "OPEN"
+    EVIDENCE_PENDING = "EVIDENCE_PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    REFUND_PENDING = "REFUND_PENDING"
+    REFUNDED = "REFUNDED"
+    CLOSED = "CLOSED"
+
+
+@dataclass
+class DemoClaim:
+    id: str
+    tenant_id: str
+    channel_order_id: str
+    claim_type: str
+    amount_minor: int
+    consumer_status: ClaimStatus
+    channel_status: ClaimStatus
+    supplier_status: ClaimStatus
+    idempotency_key: str
+    created_at: datetime
+    version: int = 1
+
+
+@dataclass(frozen=True)
+class ClaimStatusObservation:
+    id: str
+    tenant_id: str
+    claim_id: str
+    status_kind: str
+    status: ClaimStatus
+    observed_at: datetime
+    response_digest: str
+
+
 @dataclass
 class RoutingDecision:
     id: str

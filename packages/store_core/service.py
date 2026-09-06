@@ -215,6 +215,24 @@ class StoreControlPlane:
         self.require(context, Capability.TENANT_ADMIN)
         return self.repo.tracking_for(context.tenant_id, order_line_id)
 
+    def open_demo_claim(self, context: TenantContext, order_id: str, claim_type: str,
+                        amount_minor: int, idempotency_key: str) -> tuple[Any, bool]:
+        from .claim01 import open_demo_claim
+        return open_demo_claim(self, context, order_id, claim_type, amount_minor, idempotency_key)
+
+    def record_demo_claim_status(self, context: TenantContext, claim_id: str, status_kind: str,
+                                 status: str, expected_version: int) -> tuple[Any, bool]:
+        from .claim01 import record_demo_claim_status
+        return record_demo_claim_status(self, context, claim_id, status_kind, status, expected_version)
+
+    def claim(self, context: TenantContext, claim_id: str) -> Any:
+        self.require(context, Capability.TENANT_ADMIN)
+        return self.repo.get_claim(context.tenant_id, claim_id)
+
+    def claim_observations(self, context: TenantContext, claim_id: str) -> tuple[Any, ...]:
+        self.require(context, Capability.TENANT_ADMIN)
+        return self.repo.claim_observations_for(context.tenant_id, claim_id)
+
     def dashboard_snapshot(self, context: TenantContext, *, project_root: str | None = None) -> dict[str, Any]:
         """Return a tenant-scoped, read-only dashboard projection.
 

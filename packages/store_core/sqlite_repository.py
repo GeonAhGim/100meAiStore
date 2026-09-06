@@ -18,6 +18,7 @@ from .domain import (
     ChannelOrder, OrderLine, RoutingDecision, SupplierPurchaseOrder, PurchaseLine,
     ChannelOrderState, RoutingState, PurchaseOrderState,
     TrackingObservation,
+    DemoClaim, ClaimStatusObservation, ClaimStatus,
 )
 from .errors import ConflictError, NotFoundError, TenantBoundaryError
 
@@ -241,6 +242,21 @@ CREATE TABLE tracking_observations(
 CREATE INDEX tracking_observations_tenant_line ON tracking_observations(tenant_id,order_line_id,observed_at);
 CREATE TRIGGER tracking_observations_no_update BEFORE UPDATE ON tracking_observations BEGIN SELECT RAISE(ABORT,'tracking observations are append-only'); END;
 CREATE TRIGGER tracking_observations_no_delete BEFORE DELETE ON tracking_observations BEGIN SELECT RAISE(ABORT,'tracking observations are append-only'); END;
+"""), (12, """
+CREATE TABLE demo_claims(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, channel_order_id TEXT NOT NULL, claim_type TEXT NOT NULL,
+ amount_minor INTEGER NOT NULL CHECK(amount_minor>=0), consumer_status TEXT NOT NULL, channel_status TEXT NOT NULL,
+ supplier_status TEXT NOT NULL, idempotency_key TEXT NOT NULL, created_at TEXT NOT NULL, version INTEGER NOT NULL CHECK(version>0),
+ UNIQUE(tenant_id,id), UNIQUE(tenant_id,idempotency_key),
+ FOREIGN KEY(tenant_id,channel_order_id) REFERENCES channel_orders(tenant_id,id) ON DELETE RESTRICT);
+CREATE TABLE claim_status_observations(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, claim_id TEXT NOT NULL, status_kind TEXT NOT NULL,
+ status TEXT NOT NULL, observed_at TEXT NOT NULL, response_digest TEXT NOT NULL CHECK(length(response_digest)=64),
+ UNIQUE(tenant_id,claim_id,status_kind,status),
+ FOREIGN KEY(tenant_id,claim_id) REFERENCES demo_claims(tenant_id,id) ON DELETE RESTRICT);
+CREATE INDEX claim_observations_tenant_claim ON claim_status_observations(tenant_id,claim_id,observed_at);
+CREATE TRIGGER claim_status_observations_no_update BEFORE UPDATE ON claim_status_observations BEGIN SELECT RAISE(ABORT,'claim status observations are append-only'); END;
+CREATE TRIGGER claim_status_observations_no_delete BEFORE DELETE ON claim_status_observations BEGIN SELECT RAISE(ABORT,'claim status observations are append-only'); END;
 """))
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -601,6 +617,50 @@ class SQLiteRepository:
     def tracking_for(self, tenant_id: str, line_id: str) -> tuple[TrackingObservation, ...]:
         self.get_order_line(tenant_id, line_id)
         return tuple(TrackingObservation(row['id'], row['tenant_id'], row['order_line_id'], row['tracking_key'], row['status'], _dt(row['observed_at']), row['response_digest']) for row in self.connection.execute("SELECT * FROM tracking_observations WHERE tenant_id=? AND order_line_id=? ORDER BY rowid", (tenant_id, line_id)))
+
+    @staticmethod
+    def _claim(row: sqlite3.Row) -> DemoClaim:
+        return DemoClaim(row['id'], row['tenant_id'], row['channel_order_id'], row['claim_type'], row['amount_minor'], ClaimStatus(row['consumer_status']), ClaimStatus(row['channel_status']), ClaimStatus(row['supplier_status']), row['idempotency_key'], _dt(row['created_at']), row['version'])
+
+    def save_claim(self, value: DemoClaim) -> tuple[DemoClaim, bool]:
+        row = self.connection.execute("SELECT * FROM demo_claims WHERE tenant_id=? AND idempotency_key=?", (value.tenant_id, value.idempotency_key)).fetchone()
+        if row:
+            prior = self._claim(row)
+            if (prior.channel_order_id, prior.claim_type, prior.amount_minor) != (value.channel_order_id, value.claim_type, value.amount_minor): raise ConflictError('claim idempotency key reused')
+            return prior, True
+        try:
+            self.connection.execute("INSERT INTO demo_claims VALUES (?,?,?,?,?,?,?,?,?,?,?)", (value.id, value.tenant_id, value.channel_order_id, value.claim_type, value.amount_minor, value.consumer_status.value, value.channel_status.value, value.supplier_status.value, value.idempotency_key, value.created_at.isoformat(), value.version))
+        except sqlite3.IntegrityError as exc: raise ConflictError('claim idempotency key already exists') from exc
+        return value, False
+
+    def get_claim(self, tenant_id: str, claim_id: str) -> DemoClaim:
+        row = self.connection.execute("SELECT * FROM demo_claims WHERE tenant_id=? AND id=?", (tenant_id, claim_id)).fetchone()
+        if row is None: raise NotFoundError('claim not found')
+        return self._claim(row)
+
+    def update_claim(self, value: DemoClaim, expected_version: int) -> None:
+        if value.version != expected_version + 1: raise ConflictError('claim version conflict')
+        changed = self.connection.execute("UPDATE demo_claims SET consumer_status=?,channel_status=?,supplier_status=?,version=? WHERE tenant_id=? AND id=? AND version=?", (value.consumer_status.value, value.channel_status.value, value.supplier_status.value, value.version, value.tenant_id, value.id, expected_version)).rowcount
+        if changed != 1: raise ConflictError('claim version conflict')
+
+    def save_claim_observation(self, value: ClaimStatusObservation) -> ClaimStatusObservation:
+        row = self.connection.execute("SELECT * FROM claim_status_observations WHERE tenant_id=? AND claim_id=? AND status_kind=? AND status=?", (value.tenant_id, value.claim_id, value.status_kind, value.status.value)).fetchone()
+        if row:
+            prior = ClaimStatusObservation(row['id'], row['tenant_id'], row['claim_id'], row['status_kind'], ClaimStatus(row['status']), _dt(row['observed_at']), row['response_digest'])
+            if prior.response_digest != value.response_digest: raise ConflictError('claim status reused with different content')
+            return prior
+        try:
+            self.connection.execute("INSERT INTO claim_status_observations VALUES (?,?,?,?,?,?,?)", (value.id, value.tenant_id, value.claim_id, value.status_kind, value.status.value, value.observed_at.isoformat(), value.response_digest))
+        except sqlite3.IntegrityError as exc: raise ConflictError('claim status observation already exists') from exc
+        return value
+
+    def claim_observation_for(self, tenant_id: str, claim_id: str, status_kind: str, status: ClaimStatus) -> ClaimStatusObservation | None:
+        row = self.connection.execute("SELECT * FROM claim_status_observations WHERE tenant_id=? AND claim_id=? AND status_kind=? AND status=?", (tenant_id, claim_id, status_kind, status.value)).fetchone()
+        return ClaimStatusObservation(row['id'], row['tenant_id'], row['claim_id'], row['status_kind'], ClaimStatus(row['status']), _dt(row['observed_at']), row['response_digest']) if row else None
+
+    def claim_observations_for(self, tenant_id: str, claim_id: str) -> tuple[ClaimStatusObservation, ...]:
+        self.get_claim(tenant_id, claim_id)
+        return tuple(ClaimStatusObservation(row['id'], row['tenant_id'], row['claim_id'], row['status_kind'], ClaimStatus(row['status']), _dt(row['observed_at']), row['response_digest']) for row in self.connection.execute("SELECT * FROM claim_status_observations WHERE tenant_id=? AND claim_id=? ORDER BY rowid", (tenant_id, claim_id)))
 
     def save_routing_decision(self, value: RoutingDecision) -> None:
         try:
