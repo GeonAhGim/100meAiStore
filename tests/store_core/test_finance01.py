@@ -44,5 +44,23 @@ class Finance01Tests(unittest.TestCase):
         changed = {**row, "amount_minor": 400}
         with self.assertRaises(ConflictError): self.app.import_demo_settlement(self.ctx, "demo-channel", "2026-09", [changed], "file-4")
 
+    def test_field_order_does_not_change_settlement_mapping_or_replay(self):
+        row = {"external_order_key": "order-1", "kind": "SALE", "amount_minor": 500,
+               "currency": "KRW", "source_row_ref": "ordered-fields"}
+        reordered = dict(reversed(list(row.items())))
+        batch, replay = self.app.import_demo_settlement(self.ctx, "demo-channel", "2026-09", [reordered], "field-order")
+        self.assertFalse(replay)
+        self.assertEqual(SettlementStatus.RECONCILED, batch.status)
+        same, replay = self.app.import_demo_settlement(self.ctx, "demo-channel", "2026-09", [row], "field-order")
+        self.assertTrue(replay)
+        self.assertEqual(batch.id, same.id)
+
+    def test_unhashable_kind_or_currency_is_a_safe_input_conflict(self):
+        row = {"external_order_key": "order-1", "kind": "SALE", "amount_minor": 500,
+               "currency": "KRW", "source_row_ref": "malformed"}
+        for field in ("kind", "currency"):
+            with self.subTest(field=field), self.assertRaises(ConflictError):
+                self.app.import_demo_settlement(self.ctx, "demo-channel", "2026-09", [{**row, field: []}], "bad-field")
+
 
 if __name__ == "__main__": unittest.main()

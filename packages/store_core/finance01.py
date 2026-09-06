@@ -31,8 +31,9 @@ def import_demo_settlement(service: Any, context: Any, channel_id: str, period: 
     for row in rows:
         if not isinstance(row, Mapping) or set(row) != {"external_order_key", "kind", "amount_minor", "currency", "source_row_ref"}:
             raise ConflictError("invalid settlement row schema")
-        external, kind, amount, currency, source = row.values()
-        if not isinstance(external, str) or not _OPAQUE.fullmatch(external) or kind not in _KINDS or type(amount) is not int or not isinstance(currency, str) or currency not in _CURRENCIES or not isinstance(source, str) or not _OPAQUE.fullmatch(source) or source in seen_refs:
+        external, kind, amount, currency, source = (row[key] for key in
+            ("external_order_key", "kind", "amount_minor", "currency", "source_row_ref"))
+        if not isinstance(external, str) or not _OPAQUE.fullmatch(external) or not isinstance(kind, str) or kind not in _KINDS or type(amount) is not int or not isinstance(currency, str) or currency not in _CURRENCIES or not isinstance(source, str) or not _OPAQUE.fullmatch(source) or source in seen_refs:
             raise ConflictError("invalid settlement row")
         seen_refs.add(source)
         canonical_rows.append({"external_order_key": external, "kind": kind, "amount_minor": amount, "currency": currency, "source_row_ref": source})
