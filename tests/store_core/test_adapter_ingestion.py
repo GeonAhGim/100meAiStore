@@ -145,7 +145,7 @@ class AdapterIngestionTests(unittest.TestCase):
         self.assertEqual(2, len(self.app.normalized_payloads_for(self.ctx)))
 
     def test_ad10_migration_and_immutable_payload_triggers(self):
-        self.assertEqual(13, self.repo.readiness()["schema_version"])
+        self.assertEqual(14, self.repo.readiness()["schema_version"])
         result = self.app.poll_demo_connection(self.ctx, "demo", "orders", 0,
             self.adapter(DemoPage((self.row(),), None, False, datetime.now(timezone.utc))))
         with self.assertRaises(sqlite3.IntegrityError):

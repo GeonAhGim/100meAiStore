@@ -20,6 +20,7 @@ from .domain import (
     TrackingObservation,
     DemoClaim, ClaimStatusObservation, ClaimStatus,
     DemoSettlementBatch, DemoSettlementLine, DemoRealizedProfit, SettlementStatus,
+    DemoCatalogImport, DemoCatalogSnapshot, DemoCanonicalProduct, DemoProductLineage, DemoChannelOffer,
 )
 from .errors import ConflictError, NotFoundError, TenantBoundaryError
 
@@ -275,6 +276,39 @@ CREATE TABLE demo_realized_profit(
  projected_minor INTEGER, realized_minor INTEGER, status TEXT NOT NULL, calculated_at TEXT NOT NULL,
  UNIQUE(tenant_id,batch_id,order_id), FOREIGN KEY(tenant_id,batch_id) REFERENCES demo_settlement_batches(tenant_id,id) ON DELETE RESTRICT,
  FOREIGN KEY(tenant_id,order_id) REFERENCES channel_orders(tenant_id,id) ON DELETE RESTRICT);
+"""), (14, """
+CREATE TABLE demo_catalog_imports(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, supplier_id TEXT NOT NULL,
+ source_digest TEXT NOT NULL CHECK(length(source_digest)=64), idempotency_key TEXT NOT NULL,
+ created_at TEXT NOT NULL, UNIQUE(tenant_id,id), UNIQUE(tenant_id,idempotency_key),
+ FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT);
+CREATE TABLE demo_catalog_snapshots(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, import_id TEXT NOT NULL, supplier_id TEXT NOT NULL,
+ external_key TEXT NOT NULL, source_digest TEXT NOT NULL CHECK(length(source_digest)=64), payload_json TEXT NOT NULL,
+ created_at TEXT NOT NULL, UNIQUE(tenant_id,id), UNIQUE(tenant_id,import_id,external_key),
+ FOREIGN KEY(tenant_id,import_id) REFERENCES demo_catalog_imports(tenant_id,id) ON DELETE RESTRICT);
+CREATE INDEX demo_catalog_snapshots_tenant_import ON demo_catalog_snapshots(tenant_id,import_id);
+CREATE TRIGGER demo_catalog_snapshots_no_update BEFORE UPDATE ON demo_catalog_snapshots BEGIN SELECT RAISE(ABORT,'catalog snapshots are immutable'); END;
+CREATE TRIGGER demo_catalog_snapshots_no_delete BEFORE DELETE ON demo_catalog_snapshots BEGIN SELECT RAISE(ABORT,'catalog snapshots are immutable'); END;
+CREATE TABLE demo_canonical_products(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, sku TEXT NOT NULL, title TEXT NOT NULL, category TEXT NOT NULL,
+ price_minor INTEGER NOT NULL CHECK(price_minor>=0), currency TEXT NOT NULL, attributes_json TEXT NOT NULL,
+ source_snapshot_id TEXT NOT NULL, version INTEGER NOT NULL CHECK(version>0), created_at TEXT NOT NULL,
+ UNIQUE(tenant_id,id), UNIQUE(tenant_id,sku),
+ FOREIGN KEY(tenant_id,source_snapshot_id) REFERENCES demo_catalog_snapshots(tenant_id,id) ON DELETE RESTRICT);
+CREATE TABLE demo_product_lineage(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, source_snapshot_id TEXT NOT NULL, canonical_product_id TEXT NOT NULL,
+ transform_version INTEGER NOT NULL CHECK(transform_version>0), created_at TEXT NOT NULL,
+ UNIQUE(tenant_id,source_snapshot_id),
+ FOREIGN KEY(tenant_id,source_snapshot_id) REFERENCES demo_catalog_snapshots(tenant_id,id) ON DELETE RESTRICT,
+ FOREIGN KEY(tenant_id,canonical_product_id) REFERENCES demo_canonical_products(tenant_id,id) ON DELETE RESTRICT);
+CREATE TABLE demo_channel_offers(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, channel_id TEXT NOT NULL, canonical_product_id TEXT NOT NULL,
+ source_snapshot_id TEXT NOT NULL, external_key TEXT NOT NULL, price_minor INTEGER NOT NULL CHECK(price_minor>=0),
+ currency TEXT NOT NULL, version INTEGER NOT NULL CHECK(version>0), created_at TEXT NOT NULL,
+ UNIQUE(tenant_id,id), UNIQUE(tenant_id,channel_id,canonical_product_id),
+ FOREIGN KEY(tenant_id,canonical_product_id) REFERENCES demo_canonical_products(tenant_id,id) ON DELETE RESTRICT,
+ FOREIGN KEY(tenant_id,source_snapshot_id) REFERENCES demo_catalog_snapshots(tenant_id,id) ON DELETE RESTRICT);
 """))
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -683,6 +717,97 @@ class SQLiteRepository:
     def claim_observations_for(self, tenant_id: str, claim_id: str) -> tuple[ClaimStatusObservation, ...]:
         self.get_claim(tenant_id, claim_id)
         return tuple(ClaimStatusObservation(row['id'], row['tenant_id'], row['claim_id'], row['status_kind'], ClaimStatus(row['status']), _dt(row['observed_at']), row['response_digest']) for row in self.connection.execute("SELECT * FROM claim_status_observations WHERE tenant_id=? AND claim_id=? ORDER BY rowid", (tenant_id, claim_id)))
+
+    @staticmethod
+    def _catalog_import(row: sqlite3.Row) -> DemoCatalogImport:
+        return DemoCatalogImport(row['id'], row['tenant_id'], row['supplier_id'], row['source_digest'], row['idempotency_key'], _dt(row['created_at']))
+
+    def save_catalog_import(self, value: DemoCatalogImport) -> tuple[DemoCatalogImport, bool]:
+        row = self.connection.execute("SELECT * FROM demo_catalog_imports WHERE tenant_id=? AND idempotency_key=?", (value.tenant_id, value.idempotency_key)).fetchone()
+        if row:
+            prior = self._catalog_import(row)
+            if (prior.source_digest, prior.supplier_id) != (value.source_digest, value.supplier_id): raise ConflictError('catalog idempotency key reused')
+            return prior, True
+        try: self.connection.execute("INSERT INTO demo_catalog_imports VALUES (?,?,?,?,?,?)", (value.id, value.tenant_id, value.supplier_id, value.source_digest, value.idempotency_key, value.created_at.isoformat()))
+        except sqlite3.IntegrityError as exc: raise ConflictError('catalog import already exists') from exc
+        return value, False
+
+    def get_catalog_import(self, tenant_id: str, import_id: str) -> DemoCatalogImport:
+        row = self.connection.execute("SELECT * FROM demo_catalog_imports WHERE tenant_id=? AND id=?", (tenant_id, import_id)).fetchone()
+        if row is None: raise NotFoundError('catalog import not found')
+        return self._catalog_import(row)
+
+    @staticmethod
+    def _catalog_snapshot(row: sqlite3.Row) -> DemoCatalogSnapshot:
+        return DemoCatalogSnapshot(row['id'], row['tenant_id'], row['import_id'], row['supplier_id'], row['external_key'], row['source_digest'], row['payload_json'], _dt(row['created_at']))
+
+    def save_catalog_snapshot(self, value: DemoCatalogSnapshot) -> DemoCatalogSnapshot:
+        try: self.connection.execute("INSERT INTO demo_catalog_snapshots VALUES (?,?,?,?,?,?,?,?)", (value.id, value.tenant_id, value.import_id, value.supplier_id, value.external_key, value.source_digest, value.payload_json, value.created_at.isoformat()))
+        except sqlite3.IntegrityError as exc:
+            row = self.connection.execute("SELECT * FROM demo_catalog_snapshots WHERE tenant_id=? AND id=?", (value.tenant_id, value.id)).fetchone()
+            if row and row['payload_json'] == value.payload_json: return self._catalog_snapshot(row)
+            raise ConflictError('catalog snapshot already exists') from exc
+        return value
+
+    def catalog_snapshots_for(self, tenant_id: str, import_id: str) -> tuple[DemoCatalogSnapshot, ...]:
+        self.get_catalog_import(tenant_id, import_id)
+        return tuple(self._catalog_snapshot(row) for row in self.connection.execute("SELECT * FROM demo_catalog_snapshots WHERE tenant_id=? AND import_id=? ORDER BY rowid", (tenant_id, import_id)))
+
+    @staticmethod
+    def _canonical_product(row: sqlite3.Row) -> DemoCanonicalProduct:
+        return DemoCanonicalProduct(row['id'], row['tenant_id'], row['sku'], row['title'], row['category'], row['price_minor'], row['currency'], row['attributes_json'], row['source_snapshot_id'], row['version'], _dt(row['created_at']))
+
+    def save_canonical_product(self, value: DemoCanonicalProduct) -> DemoCanonicalProduct:
+        row = self.connection.execute("SELECT * FROM demo_canonical_products WHERE tenant_id=? AND sku=?", (value.tenant_id, value.sku)).fetchone()
+        if row:
+            prior = self._canonical_product(row)
+            if (prior.title, prior.category, prior.price_minor, prior.currency, prior.attributes_json) != (value.title, value.category, value.price_minor, value.currency, value.attributes_json): raise ConflictError('canonical SKU reused with different content')
+            return prior
+        try: self.connection.execute("INSERT INTO demo_canonical_products VALUES (?,?,?,?,?,?,?,?,?,?,?)", (value.id, value.tenant_id, value.sku, value.title, value.category, value.price_minor, value.currency, value.attributes_json, value.source_snapshot_id, value.version, value.created_at.isoformat()))
+        except sqlite3.IntegrityError as exc: raise ConflictError('canonical product already exists') from exc
+        return value
+
+    def get_canonical_product(self, tenant_id: str, product_id: str) -> DemoCanonicalProduct:
+        row = self.connection.execute("SELECT * FROM demo_canonical_products WHERE tenant_id=? AND id=?", (tenant_id, product_id)).fetchone()
+        if row is None: raise NotFoundError('canonical product not found')
+        return self._canonical_product(row)
+
+    def save_product_lineage(self, value: DemoProductLineage) -> DemoProductLineage:
+        row = self.connection.execute("SELECT * FROM demo_product_lineage WHERE tenant_id=? AND source_snapshot_id=?", (value.tenant_id, value.source_snapshot_id)).fetchone()
+        if row:
+            prior = DemoProductLineage(row['id'], row['tenant_id'], row['source_snapshot_id'], row['canonical_product_id'], row['transform_version'], _dt(row['created_at']))
+            if prior.canonical_product_id != value.canonical_product_id: raise ConflictError('catalog lineage conflict')
+            return prior
+        try: self.connection.execute("INSERT INTO demo_product_lineage VALUES (?,?,?,?,?,?)", (value.id, value.tenant_id, value.source_snapshot_id, value.canonical_product_id, value.transform_version, value.created_at.isoformat()))
+        except sqlite3.IntegrityError as exc: raise ConflictError('catalog lineage already exists') from exc
+        return value
+
+    def lineage_for(self, tenant_id: str, product_id: str) -> tuple[DemoProductLineage, ...]:
+        self.get_canonical_product(tenant_id, product_id)
+        return tuple(DemoProductLineage(row['id'], row['tenant_id'], row['source_snapshot_id'], row['canonical_product_id'], row['transform_version'], _dt(row['created_at'])) for row in self.connection.execute("SELECT * FROM demo_product_lineage WHERE tenant_id=? AND canonical_product_id=? ORDER BY rowid", (tenant_id, product_id)))
+
+    @staticmethod
+    def _channel_offer(row: sqlite3.Row) -> DemoChannelOffer:
+        return DemoChannelOffer(row['id'], row['tenant_id'], row['channel_id'], row['canonical_product_id'], row['source_snapshot_id'], row['external_key'], row['price_minor'], row['currency'], row['version'], _dt(row['created_at']))
+
+    def save_channel_offer(self, value: DemoChannelOffer) -> tuple[DemoChannelOffer, bool]:
+        row = self.connection.execute("SELECT * FROM demo_channel_offers WHERE tenant_id=? AND channel_id=? AND canonical_product_id=?", (value.tenant_id, value.channel_id, value.canonical_product_id)).fetchone()
+        if row:
+            prior = self._channel_offer(row)
+            if (prior.price_minor, prior.currency) != (value.price_minor, value.currency): raise ConflictError('channel offer already exists with different content')
+            return prior, True
+        try: self.connection.execute("INSERT INTO demo_channel_offers VALUES (?,?,?,?,?,?,?,?,?,?)", (value.id, value.tenant_id, value.channel_id, value.canonical_product_id, value.source_snapshot_id, value.external_key, value.price_minor, value.currency, value.version, value.created_at.isoformat()))
+        except sqlite3.IntegrityError as exc: raise ConflictError('channel offer already exists') from exc
+        return value, False
+
+    def get_channel_offer(self, tenant_id: str, offer_id: str) -> DemoChannelOffer:
+        row = self.connection.execute("SELECT * FROM demo_channel_offers WHERE tenant_id=? AND id=?", (tenant_id, offer_id)).fetchone()
+        if row is None: raise NotFoundError('channel offer not found')
+        return self._channel_offer(row)
+
+    def channel_offers_for(self, tenant_id: str, product_id: str) -> tuple[DemoChannelOffer, ...]:
+        self.get_canonical_product(tenant_id, product_id)
+        return tuple(self._channel_offer(row) for row in self.connection.execute("SELECT * FROM demo_channel_offers WHERE tenant_id=? AND canonical_product_id=? ORDER BY rowid", (tenant_id, product_id)))
 
     @staticmethod
     def _settlement_batch(row: sqlite3.Row) -> DemoSettlementBatch:

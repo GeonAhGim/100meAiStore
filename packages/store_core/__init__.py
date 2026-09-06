@@ -24,6 +24,7 @@ from .order03 import request_demo_cancel, ingest_demo_tracking
 from .claim01 import open_demo_claim, record_demo_claim_status
 from .finance01 import import_demo_settlement
 from .inventory import DemoInventoryObservation, DemoPriceCalculation, calculate_demo_price, observe_demo_inventory
+from .catalog import ingest_demo_catalog, project_demo_offer
 
 __all__ = [
     "ApprovalKind",
@@ -62,6 +63,8 @@ __all__ = [
     "DemoPriceCalculation",
     "calculate_demo_price",
     "observe_demo_inventory",
+    "ingest_demo_catalog",
+    "project_demo_offer",
     "normalize_demo_order",
     "validate_demo_page",
 ]

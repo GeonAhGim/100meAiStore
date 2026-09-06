@@ -477,6 +477,69 @@ class DemoRealizedProfit:
     calculated_at: datetime
 
 
+@dataclass(frozen=True)
+class DemoCatalogImport:
+    """Immutable local DEMO catalog batch and its idempotency identity."""
+
+    id: str
+    tenant_id: str
+    supplier_id: str
+    source_digest: str
+    idempotency_key: str
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class DemoCatalogSnapshot:
+    id: str
+    tenant_id: str
+    import_id: str
+    supplier_id: str
+    external_key: str
+    source_digest: str
+    payload_json: str
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class DemoCanonicalProduct:
+    id: str
+    tenant_id: str
+    sku: str
+    title: str
+    category: str
+    price_minor: int
+    currency: str
+    attributes_json: str
+    source_snapshot_id: str
+    version: int
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class DemoProductLineage:
+    id: str
+    tenant_id: str
+    source_snapshot_id: str
+    canonical_product_id: str
+    transform_version: int
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class DemoChannelOffer:
+    id: str
+    tenant_id: str
+    channel_id: str
+    canonical_product_id: str
+    source_snapshot_id: str
+    external_key: str
+    price_minor: int
+    currency: str
+    version: int
+    created_at: datetime
+
+
 @dataclass
 class RoutingDecision:
     id: str

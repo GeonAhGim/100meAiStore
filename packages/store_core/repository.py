@@ -16,6 +16,7 @@ from .domain import (ChannelOrder, OrderLine, RoutingDecision, SupplierPurchaseO
 from .domain import TrackingObservation
 from .domain import DemoClaim, ClaimStatusObservation, ClaimStatus
 from .domain import DemoSettlementBatch, DemoSettlementLine, DemoRealizedProfit, SettlementStatus
+from .domain import DemoCatalogImport, DemoCatalogSnapshot, DemoCanonicalProduct, DemoProductLineage, DemoChannelOffer
 from .domain import DemoExecutionControl, ExecutionAttempt, AttemptObservation
 
 
@@ -59,6 +60,87 @@ class InMemoryRepository:
         self.settlement_batches: dict[tuple[str, str], DemoSettlementBatch] = {}
         self.settlement_lines: dict[tuple[str, str], DemoSettlementLine] = {}
         self.realized_profits: dict[tuple[str, str, str], DemoRealizedProfit] = {}
+        self.catalog_imports: dict[tuple[str, str], DemoCatalogImport] = {}
+        self.catalog_snapshots: dict[tuple[str, str], DemoCatalogSnapshot] = {}
+        self.canonical_products: dict[tuple[str, str], DemoCanonicalProduct] = {}
+        self.product_lineage: dict[tuple[str, str], DemoProductLineage] = {}
+        self.channel_offers: dict[tuple[str, str], DemoChannelOffer] = {}
+
+    def save_catalog_import(self, value: DemoCatalogImport) -> tuple[DemoCatalogImport, bool]:
+        prior = next((row for (tid, _), row in self.catalog_imports.items()
+                      if tid == value.tenant_id and row.idempotency_key == value.idempotency_key), None)
+        if prior:
+            if prior.source_digest != value.source_digest or prior.supplier_id != value.supplier_id:
+                raise ConflictError("catalog idempotency key reused")
+            return deepcopy(prior), True
+        self.catalog_imports[(value.tenant_id, value.id)] = deepcopy(value)
+        return deepcopy(value), False
+
+    def get_catalog_import(self, tenant_id: str, import_id: str) -> DemoCatalogImport:
+        try: return deepcopy(self.catalog_imports[(tenant_id, import_id)])
+        except KeyError as exc: raise NotFoundError("catalog import not found") from exc
+
+    def save_catalog_snapshot(self, value: DemoCatalogSnapshot) -> DemoCatalogSnapshot:
+        key = (value.tenant_id, value.id)
+        prior = self.catalog_snapshots.get(key)
+        if prior:
+            if prior.payload_json != value.payload_json: raise ConflictError("catalog snapshot identity reused")
+            return deepcopy(prior)
+        self.catalog_snapshots[key] = deepcopy(value)
+        return deepcopy(value)
+
+    def catalog_snapshots_for(self, tenant_id: str, import_id: str) -> tuple[DemoCatalogSnapshot, ...]:
+        self.get_catalog_import(tenant_id, import_id)
+        return tuple(deepcopy(row) for (tid, _), row in self.catalog_snapshots.items()
+                     if tid == tenant_id and row.import_id == import_id)
+
+    def save_canonical_product(self, value: DemoCanonicalProduct) -> DemoCanonicalProduct:
+        prior = next((row for (tid, _), row in self.canonical_products.items()
+                      if tid == value.tenant_id and row.sku == value.sku), None)
+        if prior:
+            if (prior.title, prior.category, prior.price_minor, prior.currency, prior.attributes_json) != (value.title, value.category, value.price_minor, value.currency, value.attributes_json):
+                raise ConflictError("canonical SKU reused with different content")
+            return deepcopy(prior)
+        self.canonical_products[(value.tenant_id, value.id)] = deepcopy(value)
+        return deepcopy(value)
+
+    def get_canonical_product(self, tenant_id: str, product_id: str) -> DemoCanonicalProduct:
+        try: return deepcopy(self.canonical_products[(tenant_id, product_id)])
+        except KeyError as exc: raise NotFoundError("canonical product not found") from exc
+
+    def save_product_lineage(self, value: DemoProductLineage) -> DemoProductLineage:
+        key = (value.tenant_id, value.source_snapshot_id)
+        prior = self.product_lineage.get(key)
+        if prior:
+            if prior.canonical_product_id != value.canonical_product_id: raise ConflictError("catalog lineage conflict")
+            return deepcopy(prior)
+        self.product_lineage[key] = deepcopy(value)
+        return deepcopy(value)
+
+    def lineage_for(self, tenant_id: str, product_id: str) -> tuple[DemoProductLineage, ...]:
+        self.get_canonical_product(tenant_id, product_id)
+        return tuple(deepcopy(row) for (tid, _), row in self.product_lineage.items()
+                     if tid == tenant_id and row.canonical_product_id == product_id)
+
+    def save_channel_offer(self, value: DemoChannelOffer) -> tuple[DemoChannelOffer, bool]:
+        prior = next((row for (tid, _), row in self.channel_offers.items()
+                      if tid == value.tenant_id and row.channel_id == value.channel_id
+                      and row.canonical_product_id == value.canonical_product_id), None)
+        if prior:
+            if (prior.price_minor, prior.currency) != (value.price_minor, value.currency):
+                raise ConflictError("channel offer already exists with different content")
+            return deepcopy(prior), True
+        self.channel_offers[(value.tenant_id, value.id)] = deepcopy(value)
+        return deepcopy(value), False
+
+    def get_channel_offer(self, tenant_id: str, offer_id: str) -> DemoChannelOffer:
+        try: return deepcopy(self.channel_offers[(tenant_id, offer_id)])
+        except KeyError as exc: raise NotFoundError("channel offer not found") from exc
+
+    def channel_offers_for(self, tenant_id: str, product_id: str) -> tuple[DemoChannelOffer, ...]:
+        self.get_canonical_product(tenant_id, product_id)
+        return tuple(deepcopy(row) for (tid, _), row in self.channel_offers.items()
+                     if tid == tenant_id and row.canonical_product_id == product_id)
 
     def save_demo_control(self, value: DemoExecutionControl) -> None:
         self.get_command(value.tenant_id, value.command_id)

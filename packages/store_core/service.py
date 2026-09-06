@@ -238,6 +238,32 @@ class StoreControlPlane:
         from .finance01 import import_demo_settlement
         return import_demo_settlement(self, context, channel_id, period, rows, idempotency_key)
 
+    def ingest_demo_catalog(self, context: TenantContext, supplier_id: str,
+                            rows: Sequence[Mapping[str, Any]], idempotency_key: str) -> tuple[Any, bool]:
+        from .catalog import ingest_demo_catalog
+        return ingest_demo_catalog(self, context, supplier_id, rows, idempotency_key)
+
+    def project_demo_offer(self, context: TenantContext, canonical_product_id: str,
+                           channel_id: str, price_minor: int | None = None) -> tuple[Any, bool]:
+        from .catalog import project_demo_offer
+        return project_demo_offer(self, context, canonical_product_id, channel_id, price_minor)
+
+    def catalog_snapshots(self, context: TenantContext, import_id: str) -> tuple[Any, ...]:
+        self.require(context, Capability.TENANT_ADMIN)
+        return self.repo.catalog_snapshots_for(context.tenant_id, import_id)
+
+    def canonical_product(self, context: TenantContext, product_id: str) -> Any:
+        self.require(context, Capability.TENANT_ADMIN)
+        return self.repo.get_canonical_product(context.tenant_id, product_id)
+
+    def product_lineage(self, context: TenantContext, product_id: str) -> tuple[Any, ...]:
+        self.require(context, Capability.TENANT_ADMIN)
+        return self.repo.lineage_for(context.tenant_id, product_id)
+
+    def channel_offers(self, context: TenantContext, product_id: str) -> tuple[Any, ...]:
+        self.require(context, Capability.TENANT_ADMIN)
+        return self.repo.channel_offers_for(context.tenant_id, product_id)
+
     def settlement_batch(self, context: TenantContext, batch_id: str) -> Any:
         self.require(context, Capability.TENANT_ADMIN)
         return self.repo.get_settlement_batch(context.tenant_id, batch_id)
