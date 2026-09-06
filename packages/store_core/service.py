@@ -233,6 +233,23 @@ class StoreControlPlane:
         self.require(context, Capability.TENANT_ADMIN)
         return self.repo.claim_observations_for(context.tenant_id, claim_id)
 
+    def import_demo_settlement(self, context: TenantContext, channel_id: str, period: str,
+                               rows: Sequence[Mapping[str, Any]], idempotency_key: str) -> tuple[Any, bool]:
+        from .finance01 import import_demo_settlement
+        return import_demo_settlement(self, context, channel_id, period, rows, idempotency_key)
+
+    def settlement_batch(self, context: TenantContext, batch_id: str) -> Any:
+        self.require(context, Capability.TENANT_ADMIN)
+        return self.repo.get_settlement_batch(context.tenant_id, batch_id)
+
+    def settlement_lines(self, context: TenantContext, batch_id: str) -> tuple[Any, ...]:
+        self.require(context, Capability.TENANT_ADMIN)
+        return self.repo.settlement_lines_for(context.tenant_id, batch_id)
+
+    def realized_profits(self, context: TenantContext, batch_id: str) -> tuple[Any, ...]:
+        self.require(context, Capability.TENANT_ADMIN)
+        return self.repo.realized_profits_for(context.tenant_id, batch_id)
+
     def dashboard_snapshot(self, context: TenantContext, *, project_root: str | None = None) -> dict[str, Any]:
         """Return a tenant-scoped, read-only dashboard projection.
 

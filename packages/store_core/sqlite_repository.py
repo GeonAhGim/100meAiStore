@@ -19,6 +19,7 @@ from .domain import (
     ChannelOrderState, RoutingState, PurchaseOrderState,
     TrackingObservation,
     DemoClaim, ClaimStatusObservation, ClaimStatus,
+    DemoSettlementBatch, DemoSettlementLine, DemoRealizedProfit, SettlementStatus,
 )
 from .errors import ConflictError, NotFoundError, TenantBoundaryError
 
@@ -257,6 +258,23 @@ CREATE TABLE claim_status_observations(
 CREATE INDEX claim_observations_tenant_claim ON claim_status_observations(tenant_id,claim_id,observed_at);
 CREATE TRIGGER claim_status_observations_no_update BEFORE UPDATE ON claim_status_observations BEGIN SELECT RAISE(ABORT,'claim status observations are append-only'); END;
 CREATE TRIGGER claim_status_observations_no_delete BEFORE DELETE ON claim_status_observations BEGIN SELECT RAISE(ABORT,'claim status observations are append-only'); END;
+"""), (13, """
+CREATE TABLE demo_settlement_batches(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, channel_id TEXT NOT NULL, period TEXT NOT NULL,
+ source_digest TEXT NOT NULL CHECK(length(source_digest)=64), status TEXT NOT NULL, idempotency_key TEXT NOT NULL,
+ created_at TEXT NOT NULL, version INTEGER NOT NULL CHECK(version>0), UNIQUE(tenant_id,id), UNIQUE(tenant_id,idempotency_key),
+ FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT);
+CREATE TABLE demo_settlement_lines(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, batch_id TEXT NOT NULL, external_order_key TEXT NOT NULL,
+ kind TEXT NOT NULL, amount_minor INTEGER NOT NULL, currency TEXT NOT NULL, source_row_ref TEXT NOT NULL,
+ order_id TEXT, match_status TEXT NOT NULL, UNIQUE(tenant_id,batch_id,source_row_ref),
+ FOREIGN KEY(tenant_id,batch_id) REFERENCES demo_settlement_batches(tenant_id,id) ON DELETE RESTRICT,
+ FOREIGN KEY(tenant_id,order_id) REFERENCES channel_orders(tenant_id,id) ON DELETE RESTRICT);
+CREATE TABLE demo_realized_profit(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, batch_id TEXT NOT NULL, order_id TEXT NOT NULL,
+ projected_minor INTEGER, realized_minor INTEGER, status TEXT NOT NULL, calculated_at TEXT NOT NULL,
+ UNIQUE(tenant_id,batch_id,order_id), FOREIGN KEY(tenant_id,batch_id) REFERENCES demo_settlement_batches(tenant_id,id) ON DELETE RESTRICT,
+ FOREIGN KEY(tenant_id,order_id) REFERENCES channel_orders(tenant_id,id) ON DELETE RESTRICT);
 """))
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -563,6 +581,10 @@ class SQLiteRepository:
         if row is None: raise NotFoundError('order not found')
         return self._channel_order(row)
 
+    def find_channel_order(self, tenant_id: str, channel_id: str, external_key: str) -> ChannelOrder | None:
+        row = self.connection.execute("SELECT * FROM channel_orders WHERE tenant_id=? AND channel_id=? AND external_order_key=?", (tenant_id, channel_id, external_key)).fetchone()
+        return self._channel_order(row) if row else None
+
     def update_channel_order(self, value: ChannelOrder, expected_version: int) -> None:
         if value.version != expected_version + 1: raise ConflictError('order version conflict')
         changed = self.connection.execute("UPDATE channel_orders SET status=?,version=? WHERE tenant_id=? AND id=? AND version=?",
@@ -661,6 +683,44 @@ class SQLiteRepository:
     def claim_observations_for(self, tenant_id: str, claim_id: str) -> tuple[ClaimStatusObservation, ...]:
         self.get_claim(tenant_id, claim_id)
         return tuple(ClaimStatusObservation(row['id'], row['tenant_id'], row['claim_id'], row['status_kind'], ClaimStatus(row['status']), _dt(row['observed_at']), row['response_digest']) for row in self.connection.execute("SELECT * FROM claim_status_observations WHERE tenant_id=? AND claim_id=? ORDER BY rowid", (tenant_id, claim_id)))
+
+    @staticmethod
+    def _settlement_batch(row: sqlite3.Row) -> DemoSettlementBatch:
+        return DemoSettlementBatch(row['id'], row['tenant_id'], row['channel_id'], row['period'], row['source_digest'], SettlementStatus(row['status']), row['idempotency_key'], _dt(row['created_at']), row['version'])
+
+    def save_settlement_batch(self, value: DemoSettlementBatch) -> tuple[DemoSettlementBatch, bool]:
+        row = self.connection.execute("SELECT * FROM demo_settlement_batches WHERE tenant_id=? AND idempotency_key=?", (value.tenant_id, value.idempotency_key)).fetchone()
+        if row:
+            prior = self._settlement_batch(row)
+            if prior.source_digest != value.source_digest: raise ConflictError('settlement idempotency key reused')
+            return prior, True
+        try: self.connection.execute("INSERT INTO demo_settlement_batches VALUES (?,?,?,?,?,?,?,?,?)", (value.id, value.tenant_id, value.channel_id, value.period, value.source_digest, value.status.value, value.idempotency_key, value.created_at.isoformat(), value.version))
+        except sqlite3.IntegrityError as exc: raise ConflictError('settlement batch already exists') from exc
+        return value, False
+
+    def get_settlement_batch(self, tenant_id: str, batch_id: str) -> DemoSettlementBatch:
+        row = self.connection.execute("SELECT * FROM demo_settlement_batches WHERE tenant_id=? AND id=?", (tenant_id, batch_id)).fetchone()
+        if row is None: raise NotFoundError('settlement batch not found')
+        return self._settlement_batch(row)
+
+    def update_settlement_batch(self, value: DemoSettlementBatch, expected_version: int) -> None:
+        if value.version != expected_version + 1: raise ConflictError('settlement version conflict')
+        changed = self.connection.execute("UPDATE demo_settlement_batches SET status=?,version=? WHERE tenant_id=? AND id=? AND version=?", (value.status.value, value.version, value.tenant_id, value.id, expected_version)).rowcount
+        if changed != 1: raise ConflictError('settlement version conflict')
+
+    def save_settlement_line(self, value: DemoSettlementLine) -> None:
+        self.connection.execute("INSERT INTO demo_settlement_lines VALUES (?,?,?,?,?,?,?,?,?,?)", (value.id, value.tenant_id, value.batch_id, value.external_order_key, value.kind, value.amount_minor, value.currency, value.source_row_ref, value.order_id, value.match_status))
+
+    def settlement_lines_for(self, tenant_id: str, batch_id: str) -> tuple[DemoSettlementLine, ...]:
+        self.get_settlement_batch(tenant_id, batch_id)
+        return tuple(DemoSettlementLine(row['id'], row['tenant_id'], row['batch_id'], row['external_order_key'], row['kind'], row['amount_minor'], row['currency'], row['source_row_ref'], row['order_id'], row['match_status']) for row in self.connection.execute("SELECT * FROM demo_settlement_lines WHERE tenant_id=? AND batch_id=? ORDER BY rowid", (tenant_id, batch_id)))
+
+    def save_realized_profit(self, value: DemoRealizedProfit) -> None:
+        self.connection.execute("INSERT OR REPLACE INTO demo_realized_profit VALUES (?,?,?,?,?,?,?,?)", (value.id, value.tenant_id, value.batch_id, value.order_id, value.projected_minor, value.realized_minor, value.status, value.calculated_at.isoformat()))
+
+    def realized_profits_for(self, tenant_id: str, batch_id: str) -> tuple[DemoRealizedProfit, ...]:
+        self.get_settlement_batch(tenant_id, batch_id)
+        return tuple(DemoRealizedProfit(row['id'], row['tenant_id'], row['batch_id'], row['order_id'], row['projected_minor'], row['realized_minor'], row['status'], _dt(row['calculated_at'])) for row in self.connection.execute("SELECT * FROM demo_realized_profit WHERE tenant_id=? AND batch_id=? ORDER BY rowid", (tenant_id, batch_id)))
 
     def save_routing_decision(self, value: RoutingDecision) -> None:
         try:

@@ -22,6 +22,7 @@ from .orders import ingest_order, propose_routing
 from .order02 import approve_demo_po, submit_demo_po, reconcile_demo_po
 from .order03 import request_demo_cancel, ingest_demo_tracking
 from .claim01 import open_demo_claim, record_demo_claim_status
+from .finance01 import import_demo_settlement
 
 __all__ = [
     "ApprovalKind",
@@ -55,6 +56,7 @@ __all__ = [
     "ingest_demo_tracking",
     "open_demo_claim",
     "record_demo_claim_status",
+    "import_demo_settlement",
     "normalize_demo_order",
     "validate_demo_page",
 ]

@@ -432,6 +432,51 @@ class ClaimStatusObservation:
     response_digest: str
 
 
+class SettlementStatus(str, Enum):
+    IMPORTED = "IMPORTED"
+    RECONCILED = "RECONCILED"
+    EXCEPTION = "EXCEPTION"
+
+
+@dataclass
+class DemoSettlementBatch:
+    id: str
+    tenant_id: str
+    channel_id: str
+    period: str
+    source_digest: str
+    status: SettlementStatus
+    idempotency_key: str
+    created_at: datetime
+    version: int = 1
+
+
+@dataclass
+class DemoSettlementLine:
+    id: str
+    tenant_id: str
+    batch_id: str
+    external_order_key: str
+    kind: str
+    amount_minor: int
+    currency: str
+    source_row_ref: str
+    order_id: str | None
+    match_status: str
+
+
+@dataclass
+class DemoRealizedProfit:
+    id: str
+    tenant_id: str
+    batch_id: str
+    order_id: str
+    projected_minor: int | None
+    realized_minor: int | None
+    status: str
+    calculated_at: datetime
+
+
 @dataclass
 class RoutingDecision:
     id: str

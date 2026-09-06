@@ -15,6 +15,7 @@ from .domain import (ChannelOrder, OrderLine, RoutingDecision, SupplierPurchaseO
                      ChannelOrderState, RoutingState, PurchaseOrderState)
 from .domain import TrackingObservation
 from .domain import DemoClaim, ClaimStatusObservation, ClaimStatus
+from .domain import DemoSettlementBatch, DemoSettlementLine, DemoRealizedProfit, SettlementStatus
 from .domain import DemoExecutionControl, ExecutionAttempt, AttemptObservation
 
 
@@ -55,6 +56,9 @@ class InMemoryRepository:
         self.tracking_observations: dict[tuple[str, str], list[TrackingObservation]] = defaultdict(list)
         self.claims: dict[tuple[str, str], DemoClaim] = {}
         self.claim_status_observations: dict[tuple[str, str], list[ClaimStatusObservation]] = defaultdict(list)
+        self.settlement_batches: dict[tuple[str, str], DemoSettlementBatch] = {}
+        self.settlement_lines: dict[tuple[str, str], DemoSettlementLine] = {}
+        self.realized_profits: dict[tuple[str, str, str], DemoRealizedProfit] = {}
 
     def save_demo_control(self, value: DemoExecutionControl) -> None:
         self.get_command(value.tenant_id, value.command_id)
@@ -235,6 +239,9 @@ class InMemoryRepository:
         try: return deepcopy(self.channel_orders[(tenant_id, order_id)])
         except KeyError as exc: raise NotFoundError("order not found") from exc
 
+    def find_channel_order(self, tenant_id: str, channel_id: str, external_key: str) -> ChannelOrder | None:
+        return next((deepcopy(row) for (tid, _), row in self.channel_orders.items() if tid == tenant_id and row.channel_id == channel_id and row.external_order_key == external_key), None)
+
     def update_channel_order(self, value: ChannelOrder, expected_version: int) -> None:
         current = self.get_channel_order(value.tenant_id, value.id)
         if current.version != expected_version or value.version != expected_version + 1: raise ConflictError("order version conflict")
@@ -297,6 +304,34 @@ class InMemoryRepository:
 
     def claim_observations_for(self, tenant_id: str, claim_id: str) -> tuple[ClaimStatusObservation, ...]:
         self.get_claim(tenant_id, claim_id); return tuple(deepcopy(row) for row in self.claim_status_observations[(tenant_id, claim_id)])
+
+    def save_settlement_batch(self, value: DemoSettlementBatch) -> tuple[DemoSettlementBatch, bool]:
+        prior = next((row for (tid, _), row in self.settlement_batches.items() if tid == value.tenant_id and row.idempotency_key == value.idempotency_key), None)
+        if prior:
+            if prior.source_digest != value.source_digest: raise ConflictError("settlement idempotency key reused")
+            return deepcopy(prior), True
+        self.settlement_batches[(value.tenant_id, value.id)] = deepcopy(value); return deepcopy(value), False
+
+    def get_settlement_batch(self, tenant_id: str, batch_id: str) -> DemoSettlementBatch:
+        try: return deepcopy(self.settlement_batches[(tenant_id, batch_id)])
+        except KeyError as exc: raise NotFoundError("settlement batch not found") from exc
+
+    def update_settlement_batch(self, value: DemoSettlementBatch, expected_version: int) -> None:
+        current = self.get_settlement_batch(value.tenant_id, value.id)
+        if current.version != expected_version or value.version != expected_version + 1: raise ConflictError("settlement version conflict")
+        self.settlement_batches[(value.tenant_id, value.id)] = deepcopy(value)
+
+    def save_settlement_line(self, value: DemoSettlementLine) -> None:
+        self.settlement_lines[(value.tenant_id, value.id)] = deepcopy(value)
+
+    def settlement_lines_for(self, tenant_id: str, batch_id: str) -> tuple[DemoSettlementLine, ...]:
+        self.get_settlement_batch(tenant_id, batch_id); return tuple(deepcopy(v) for (tid, _), v in self.settlement_lines.items() if tid == tenant_id and v.batch_id == batch_id)
+
+    def save_realized_profit(self, value: DemoRealizedProfit) -> None:
+        self.realized_profits[(value.tenant_id, value.batch_id, value.order_id)] = deepcopy(value)
+
+    def realized_profits_for(self, tenant_id: str, batch_id: str) -> tuple[DemoRealizedProfit, ...]:
+        self.get_settlement_batch(tenant_id, batch_id); return tuple(deepcopy(v) for (tid, bid, _), v in self.realized_profits.items() if tid == tenant_id and bid == batch_id)
 
     def order_lines_for(self, tenant_id: str, order_id: str) -> tuple[OrderLine, ...]:
         self.get_channel_order(tenant_id, order_id)
