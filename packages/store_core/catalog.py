@@ -5,7 +5,7 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping, Sequence
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -99,13 +99,24 @@ def ingest_demo_catalog(service: Any, context: Any, supplier_id: str, rows: Sequ
         return batch, False
 
 
-def project_demo_offer(service: Any, context: Any, canonical_product_id: str, channel_id: str, price_minor: int | None = None) -> tuple[DemoChannelOffer, bool]:
+def project_demo_offer(service: Any, context: Any, canonical_product_id: str, channel_id: str, price_minor: int | None = None, max_age_seconds: int = 86400) -> tuple[DemoChannelOffer, bool]:
     service.require(context, Capability.TENANT_ADMIN)
     channel_id = _id(channel_id, "channel_id")
+    if type(max_age_seconds) is not int or max_age_seconds < 1:
+        raise ConflictError("invalid freshness window")
     with service.repo.transaction():
         product = service.repo.get_canonical_product(context.tenant_id, _id(canonical_product_id, "canonical_product_id"))
         if price_minor is None: price_minor = product.price_minor
         if type(price_minor) is not int or price_minor < 0: raise ConflictError("invalid offer price")
+        projections = service.repo.price_projections_for(context.tenant_id, product.sku)
+        if projections and projections[-1].status != "READY":
+            raise ConflictError("projected margin below DEMO threshold")
+        cutoff = service._clock() - timedelta(seconds=max_age_seconds)
+        if projections and projections[-1].calculated_at < cutoff:
+            raise ConflictError("DEMO price projection is stale; reapproval required")
+        inventory = service.repo.inventory_snapshots_for(context.tenant_id, product.sku)
+        if inventory and inventory[-1].observed_at < cutoff:
+            raise ConflictError("DEMO inventory observation is stale; reapproval required")
         offer = DemoChannelOffer(str(uuid4()), context.tenant_id, channel_id, product.id, product.source_snapshot_id, product.sku, price_minor, product.currency, 1, service._clock())
         offer, replay = service.repo.save_channel_offer(offer)
         if not replay:

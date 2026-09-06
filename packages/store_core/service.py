@@ -244,9 +244,10 @@ class StoreControlPlane:
         return ingest_demo_catalog(self, context, supplier_id, rows, idempotency_key)
 
     def project_demo_offer(self, context: TenantContext, canonical_product_id: str,
-                           channel_id: str, price_minor: int | None = None) -> tuple[Any, bool]:
+                           channel_id: str, price_minor: int | None = None,
+                           max_age_seconds: int = 86400) -> tuple[Any, bool]:
         from .catalog import project_demo_offer
-        return project_demo_offer(self, context, canonical_product_id, channel_id, price_minor)
+        return project_demo_offer(self, context, canonical_product_id, channel_id, price_minor, max_age_seconds)
 
     def catalog_snapshots(self, context: TenantContext, import_id: str) -> tuple[Any, ...]:
         self.require(context, Capability.TENANT_ADMIN)

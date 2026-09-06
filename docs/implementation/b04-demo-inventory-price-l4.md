@@ -19,4 +19,8 @@ passed.
 
 Gap follow-up: schema 18 now persists tenant-scoped inventory observations and
 price projection results, with restart coverage in `test_b04_gap.py`. Offer
-projection integration/freshness and full B04 completion remain pending.
+projection now fails closed when the latest persisted price guard is BLOCKED or
+when inventory/price observations exceed the default 24-hour freshness window;
+the error explicitly requires fresh reapproval. A fresh observation and READY
+projection permit a local offer projection. `test_b04_gap.py` covers blocked,
+fresh, stale, and reapproval paths.

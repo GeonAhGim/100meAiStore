@@ -5,7 +5,7 @@ or external side effect is implied.
 
 | Slice | Evidence present | Gap / dependency | Safe next action |
 |---|---|---|---|
-| B04 inventory/price | pure validation and deterministic 10% calculation | observations and calculated projections are not durable or connected to offer projection; freshness and restart evidence absent | persist tenant-scoped snapshots/calculations and enforce optional guard at local offer projection |
+| B04 inventory/price | durable observations/projections, 10% guard, offer gate, freshness/reapproval follow-up | no external sell-state authority; freshness window remains local default (24h) | retain local DEMO gate and require policy review before any external offer write |
 | B05 order/PO | routing split, approval revalidation, cancel race, line tracking, restart and rollback follow-up | legacy direct order mutation paths still rely on their local contracts; no LIVE behavior is authorized | retain gateway/DEMO boundary and official adapter review as a future condition |
 | B07 claims/settlement | strict import, match exceptions, projected/realized separation, multi-PO aggregation, restart/claim independence/rollback follow-up | no external accounting/payment authority; official finance retention remains a decision gate | retain local-only reconciliation and require explicit finance/retention decision for future work |
 
