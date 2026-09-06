@@ -11,7 +11,8 @@ Root confirmed no retries or alternate publishing paths. Keep local work moving.
 |---|---|---|
 | 5cc5985 | Phase 2 official-source backlog and phase-aware dashboard | 121 tests |
 | 2e84b2c | Offline channel request/error scaffold | 126 tests |
-| Current P2-03 commit (resolve from git log) | Order snapshots and isolated fixture journal | 136 tests |
+| 665a4d3 | Order snapshots and isolated fixture journal | 136 tests |
+| Current P2-05 commit (resolve from git log) | Local CSV/manual supplier fixture contract | 144 tests |
 
 No entry here claims remote publication. Later local commits will extend this
 list; only an explicit authorized publishing step may mark them published.

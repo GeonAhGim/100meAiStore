@@ -24,7 +24,7 @@
     {"id":"P2-02","phase":"live_readiness","title":"무자격증명 요청·오류 계약 테스트","status":"completed","evidence":"docs/implementation/live-p2-02-offline-contract-evidence.md"},
     {"id":"P2-03","phase":"live_readiness","title":"채널 주문 스키마·정규화·페이징","status":"completed","evidence":"docs/implementation/live-p2-03-order-contract-l4.md"},
     {"id":"P2-04","phase":"live_readiness","title":"오프라인 인증·재시도·커서 검증","status":"pending","evidence":null},
-    {"id":"P2-05","phase":"live_readiness","title":"공급처 파일·수동 처리 계약","status":"pending","evidence":null},
+    {"id":"P2-05","phase":"live_readiness","title":"공급처 파일·수동 처리 계약","status":"completed","evidence":"docs/implementation/live-p2-05-supplier-files-l4.md"},
     {"id":"P2-06","phase":"live_readiness","title":"채널 정산·장부 매핑 검증","status":"pending","evidence":null},
     {"id":"P2-07","phase":"live_readiness","title":"개인정보·보존·라이선스 검토 패키지","status":"pending","evidence":null},
     {"id":"P2-08","phase":"live_readiness","title":"상품·재고·송장·클레임 오프라인 계약","status":"pending","evidence":null},
