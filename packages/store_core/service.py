@@ -337,6 +337,10 @@ class StoreControlPlane:
         self.require(context, Capability.TENANT_ADMIN)
         return self.repo.acknowledgements_for(context.tenant_id, incident_id)
 
+    def demo_readiness(self, **kwargs: Any) -> dict[str, Any]:
+        from .readiness import evaluate_demo_readiness
+        return evaluate_demo_readiness(self.repo, **kwargs)
+
     def set_demo_stop(self, context: TenantContext, scope_type: str, scope_ref: str,
                       stopped: bool, reason: str) -> Any:
         from .safety import set_demo_stop

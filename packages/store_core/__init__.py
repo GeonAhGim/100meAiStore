@@ -29,6 +29,7 @@ from .approvals import approval_inbox, approval_detail, decide_approval
 from .gateway import configure_demo_byok, set_demo_budget_policy, record_demo_agent_run, submit_demo_tool
 from .notifications import set_demo_notification_preference, notify_demo, acknowledge_demo_incident
 from .safety import set_demo_stop, backup_demo_sqlite
+from .readiness import evaluate_demo_readiness
 
 __all__ = [
     "ApprovalKind",
@@ -81,6 +82,7 @@ __all__ = [
     "acknowledge_demo_incident",
     "set_demo_stop",
     "backup_demo_sqlite",
+    "evaluate_demo_readiness",
     "normalize_demo_order",
     "validate_demo_page",
 ]
