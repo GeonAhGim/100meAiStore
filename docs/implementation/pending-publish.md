@@ -19,7 +19,8 @@ Root confirmed no retries or alternate publishing paths. Keep local work moving.
 | 176437b | Privacy/license inventory and deletion-free review tests | 165 tests |
 | 8a6b266 | Isolated PostgreSQL tenant RLS and atomicity proof | PostgreSQL 16.15 proof; 165 Python tests |
 | 3c6b9a3 | Non-executable single-item Coupang tracking review | 172 Python tests |
-| Current Naver dispatch slice | Confirmed-order, dated, scoped dispatch review fixture | 178 Python tests |
+| caed35e | Confirmed-order, dated, scoped dispatch review fixture | 178 Python tests |
+| Current price guard fix | Reject unrounded margins below 10% | 179 Python tests |
 
 No entry here claims remote publication. Later local commits will extend this
 list; only an explicit authorized publishing step may mark them published.

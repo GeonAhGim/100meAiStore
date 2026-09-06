@@ -55,3 +55,14 @@ never infer resend authority from HTTP 200 or the documentation's retry prose.
 
 Naver slice verification: tracking suite 12 tests passed, full repository suite
 178 tests passed; compileall/diff/common secret-pattern/filename checks passed.
+
+## Price guard boundary correction
+
+While preparing price/stock fixtures, a regression test reproduced existing
+B04 behavior that approved 100000 selling price / 90001 cost: true margin is
+below 10%, but display rounding produced 0.1000. Eligibility now compares
+unrounded contribution to the 10% threshold; display values stay unchanged.
+This is a local policy defect correction, not an accounting/tax determination.
+
+Boundary regression and full suite passed (179 tests), along with compileall,
+diff whitespace and pattern/filename secret gates.

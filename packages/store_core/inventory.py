@@ -48,7 +48,9 @@ def calculate_demo_price(selling_price_minor: int, supply_cost_minor: int, varia
     contribution = Decimal(selling_price_minor) - Decimal(supply_cost_minor) - Decimal(variable_cost_minor) - (Decimal(selling_price_minor) * rate)
     contribution_minor = int(contribution.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
     margin = (contribution / Decimal(selling_price_minor)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
-    return DemoPriceCalculation(selling_price_minor, supply_cost_minor, variable_cost_minor, rate, contribution_minor, margin, "READY" if margin >= Decimal("0.10") else "BLOCKED")
+    # Display rounding must never promote a below-threshold proposal to READY.
+    eligible = contribution >= Decimal(selling_price_minor) * Decimal("0.10")
+    return DemoPriceCalculation(selling_price_minor, supply_cost_minor, variable_cost_minor, rate, contribution_minor, margin, "READY" if eligible else "BLOCKED")
 
 
 def record_demo_inventory(service: Any, context: Any, sku: str, supplier_id: str, quantity: int,

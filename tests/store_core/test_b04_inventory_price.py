@@ -13,6 +13,12 @@ class B04Tests(unittest.TestCase):
         with self.assertRaises(ConflictError): observe_demo_inventory("sku", "supplier", -1, value.observed_at)
         with self.assertRaises(ConflictError): observe_demo_inventory("sku", "supplier", 1, datetime.now())
 
+    def test_display_rounding_cannot_approve_below_ten_percent(self):
+        result = calculate_demo_price(100000, 90001)
+        self.assertEqual(Decimal("0.1000"), result.projected_margin)
+        self.assertEqual("BLOCKED", result.status)
+        self.assertEqual("READY", calculate_demo_price(100000, 90000).status)
+
     def test_price_guard_separates_projected_margin_and_blocks_below_ten_percent(self):
         ready = calculate_demo_price(1000, 700, fee_rate=Decimal("0.05"))
         blocked = calculate_demo_price(1000, 900, fee_rate=Decimal("0.05"))
