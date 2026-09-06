@@ -1,0 +1,56 @@
+{
+  "fixture_origin": "synthetic-local-2026-09-06",
+  "naver": {
+    "traceId": "fixture-trace",
+    "data": [{
+      "order": {"orderId": "fixture-order-1", "ordererName": "SYNTHETIC PRIVATE NAME"},
+      "productOrder": {
+        "productOrderId": "fixture-product-order-1",
+        "productId": "fixture-channel-product-1",
+        "productOrderStatus": "PAYED",
+        "initialQuantity": 3,
+        "remainQuantity": 2,
+        "initialPaymentAmount": 2900,
+        "remainPaymentAmount": 1900,
+        "unitPrice": 1000,
+        "claimStatus": "CANCEL_REQUEST"
+      }
+    }]
+  },
+  "coupang": {
+    "code": 200,
+    "message": "OK",
+    "data": [{
+      "orderId": 9007199254740993,
+      "shipmentBoxId": 9007199254740995,
+      "status": "INSTRUCT",
+      "shippingPrice": {"currencyCode": "KRW", "units": 2500, "nanos": 0},
+      "remotePrice": null,
+      "receiver": {"name": "SYNTHETIC PRIVATE NAME", "addr1": "SYNTHETIC PRIVATE ADDRESS"},
+      "orderItems": [{
+        "sequenceNo": "001",
+        "vendorItemId": 9007199254740997,
+        "shippingCount": 5,
+        "cancelCount": 1,
+        "holdCountForCancel": 2,
+        "salesPrice": {"currencyCode": "KRW", "units": 1000, "nanos": 0},
+        "orderPrice": {"currencyCode": "KRW", "units": 5000, "nanos": 0},
+        "discountPrice": null
+      }]
+    }],
+    "nextToken": "fixture+/=cursor"
+  },
+  "naver_changes": {
+    "traceId": "fixture-trace",
+    "data": {
+      "count": 1,
+      "lastChangeStatuses": [{
+        "orderId": "fixture-order-1",
+        "productOrderId": "fixture-product-order-1",
+        "lastChangedDate": "2026-09-06T10:00:00+09:00",
+        "productOrderStatus": "PAYED"
+      }],
+      "more": {"moreFrom": "2026-09-06T10:00:00+09:00", "moreSequence": "fixture-product-order-2"}
+    }
+  }
+}
