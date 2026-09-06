@@ -9,7 +9,8 @@ from typing import Iterable
 
 from .domain import AgentStatusSnapshot, Approval, AuditEvent, Command, Membership, OutboxEvent, OutboxState, Tenant, User
 from .errors import ConflictError, NotFoundError, TenantBoundaryError
-from .domain import AdapterCapabilityManifest, InboxMessage, InboxState, ApprovalIntent, ExecutionPreparation
+from .domain import (AdapterCapabilityManifest, InboxMessage, InboxState, ApprovalIntent,
+                     ExecutionPreparation, NormalizedInboundPayload, AdapterPollCheckpoint)
 from .domain import DemoExecutionControl, ExecutionAttempt, AttemptObservation
 
 
@@ -40,6 +41,8 @@ class InMemoryRepository:
         self.demo_controls: dict[tuple[str, str], DemoExecutionControl] = {}
         self.attempts: dict[tuple[str, str], ExecutionAttempt] = {}
         self.observations: dict[tuple[str, str], list[AttemptObservation]] = defaultdict(list)
+        self.normalized_payloads: dict[tuple[str, str], NormalizedInboundPayload] = {}
+        self.poll_checkpoints: dict[tuple[str, str, str], AdapterPollCheckpoint] = {}
 
     def save_demo_control(self, value: DemoExecutionControl) -> None:
         self.get_command(value.tenant_id, value.command_id)
@@ -170,6 +173,37 @@ class InMemoryRepository:
             value.state, value.version, value.processed_at = InboxState.PROCESSED, value.version + 1, processed_at
             self.inbox[(tenant_id, inbox_id)] = deepcopy(value)
             return value
+
+    def save_normalized_payload(self, value: NormalizedInboundPayload) -> NormalizedInboundPayload:
+        key = (value.tenant_id, value.immutable_ref)
+        prior = self.normalized_payloads.get(key)
+        if prior:
+            if prior.canonical_digest != value.canonical_digest or prior.payload_json != value.payload_json:
+                raise ConflictError("immutable payload reference reused with different content")
+            return deepcopy(prior)
+        self.normalized_payloads[key] = deepcopy(value)
+        return deepcopy(value)
+
+    def get_normalized_payload(self, tenant_id: str, immutable_ref: str) -> NormalizedInboundPayload:
+        try:
+            return deepcopy(self.normalized_payloads[(tenant_id, immutable_ref)])
+        except KeyError as exc:
+            raise NotFoundError("normalized payload not found") from exc
+
+    def normalized_payloads_for(self, tenant_id: str) -> tuple[NormalizedInboundPayload, ...]:
+        return tuple(deepcopy(value) for (tid, _), value in self.normalized_payloads.items() if tid == tenant_id)
+
+    def get_poll_checkpoint(self, tenant_id: str, provider: str, connection_id: str) -> AdapterPollCheckpoint | None:
+        return deepcopy(self.poll_checkpoints.get((tenant_id, provider, connection_id)))
+
+    def insert_or_advance_poll_checkpoint(self, value: AdapterPollCheckpoint, expected_version: int) -> AdapterPollCheckpoint:
+        key = (value.tenant_id, value.provider, value.connection_id)
+        prior = self.poll_checkpoints.get(key)
+        actual = prior.version if prior else 0
+        if actual != expected_version or value.version != expected_version + 1:
+            raise ConflictError("adapter poll checkpoint version conflict")
+        self.poll_checkpoints[key] = deepcopy(value)
+        return deepcopy(value)
 
     def add_tenant(self, tenant: Tenant) -> None:
         self.tenants[tenant.id] = tenant

@@ -222,17 +222,6 @@ class InboxMessage:
     processed_at: datetime | None = None
 
 
-class AdapterCapability(str, Enum):
-    DEMO_EXECUTE = "demo_execute"
-    DEMO_LOOKUP = "demo_lookup"
-    INBOUND_EVENTS = "inbound_events"
-    ORDERS_READ = "orders_read"
-    ORDERS_WRITE = "orders_write"
-    PRODUCTS_READ = "products_read"
-    PRODUCTS_WRITE = "products_write"
-    INVENTORY_READ = "inventory_read"
-
-
 class AgentState(str, Enum):
     RUNNING = "running"
     WAITING = "waiting"
@@ -271,6 +260,71 @@ class AdapterCapabilityManifest:
     capabilities: frozenset[AdapterCapability]
     inbound_schema_versions: frozenset[int]
     updated_at: datetime
+
+
+class AdapterCapability(str, Enum):
+    DEMO_EXECUTE = "demo_execute"
+    DEMO_LOOKUP = "demo_lookup"
+    INBOUND_EVENTS = "inbound_events"
+    ORDERS_READ = "orders_read"
+    ORDERS_WRITE = "orders_write"
+    PRODUCTS_READ = "products_read"
+    PRODUCTS_WRITE = "products_write"
+    INVENTORY_READ = "inventory_read"
+
+
+@dataclass(frozen=True)
+class DemoAdapterDescription:
+    """The deliberately small, read-only contract used by DEMO ingestion."""
+
+    provider: str
+    adapter_version: str
+    normalized_schema_version: int = 1
+    capability: AdapterCapability = AdapterCapability.ORDERS_READ
+    mode: str = "DEMO"
+
+
+@dataclass(frozen=True)
+class NormalizedDemoOrder:
+    external_order_id: str
+    event_id: str
+    revision: int
+    currency: str
+    total_minor: int
+    lines: tuple[Mapping[str, Any], ...]
+    source_digest: str | None = None
+
+
+@dataclass(frozen=True)
+class DemoPage:
+    items: tuple[Mapping[str, Any], ...]
+    next_cursor: str | None
+    has_more: bool
+    observed_at: datetime
+
+
+@dataclass(frozen=True)
+class NormalizedInboundPayload:
+    tenant_id: str
+    immutable_ref: str
+    canonical_digest: str
+    schema_version: int
+    payload_json: str
+    source_digest: str | None
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class AdapterPollCheckpoint:
+    tenant_id: str
+    provider: str
+    connection_id: str
+    adapter_version: str
+    cursor: str | None
+    overlap_from: datetime | None
+    version: int
+    updated_at: datetime
+    last_success_at: datetime | None = None
 
 
 class AttemptState(str, Enum):

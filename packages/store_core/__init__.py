@@ -13,6 +13,11 @@ from .dashboard import DashboardProjection
 from .errors import AuthorizationError, ConflictError, NotFoundError, TenantBoundaryError
 from .service import StoreControlPlane
 from .sqlite_repository import SQLiteRepository
+from .ingestion import (
+    DemoPollResult, DemoReadAdapter, FixtureDemoReadAdapter, RetryableReadError, Page,
+    normalize_demo_order, validate_demo_page,
+)
+from .domain import AdapterCapability, AdapterCapabilityManifest, DemoPage
 
 __all__ = [
     "ApprovalKind",
@@ -29,4 +34,14 @@ __all__ = [
     "OutboxState",
     "SQLiteRepository",
     "DashboardProjection",
+    "DemoPollResult",
+    "DemoReadAdapter",
+    "FixtureDemoReadAdapter",
+    "RetryableReadError",
+    "Page",
+    "AdapterCapability",
+    "AdapterCapabilityManifest",
+    "DemoPage",
+    "normalize_demo_order",
+    "validate_demo_page",
 ]

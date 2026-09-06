@@ -143,6 +143,28 @@ class StoreControlPlane:
             self._audit(context.tenant_id, context.user_id, 'inbox.processed', message.id, 'accepted', {'payload_digest': message.payload_digest})
             return message, False
 
+    def poll_demo_connection(self, context: TenantContext, provider: str, connection_id: str,
+                             expected_checkpoint_version: int, adapter: Any,
+                             overlap_from: datetime | None = None) -> Any:
+        """Ingest exactly one local DEMO page with payload/receipt/cursor atomicity."""
+        from .ingestion import poll_demo_connection
+        return poll_demo_connection(self, context, provider, connection_id,
+                                    expected_checkpoint_version, adapter, overlap_from)
+
+    def get_normalized_payload(self, context: TenantContext, immutable_ref: str) -> Any:
+        """Read one immutable payload only through the authenticated tenant context."""
+        self.require(context, Capability.TENANT_ADMIN)
+        self._inbound_identifier(immutable_ref)
+        return self.repo.get_normalized_payload(context.tenant_id, immutable_ref)
+
+    def normalized_payloads_for(self, context: TenantContext) -> tuple[Any, ...]:
+        self.require(context, Capability.TENANT_ADMIN)
+        return self.repo.normalized_payloads_for(context.tenant_id)
+
+    def poll_checkpoint(self, context: TenantContext, provider: str, connection_id: str) -> Any:
+        self.require(context, Capability.TENANT_ADMIN)
+        return self.repo.get_poll_checkpoint(context.tenant_id, provider, connection_id)
+
     def dashboard_snapshot(self, context: TenantContext, *, project_root: str | None = None) -> dict[str, Any]:
         """Return a tenant-scoped, read-only dashboard projection.
 

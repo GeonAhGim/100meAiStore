@@ -14,6 +14,7 @@ from .domain import (
     Membership, OutboxEvent, OutboxState, Role, Tenant, User,
     ApprovalIntent, ExecutionPreparation,
     DemoExecutionControl, ExecutionAttempt, AttemptObservation, AttemptState,
+    NormalizedInboundPayload, AdapterPollCheckpoint,
 )
 from .errors import ConflictError, NotFoundError, TenantBoundaryError
 
@@ -171,6 +172,23 @@ CREATE TABLE attempt_observations(
 CREATE INDEX observations_tenant_attempt ON attempt_observations(tenant_id,attempt_id);
 CREATE TRIGGER attempt_observations_no_update BEFORE UPDATE ON attempt_observations BEGIN SELECT RAISE(ABORT,'observations are append-only'); END;
 CREATE TRIGGER attempt_observations_no_delete BEFORE DELETE ON attempt_observations BEGIN SELECT RAISE(ABORT,'observations are append-only'); END;
+"""), (8, """
+CREATE TABLE normalized_inbound_payloads(
+ tenant_id TEXT NOT NULL, immutable_ref TEXT NOT NULL, canonical_digest TEXT NOT NULL CHECK(length(canonical_digest)=64),
+ schema_version INTEGER NOT NULL CHECK(schema_version>0), payload_json TEXT NOT NULL,
+ source_digest TEXT CHECK(source_digest IS NULL OR length(source_digest)=64), created_at TEXT NOT NULL,
+ PRIMARY KEY(tenant_id,immutable_ref),
+ FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT);
+CREATE INDEX normalized_payloads_tenant_digest ON normalized_inbound_payloads(tenant_id,canonical_digest);
+CREATE TRIGGER normalized_payloads_no_update BEFORE UPDATE ON normalized_inbound_payloads BEGIN SELECT RAISE(ABORT,'normalized payloads are immutable'); END;
+CREATE TRIGGER normalized_payloads_no_delete BEFORE DELETE ON normalized_inbound_payloads BEGIN SELECT RAISE(ABORT,'normalized payloads are immutable'); END;
+CREATE TABLE adapter_poll_checkpoints(
+ tenant_id TEXT NOT NULL, provider TEXT NOT NULL, connection_id TEXT NOT NULL, adapter_version TEXT NOT NULL,
+ cursor TEXT, overlap_from TEXT, version INTEGER NOT NULL CHECK(version>0), updated_at TEXT NOT NULL,
+ last_success_at TEXT,
+ PRIMARY KEY(tenant_id,provider,connection_id),
+ FOREIGN KEY(tenant_id,provider,connection_id) REFERENCES adapter_capability_manifests(tenant_id,provider,connection_id) ON DELETE RESTRICT);
+CREATE INDEX poll_checkpoints_tenant_updated ON adapter_poll_checkpoints(tenant_id,updated_at);
 """))
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -367,6 +385,87 @@ class SQLiteRepository:
             if changed != 1:
                 raise ConflictError('inbox state/version conflict')
             return self.get_inbox(tenant_id, inbox_id)
+
+    def save_normalized_payload(self, value: NormalizedInboundPayload) -> NormalizedInboundPayload:
+        _payload_digest(value.canonical_digest)
+        if value.source_digest is not None:
+            _payload_digest(value.source_digest)
+        row = self.connection.execute(
+            "SELECT * FROM normalized_inbound_payloads WHERE tenant_id=? AND immutable_ref=?",
+            (value.tenant_id, value.immutable_ref),
+        ).fetchone()
+        if row:
+            prior = self._normalized_payload(row)
+            if (prior.canonical_digest, prior.payload_json, prior.schema_version, prior.source_digest) != (
+                value.canonical_digest, value.payload_json, value.schema_version, value.source_digest):
+                raise ConflictError("immutable payload reference reused with different content")
+            return prior
+        try:
+            self.connection.execute(
+                "INSERT INTO normalized_inbound_payloads VALUES (?,?,?,?,?,?,?)",
+                (value.tenant_id, value.immutable_ref, value.canonical_digest, value.schema_version,
+                 value.payload_json, value.source_digest, value.created_at.isoformat()),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise ConflictError("normalized payload could not be stored") from exc
+        return value
+
+    @staticmethod
+    def _normalized_payload(row: sqlite3.Row) -> NormalizedInboundPayload:
+        return NormalizedInboundPayload(row['tenant_id'], row['immutable_ref'], row['canonical_digest'],
+            row['schema_version'], row['payload_json'], row['source_digest'], _dt(row['created_at']))
+
+    def get_normalized_payload(self, tenant_id: str, immutable_ref: str) -> NormalizedInboundPayload:
+        row = self.connection.execute(
+            "SELECT * FROM normalized_inbound_payloads WHERE tenant_id=? AND immutable_ref=?",
+            (tenant_id, immutable_ref),
+        ).fetchone()
+        if row is None:
+            raise NotFoundError('normalized payload not found')
+        return self._normalized_payload(row)
+
+    def normalized_payloads_for(self, tenant_id: str) -> tuple[NormalizedInboundPayload, ...]:
+        return tuple(self._normalized_payload(row) for row in self.connection.execute(
+            "SELECT * FROM normalized_inbound_payloads WHERE tenant_id=? ORDER BY created_at,immutable_ref",
+            (tenant_id,),
+        ))
+
+    def get_poll_checkpoint(self, tenant_id: str, provider: str, connection_id: str) -> AdapterPollCheckpoint | None:
+        row = self.connection.execute(
+            "SELECT * FROM adapter_poll_checkpoints WHERE tenant_id=? AND provider=? AND connection_id=?",
+            (tenant_id, provider, connection_id),
+        ).fetchone()
+        if row is None:
+            return None
+        return AdapterPollCheckpoint(tenant_id, provider, connection_id, row['adapter_version'], row['cursor'],
+            _dt(row['overlap_from']), row['version'], _dt(row['updated_at']), _dt(row['last_success_at']))
+
+    def insert_or_advance_poll_checkpoint(self, value: AdapterPollCheckpoint, expected_version: int) -> AdapterPollCheckpoint:
+        prior = self.get_poll_checkpoint(value.tenant_id, value.provider, value.connection_id)
+        actual = prior.version if prior else 0
+        if actual != expected_version or value.version != expected_version + 1:
+            raise ConflictError('adapter poll checkpoint version conflict')
+        if prior is None:
+            try:
+                self.connection.execute(
+                    "INSERT INTO adapter_poll_checkpoints VALUES (?,?,?,?,?,?,?,?,?)",
+                    (value.tenant_id, value.provider, value.connection_id, value.adapter_version, value.cursor,
+                     value.overlap_from.isoformat() if value.overlap_from else None, value.version,
+                     value.updated_at.isoformat(), value.last_success_at.isoformat() if value.last_success_at else None),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise ConflictError('adapter poll checkpoint insert conflict') from exc
+        else:
+            changed = self.connection.execute(
+                "UPDATE adapter_poll_checkpoints SET adapter_version=?,cursor=?,overlap_from=?,version=?,updated_at=?,last_success_at=? "
+                "WHERE tenant_id=? AND provider=? AND connection_id=? AND version=?",
+                (value.adapter_version, value.cursor, value.overlap_from.isoformat() if value.overlap_from else None,
+                 value.version, value.updated_at.isoformat(), value.last_success_at.isoformat() if value.last_success_at else None,
+                 value.tenant_id, value.provider, value.connection_id, expected_version),
+            ).rowcount
+            if changed != 1:
+                raise ConflictError('adapter poll checkpoint version conflict')
+        return value
 
     def _migrate(self) -> None:
         versions = [version for version, _ in MIGRATIONS]
