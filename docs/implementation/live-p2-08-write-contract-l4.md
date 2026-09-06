@@ -142,3 +142,24 @@ creation ID as pending readback. This is a deliberately restricted fixture:
 the reserved `.invalid` image URL and synthetic category requirements cannot be
 used as vendor-compliant listing inputs. Product readback and batch/split/claim
 execution contracts remain open, as does application/worker wiring.
+
+## Single-receipt return-review fixture
+
+[Official return approval reference](https://developers.coupang.com/en/api/returns/approve-request-for-return)
+requires vendor/receipt identity and matching total quantity after warehouse
+confirmation. Duplicate/pre-refunded/completed cases require status review.
+Bound this fixture to one receipt line, RETURN, warehouse-confirmed, no observed
+pre-refund, fresh claim source and explicit synthetic withdrawal-review digest.
+Bind tenant, channel, vendor, exact receipt/order/item IDs, quantity, synthetic
+amount/cap and all evidence/time fields into review. Response 200 alone requires
+exact-ID completed-state fixture readback, not proof of bank refund. Unknown,
+partial, changed-count or foreign readback requires reconciliation with no resend.
+The current reference lists v4 while the official internationalization notice
+lists v5; no transport/method/version is inferred or executed by this fixture.
+
+Return-review evidence: five focused tests and 205 full tests passed;
+compileall, diff whitespace, common secret-pattern and forbidden filename
+checks passed. Socket-denied roundtrip verifies synthetic review and exact-ID
+completed observation while all real-write/refund/resend flags remain false.
+Batch receipts, raw withdrawal feed normalization and production approval/
+worker integration remain open. Review digest is not an operator signature.
