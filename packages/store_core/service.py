@@ -276,6 +276,19 @@ class StoreControlPlane:
         self.require(context, Capability.TENANT_ADMIN)
         return self.repo.realized_profits_for(context.tenant_id, batch_id)
 
+    def approval_inbox(self, context: TenantContext) -> dict[str, Any]:
+        from .approvals import approval_inbox
+        return approval_inbox(self, context)
+
+    def approval_detail(self, context: TenantContext, approval_id: str) -> dict[str, Any]:
+        from .approvals import approval_detail
+        return approval_detail(self, context, approval_id)
+
+    def decide_approval(self, context: TenantContext, approval_id: str, approve: bool,
+                        reason: str, confirmation_nonce: str) -> Approval:
+        from .approvals import decide_approval
+        return decide_approval(self, context, approval_id, approve, reason, confirmation_nonce)
+
     def dashboard_snapshot(self, context: TenantContext, *, project_root: str | None = None) -> dict[str, Any]:
         """Return a tenant-scoped, read-only dashboard projection.
 

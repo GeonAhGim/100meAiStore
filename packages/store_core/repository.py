@@ -570,6 +570,15 @@ class InMemoryRepository:
         except KeyError as exc:
             raise NotFoundError("approval not found") from exc
 
+    def approvals_for(self, tenant_id: str) -> tuple[Approval, ...]:
+        return tuple(deepcopy(value) for (tid, _), value in self.approvals.items() if tid == tenant_id)
+
+    def get_approval(self, tenant_id: str, approval_id: str) -> Approval:
+        try:
+            return deepcopy(next(value for (tid, aid), value in self.approvals.items() if tid == tenant_id and aid == approval_id))
+        except StopIteration as exc:
+            raise NotFoundError("approval not found") from exc
+
     def audits_for(self, tenant_id: str) -> tuple[AuditEvent, ...]:
         return tuple(self.audit_events[tenant_id])
 

@@ -1076,6 +1076,14 @@ class SQLiteRepository:
         if not r: raise NotFoundError("approval not found")
         return Approval(r["id"],r["tenant_id"],r["command_id"],ApprovalKind(r["kind"]),ApprovalState(r["state"]),_dt(r["requested_at"]),_dt(r["expires_at"]),tuple(json.loads(r["evidence_json"])),r["decided_by"],r["decision_reason"])  # type: ignore[arg-type]
 
+    def approvals_for(self, tenant_id: str) -> tuple[Approval, ...]:
+        return tuple(Approval(r["id"],r["tenant_id"],r["command_id"],ApprovalKind(r["kind"]),ApprovalState(r["state"]),_dt(r["requested_at"]),_dt(r["expires_at"]),tuple(json.loads(r["evidence_json"])),r["decided_by"],r["decision_reason"]) for r in self.connection.execute("SELECT * FROM approvals WHERE tenant_id=? ORDER BY requested_at,id", (tenant_id,)))  # type: ignore[arg-type]
+
+    def get_approval(self, tenant_id: str, approval_id: str) -> Approval:
+        r = self.connection.execute("SELECT * FROM approvals WHERE tenant_id=? AND id=?", (tenant_id, approval_id)).fetchone()
+        if not r: raise NotFoundError("approval not found")
+        return Approval(r["id"],r["tenant_id"],r["command_id"],ApprovalKind(r["kind"]),ApprovalState(r["state"]),_dt(r["requested_at"]),_dt(r["expires_at"]),tuple(json.loads(r["evidence_json"])),r["decided_by"],r["decision_reason"])  # type: ignore[arg-type]
+
     def append_audit(self, e: AuditEvent) -> None:
         self.connection.execute("INSERT INTO audit_events(id,tenant_id,occurred_at,actor_ref,action,target_ref,outcome,correlation_id,metadata_json,prev_hash,event_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (e.id,e.tenant_id,e.occurred_at.isoformat(),e.actor_ref,e.action,e.target_ref,e.outcome,e.correlation_id,json.dumps(e.metadata,ensure_ascii=False,sort_keys=True),e.prev_hash,e.event_hash))

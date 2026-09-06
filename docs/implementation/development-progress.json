@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
   "basis": "docs/architecture/11-adr-risks-backlog.md#implementation-backlog-dependency-ordered",
-  "updated_at": "2026-09-06T13:20:00+09:00",
+  "updated_at": "2026-09-06T13:45:00+09:00",
   "items": [
     {"id":"B01","title":"테넌트·권한·세션·정책·감사","status":"completed","evidence":"docs/implementation/core01-evidence.md"},
     {"id":"B02","title":"상품 원본·표준·채널 투영 및 계보","status":"completed","evidence":"docs/implementation/b02-demo-catalog-l4.md"},
     {"id":"B03","title":"DEMO 채널·공급처 fixture와 계약 harness","status":"completed","evidence":"docs/implementation/adapter01-evidence.md"},
     {"id":"B04","title":"재고·가격 계산과 10% 미만 차단","status":"in_progress","evidence":"docs/implementation/b04-demo-inventory-price-l4.md"},
     {"id":"B05","title":"주문 라우팅·분리 발주·멱등·재시작 복구","status":"in_progress","evidence":"docs/implementation/order03-cancel-tracking-l4.md"},
-    {"id":"B06","title":"승인함·모바일 계약·제출 시 재검증","status":"in_progress","evidence":"docs/implementation/core02-evidence.md"},
+    {"id":"B06","title":"승인함·모바일 계약·제출 시 재검증","status":"completed","evidence":"docs/implementation/b06-demo-approval-mobile-l4.md"},
     {"id":"B07","title":"클레임·정산 및 예상/실현 순이익","status":"in_progress","evidence":"docs/implementation/finance01-demo-reconciliation-l4.md"},
     {"id":"B08","title":"도구 게이트웨이·에이전트 원장·BYOK·예산 중단","status":"pending"},
     {"id":"B09","title":"알림 대체 경로와 장애 확인","status":"pending"},
