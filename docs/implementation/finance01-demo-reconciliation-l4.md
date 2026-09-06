@@ -42,3 +42,7 @@ now computes a separate projected contribution (`order total - PO cost`) while
 retaining settlement-derived realized amount. Orders without a cost snapshot
 continue to report projected as unavailable. `test_b07_projected_cost.py`
 covers this binding; split-order/restart/rollback evidence remains pending.
+Follow-up coverage now includes multi-PO cost aggregation, settlement restart,
+claim-state independence, and outbox-failure rollback in
+`test_b07_split_restart_rollback.py`; changed-file and currency/missing-order
+conflicts remain fail-closed.
