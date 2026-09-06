@@ -9,6 +9,7 @@ from typing import Any
 
 from .channel_order_contracts import (ContractQuarantine, OfflineOrderPage, canonical_json,
                                      parse_naver_details)
+from .channel_claim_contracts import OfflineClaimPage
 
 
 def _digest(value: Any) -> str:
@@ -43,6 +44,8 @@ class FixtureTrackingReview:
     invoice_number: str = field(repr=False)
     source_digest: str = field(repr=False)
     preparation_review_digest: str = field(repr=False)
+    claim_source_digest: str = field(repr=False)
+    claims_observed_at: str
     observed_at: str
     review_expires_at: str
     carrier: str = "KDEXP"
@@ -117,6 +120,7 @@ def build_coupang_tracking_review(
     order_id: str, shipment_id: str, vendor_item_id: str, invoice_number: str,
     observed_at: datetime, now: datetime, review_expires_at: datetime,
     preparation_review_digest: str, post_preparation_reviewed: bool,
+    claim_page: OfflineClaimPage, claims_observed_at: datetime,
     max_age_seconds: int = 300,
 ) -> FixtureTrackingReview:
     """300 seconds is local fixture policy, not a vendor freshness guarantee."""
@@ -131,6 +135,15 @@ def build_coupang_tracking_review(
         raise ContractQuarantine("invalid_review_expiry")
     if post_preparation_reviewed is not True:
         raise ContractQuarantine("post_preparation_review_required")
+    if not isinstance(claim_page, OfflineClaimPage) or claim_page.next_cursor is not None:
+        raise ContractQuarantine("complete_claim_fixture_required")
+    claims_observed_at = _aware(claims_observed_at)
+    if not timedelta(0) <= now - claims_observed_at < timedelta(seconds=max_age_seconds):
+        raise ContractQuarantine("stale_or_future_claim_observation")
+    if review_expires_at > claims_observed_at + timedelta(seconds=max_age_seconds):
+        raise ContractQuarantine("claim_review_expiry_exceeded")
+    if any(claim.order_id == order_id and claim.vendor_item_id == vendor_item_id for claim in claim_page.lines):
+        raise ContractQuarantine("separate_claim_feed_requires_review")
     refs = tuple(map(_ref, (tenant_ref, connection_ref, order_id, shipment_id, vendor_item_id)))
     if not isinstance(invoice_number, str) or not re.fullmatch(r"[0-9]{1,40}", invoice_number):
         raise ContractQuarantine("invalid_fixture_invoice")
@@ -144,7 +157,8 @@ def build_coupang_tracking_review(
     if line.status != "INSTRUCT" or line.claim_review_required or line.remaining_quantity <= 0:
         raise ContractQuarantine("shipment_state_review_required")
     return FixtureTrackingReview(*refs, invoice_number, _hash_ref(page.source_digest),
-                                 _hash_ref(preparation_review_digest), observed_at.isoformat(),
+                                 _hash_ref(preparation_review_digest), _hash_ref(claim_page.source_digest),
+                                 claims_observed_at.isoformat(), observed_at.isoformat(),
                                  review_expires_at.isoformat())
 
 

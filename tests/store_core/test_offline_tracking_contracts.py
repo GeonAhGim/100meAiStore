@@ -7,6 +7,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from packages.store_core.channel_order_contracts import ContractQuarantine, parse_coupang_day_page
+from packages.store_core.channel_claim_contracts import parse_coupang_claim_page
+from tests.store_core.test_channel_claim_contracts import claim_fixture
 from packages.store_core.offline_tracking_contracts import (
     build_coupang_tracking_review, interpret_coupang_tracking_fixture, verify_fixture_review,
     build_naver_dispatch_review, interpret_naver_dispatch_fixture,
@@ -24,7 +26,9 @@ class OfflineTrackingContractTest(unittest.TestCase):
                        vendor_item_id="9007199254740997", invoice_number="000012340001",
                        observed_at=self.now, now=self.now,
                        review_expires_at=self.now + timedelta(seconds=60),
-                       preparation_review_digest="a" * 64, post_preparation_reviewed=True)
+                       preparation_review_digest="a" * 64, post_preparation_reviewed=True,
+                       claim_page=parse_coupang_claim_page({"code": 200, "data": [], "nextToken": ""}),
+                       claims_observed_at=self.now)
 
     def build(self, body=None, **changes):
         return build_coupang_tracking_review(parse_coupang_day_page(self.body if body is None else body),
@@ -80,6 +84,26 @@ class OfflineTrackingContractTest(unittest.TestCase):
         with self.assertRaises(ContractQuarantine):
             self.build(body)
 
+    def test_separate_claim_feed_blocks_dispatch_even_when_order_sheet_has_no_claim(self):
+        claims = claim_fixture()
+        for state in ("RELEASE_STOP_UNCHECKED", "RETURNS_COMPLETED"):
+            claims["data"][0]["receiptStatus"] = state
+            with self.assertRaisesRegex(ContractQuarantine, "separate_claim_feed_requires_review"):
+                self.build(claim_page=parse_coupang_claim_page(claims))
+        claims["data"][0]["orderId"] = 7
+        plan = self.build(claim_page=parse_coupang_claim_page(claims))
+        self.assertFalse(plan.external_write_authorized)
+
+    def test_claim_observation_and_digest_bound_to_approval(self):
+        plan = self.build()
+        changed = self.build(claims_observed_at=self.now - timedelta(seconds=1))
+        self.assertNotEqual(plan.approval_digest, changed.approval_digest)
+        for altered in (changed, replace(plan, claim_source_digest="f" * 64)):
+            with self.assertRaisesRegex(ContractQuarantine, "approval_digest_mismatch"):
+                self.verify(altered, approval_digest=plan.approval_digest)
+        with self.assertRaisesRegex(ContractQuarantine, "claim_review_expiry_exceeded"):
+            self.build(claims_observed_at=self.now - timedelta(seconds=250))
+
     def test_freshness_review_and_expiry_fail_closed(self):
         cases = [dict(observed_at=self.now - timedelta(seconds=300)),
                  dict(observed_at=self.now + timedelta(seconds=1)),
@@ -87,6 +111,9 @@ class OfflineTrackingContractTest(unittest.TestCase):
                  dict(post_preparation_reviewed=1), dict(preparation_review_digest="bad"),
                  dict(review_expires_at=self.now),
                  dict(review_expires_at=self.now + timedelta(seconds=301))]
+        cases += [dict(claim_page=None), dict(claims_observed_at=self.now - timedelta(seconds=300)),
+                  dict(claims_observed_at=self.now + timedelta(seconds=1)),
+                  dict(claim_page=parse_coupang_claim_page({"code": 200, "data": [], "nextToken": "next"}))]
         for change in cases:
             with self.subTest(change=change), self.assertRaises(ContractQuarantine):
                 self.build(**change)

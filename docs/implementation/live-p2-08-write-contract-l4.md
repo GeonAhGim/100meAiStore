@@ -92,3 +92,28 @@ Price/quantity slice evidence: seven focused tests and 186 full tests passed;
 compileall, diff whitespace, forbidden filenames and common secret-pattern scans
 passed. Fixture CSV→cost guard→scoped review→matching readback runs with socket
 creation forbidden. This remains separate from the production worker/outbox.
+
+## Coupang separate claim-feed gate
+
+[Official return/cancel feed](https://developers.coupang.com/ko/api/returns/return-cancellation-request-list-query)
+requires checking release-stop requests before dispatch. Order-sheet cancellation
+quantities alone are insufficient. Parse receipt/order/shipment/vendor-item IDs,
+partial cancel/purchase counts, five published receipt states and preRefund as
+an observation, not bank-refund proof. Preserve signed KRW returnShippingCharge;
+do not retain requester names/addresses or free-text reasons. Unknown state,
+duplicate claim line, inconsistent counts or currency quarantines the page.
+
+Tracking review must additionally bind a fresh synthetic claim-page digest.
+Any matching claim requires manual reconciliation before this narrow tracking
+fixture qualifies. An empty fixture does not prove live feed-window coverage;
+real pagination/window/receipt reconciliation remains G1 and integration work.
+
+Claim slice evidence: official feed rechecked on 2026-09-07; six parser tests
+and fourteen tracking tests cover signed charges, partial quantities, duplicate
+and malformed quarantine, immutable/private observations, replay digests,
+dispatch blocking and claim freshness. Claim observation time is bound into
+the approval digest. Full suite: 194 tests passed; compileall, diff whitespace,
+common secret-pattern and forbidden filename checks passed. No network is
+available in the synthetic parsing/dispatch roundtrip tests. Claim execution,
+offer creation, complete batch/split contracts and operational wiring remain
+open; this slice is not P2-08 completion or real claim/refund verification.
