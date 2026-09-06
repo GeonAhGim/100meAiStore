@@ -8,6 +8,7 @@ from pathlib import Path
 from .channel_order_contracts import (
     ContractQuarantine, OfflineOrderPage, _cursor, _identifier, _integer,
 )
+from .channel_finance_contracts import OfflineSettlementPage
 
 
 class OfflineContractJournal:
@@ -45,7 +46,7 @@ class OfflineContractJournal:
     def _scope(tenant: str, connection: str, provider: str) -> tuple[str, str, str]:
         _identifier(tenant)
         _identifier(connection)
-        if provider not in {"naver", "coupang"}:
+        if provider not in {"naver", "coupang", "naver_settlement", "coupang_settlement"}:
             raise ContractQuarantine("unsupported_provider")
         return tenant, connection, provider
 
@@ -56,11 +57,12 @@ class OfflineContractJournal:
         ).fetchone()
         return row if row else (0, None)
 
-    def record(self, tenant: str, connection: str, page_key: str, page: OfflineOrderPage,
+    def record(self, tenant: str, connection: str, page_key: str, page: OfflineOrderPage | OfflineSettlementPage,
                *, expected_version: int, continuation: str | None = None) -> tuple[int, bool]:
-        if not isinstance(page, OfflineOrderPage):
+        if not isinstance(page, (OfflineOrderPage, OfflineSettlementPage)):
             raise ContractQuarantine("normalized_page_required")
-        scope = self._scope(tenant, connection, page.provider)
+        provider_scope = page.provider + "_settlement" if isinstance(page, OfflineSettlementPage) else page.provider
+        scope = self._scope(tenant, connection, provider_scope)
         _identifier(page_key)
         _integer(expected_version)
         if continuation is not None:
