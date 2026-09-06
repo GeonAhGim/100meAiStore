@@ -1,0 +1,19 @@
+{
+  "fixture_origin": "synthetic-local-2026-09-06",
+  "naver_errors": [
+    {"http_status": 401, "body": {"code": "GW.AUTHN"}, "expected": "REFRESH_REQUIRED"},
+    {"http_status": 429, "body": {"code": "GW.RATE_LIMIT"}, "expected": "RATE_LIMIT_REVIEW"},
+    {"http_status": 429, "body": {"code": "GW.QUOTA_LIMIT"}, "expected": "QUOTA_REVIEW"},
+    {"http_status": 403, "body": {"code": "GW.AUTHN"}, "expected": "MANUAL_REVIEW"},
+    {"http_status": 500, "body": {"code": "UNRECOGNIZED"}, "expected": "MANUAL_REVIEW"}
+  ],
+  "coupang_kr_page": {
+    "tenant_ref": "fixture-tenant",
+    "connection_ref": "fixture-connection",
+    "vendor_id": "fixture-vendor",
+    "start": "2026-08-01",
+    "end": "2026-08-31",
+    "status": "INSTRUCT",
+    "next_token": "fixture+/=&cursor"
+  }
+}

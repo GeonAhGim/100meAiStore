@@ -21,7 +21,7 @@
     {"id":"B10","title":"중단·복구·백업·위협 테스트·비용 상한","status":"completed","evidence":"docs/implementation/b10-demo-safety-l4.md"},
     {"id":"B11","title":"Discovery→Shadow→Assisted→Bounded 증거 패키지","status":"completed","evidence":"docs/implementation/b11-demo-evidence-package-l4.md"},
     {"id":"P2-01","phase":"live_readiness","title":"공식 계약 조사·전체 제품 백로그","status":"completed","evidence":"docs/implementation/live-phase2-backlog.md"},
-    {"id":"P2-02","phase":"live_readiness","title":"무자격증명 요청·오류 계약 테스트","status":"in_progress","evidence":"docs/implementation/live-phase2-backlog.md"},
+    {"id":"P2-02","phase":"live_readiness","title":"무자격증명 요청·오류 계약 테스트","status":"completed","evidence":"docs/implementation/live-p2-02-offline-contract-evidence.md"},
     {"id":"P2-03","phase":"live_readiness","title":"채널 주문 스키마·정규화·페이징","status":"pending","evidence":null},
     {"id":"P2-04","phase":"live_readiness","title":"오프라인 인증·재시도·커서 검증","status":"pending","evidence":null},
     {"id":"P2-05","phase":"live_readiness","title":"공급처 파일·수동 처리 계약","status":"pending","evidence":null},
