@@ -51,6 +51,7 @@ later must record the denominator change. Approval-gated rows remain incomplete.
 | P2-10 | Authorized Discovery: one selected channel/supplier; required sample coverage, external-ID roundtrip, permission/field-loss report; masked evidence only | P2-03–P2-07; D-10 Discovery | G1/G2/G3 required; no external writes |
 | P2-11 | Authorized Shadow: read-only operational comparison, bounded polling, measured freshness, discrepancies and operator exceptions; agreed exit/rollback evidence | P2-09/P2-10; D-10 Shadow | G1/G3/G5 for actual environment |
 | P2-12 | Assisted/Bounded release: scope-specific operator approval, monetary/SKU/time caps, audit and stop/restore verification; sign-off required per capability | P2-08/P2-11; D-10 Assisted/Bounded | G4/G5; bounded policy separately approved |
+| P2-13 | Whole-product traceability and gap audit, repeated safe fixes, clean bootstrap/3-user mock E2E/restart evidence and fail-closed readiness report | All requirements/architecture/implementation/user decisions; P2-08/P2-09 local implementation; audit gated work without executing it | Offline audit only; no G1–G5 authority |
 
 ## Approval packets (prepare before requesting approval)
 
@@ -75,8 +76,11 @@ approval, fabricate access, or treat a completed fixture test as channel readine
 
 ## Progress semantics
 
-Manifest schema 2 groups B01–B11 as `demo_foundation` and P2-01–P2-12 as
-`live_readiness`. Overall = completed tracked packages / 23; DEMO = 11/11.
+Manifest schema 2 groups B01–B11 as `demo_foundation` and P2-01–P2-13 as
+`live_readiness`. On 2026-09-07 the final-audit requirement added P2-13, explicitly
+changing the denominator from 23 to 24. Overall = completed tracked packages /
+24; DEMO = 11/11. Existing 17 completed packages remain completed (17/24 overall,
+6/13 Phase 2). Older point-in-time evidence below retains its historical totals.
 This is backlog completion, not operational availability, elapsed effort or
 certification. All real channel availability remains unverified and LIVE is
 not authorized. Existing DEMO readiness evaluator remains unchanged.

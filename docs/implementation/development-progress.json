@@ -31,6 +31,7 @@
     {"id":"P2-09","phase":"live_readiness","title":"운영 DB·인증·PWA·복구 준비","status":"in_progress","evidence":"docs/implementation/live-p2-09-platform-l4.md"},
     {"id":"P2-10","phase":"live_readiness","title":"승인된 실제 채널·공급처 Discovery","status":"blocked","evidence":"docs/implementation/live-phase2-backlog.md","approval_gate":"G1/G2/G3"},
     {"id":"P2-11","phase":"live_readiness","title":"승인된 읽기 전용 Shadow 운영","status":"blocked","evidence":"docs/implementation/live-phase2-backlog.md","approval_gate":"G1/G3/G5"},
-    {"id":"P2-12","phase":"live_readiness","title":"승인·범위 제한 실운영 검증","status":"blocked","evidence":"docs/implementation/live-phase2-backlog.md","approval_gate":"G4/G5"}
+    {"id":"P2-12","phase":"live_readiness","title":"승인·범위 제한 실운영 검증","status":"blocked","evidence":"docs/implementation/live-phase2-backlog.md","approval_gate":"G4/G5"},
+    {"id":"P2-13","phase":"live_readiness","title":"전수 감사·최소 E2E·설치 및 재시작 검증","status":"pending","evidence":"docs/implementation/live-p2-13-final-audit-l4.md"}
   ]
 }
