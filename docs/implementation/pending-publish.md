@@ -15,7 +15,8 @@ Root confirmed no retries or alternate publishing paths. Keep local work moving.
 | 3622ad2 | Local CSV/manual supplier fixture contract | 144 tests |
 | 6b3bbde | Synthetic signing and bounded retry plans; official-example issues open | 151 tests |
 | 457e8d7 | Correct named-field mapping and safe malformed-kind rejection | 153 tests |
-| Current P2-06 mapping commit (resolve from git log) | Offline channel settlement/ledger mapping | 160 tests |
+| 7543441 | Offline channel settlement/ledger mapping | 160 tests |
+| Current P2-07 packet commit (resolve from git log) | Privacy/license inventory and deletion-free review tests | 165 tests |
 
 No entry here claims remote publication. Later local commits will extend this
 list; only an explicit authorized publishing step may mark them published.

@@ -1,0 +1,30 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "version": 1,
+  "metadata": {
+    "component": {"type": "application", "name": "100me-ai-store", "version": "0.1.0"},
+    "properties": [
+      {"name": "inventory:status", "value": "draft-local-review-only"},
+      {"name": "inventory:transitive-coverage", "value": "incomplete"},
+      {"name": "inventory:production-lock", "value": "false"},
+      {"name": "product:license-decision", "value": "unresolved-DEC-06"}
+    ]
+  },
+  "components": [
+    {
+      "type": "library", "name": "setuptools", "version": "80.9.0",
+      "purl": "pkg:pypi/setuptools@80.9.0",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "properties": [{"name": "inventory:role", "value": "local build tool; declared requirement >=68"},
+                     {"name": "inventory:evidence", "value": "installed distribution License-Expression metadata"}]
+    },
+    {
+      "type": "library", "name": "bcrypt", "version": "4.3.0",
+      "purl": "pkg:pypi/bcrypt@4.3.0",
+      "licenses": [{"license": {"id": "Apache-2.0"}}],
+      "properties": [{"name": "inventory:role", "value": "optional local fixture verification; not a declared runtime dependency"},
+                     {"name": "inventory:evidence", "value": "installed distribution License metadata"}]
+    }
+  ]
+}
