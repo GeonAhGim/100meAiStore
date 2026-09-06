@@ -119,7 +119,9 @@ def submit_demo_tool(service: Any, context: Any, *, actor_type: str, actor_id: s
     encoded = _json(input_value)
     state, blocked = "accepted", None
     with service.repo.transaction():
-        if tool in _MUTATING:
+        if service.repo.demo_stop_active(context.tenant_id, target_id if target_type == "channel" else None):
+            state, blocked = "blocked", "stop_active"
+        elif tool in _MUTATING:
             if approval_id is None:
                 state, blocked = "approval_required", "approval_required"
             else:

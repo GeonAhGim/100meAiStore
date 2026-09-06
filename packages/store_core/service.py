@@ -337,6 +337,15 @@ class StoreControlPlane:
         self.require(context, Capability.TENANT_ADMIN)
         return self.repo.acknowledgements_for(context.tenant_id, incident_id)
 
+    def set_demo_stop(self, context: TenantContext, scope_type: str, scope_ref: str,
+                      stopped: bool, reason: str) -> Any:
+        from .safety import set_demo_stop
+        return set_demo_stop(self, context, scope_type, scope_ref, stopped, reason)
+
+    def backup_demo_sqlite(self, destination: str, tenant_id: str) -> Any:
+        from .safety import backup_demo_sqlite
+        return backup_demo_sqlite(self.repo, destination, tenant_id)
+
     def dashboard_snapshot(self, context: TenantContext, *, project_root: str | None = None) -> dict[str, Any]:
         """Return a tenant-scoped, read-only dashboard projection.
 

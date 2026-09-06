@@ -28,6 +28,7 @@ from .catalog import ingest_demo_catalog, project_demo_offer
 from .approvals import approval_inbox, approval_detail, decide_approval
 from .gateway import configure_demo_byok, set_demo_budget_policy, record_demo_agent_run, submit_demo_tool
 from .notifications import set_demo_notification_preference, notify_demo, acknowledge_demo_incident
+from .safety import set_demo_stop, backup_demo_sqlite
 
 __all__ = [
     "ApprovalKind",
@@ -78,6 +79,8 @@ __all__ = [
     "set_demo_notification_preference",
     "notify_demo",
     "acknowledge_demo_incident",
+    "set_demo_stop",
+    "backup_demo_sqlite",
     "normalize_demo_order",
     "validate_demo_page",
 ]

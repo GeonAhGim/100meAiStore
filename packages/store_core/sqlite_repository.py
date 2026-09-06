@@ -23,6 +23,7 @@ from .domain import (
     DemoCatalogImport, DemoCatalogSnapshot, DemoCanonicalProduct, DemoProductLineage, DemoChannelOffer,
     DemoToolCommand, DemoAgentRun, DemoByokReference, DemoBudgetPolicy, DemoBudgetLedgerEntry,
     DemoNotificationPreference, DemoNotificationDelivery, DemoIncidentAcknowledgement,
+    DemoStopControl, DemoBackupManifest,
 )
 from .errors import ConflictError, NotFoundError, TenantBoundaryError
 
@@ -356,6 +357,15 @@ CREATE TABLE demo_incident_acknowledgements(
  note TEXT NOT NULL, idempotency_key TEXT NOT NULL, acknowledged_at TEXT NOT NULL,
  UNIQUE(tenant_id,id), UNIQUE(tenant_id,idempotency_key), FOREIGN KEY(tenant_id,acknowledged_by) REFERENCES memberships(tenant_id,user_id) ON DELETE RESTRICT);
 CREATE INDEX demo_notification_deliveries_tenant_time ON demo_notification_deliveries(tenant_id,created_at);
+"""), (17, """
+CREATE TABLE demo_stop_controls(
+ tenant_id TEXT NOT NULL, scope_type TEXT NOT NULL, scope_ref TEXT NOT NULL, stopped INTEGER NOT NULL CHECK(stopped IN (0,1)),
+ reason TEXT NOT NULL, version INTEGER NOT NULL CHECK(version>0), updated_at TEXT NOT NULL,
+ PRIMARY KEY(tenant_id,scope_type,scope_ref), FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT);
+CREATE TABLE demo_backup_manifests(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, source_digest TEXT NOT NULL CHECK(length(source_digest)=64),
+ schema_version INTEGER NOT NULL CHECK(schema_version>0), created_at TEXT NOT NULL, UNIQUE(tenant_id,id),
+ FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT);
 """))
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -997,6 +1007,23 @@ class SQLiteRepository:
         if foreign_keys:
             raise ConflictError("sqlite foreign key check failed")
         return {"ready": True, "schema_version": actual, "integrity": integrity}
+
+    def save_stop_control(self, value: DemoStopControl) -> DemoStopControl:
+        self.connection.execute("INSERT INTO demo_stop_controls VALUES (?,?,?,?,?,?,?) ON CONFLICT(tenant_id,scope_type,scope_ref) DO UPDATE SET stopped=excluded.stopped,reason=excluded.reason,version=excluded.version,updated_at=excluded.updated_at", (value.tenant_id, value.scope_type, value.scope_ref, int(value.stopped), value.reason, value.version, value.updated_at.isoformat()))
+        return value
+
+    def stop_controls_for(self, tenant_id: str) -> tuple[DemoStopControl, ...]:
+        return tuple(DemoStopControl(row['tenant_id'], row['scope_type'], row['scope_ref'], bool(row['stopped']), row['reason'], row['version'], _dt(row['updated_at'])) for row in self.connection.execute("SELECT * FROM demo_stop_controls WHERE tenant_id=? ORDER BY scope_type,scope_ref", (tenant_id,)))
+
+    def demo_stop_active(self, tenant_id: str, connection_id: str | None = None) -> bool:
+        return any(row.stopped and (row.scope_type in {"global", "tenant"} or (row.scope_type == "connection" and row.scope_ref == connection_id)) for row in self.stop_controls_for(tenant_id))
+
+    def save_backup_manifest(self, value: DemoBackupManifest) -> DemoBackupManifest:
+        self.connection.execute("INSERT INTO demo_backup_manifests VALUES (?,?,?,?,?)", (value.id, value.tenant_id, value.source_digest, value.schema_version, value.created_at.isoformat()))
+        return value
+
+    def backup_manifests_for(self, tenant_id: str) -> tuple[DemoBackupManifest, ...]:
+        return tuple(DemoBackupManifest(row['id'], row['tenant_id'], row['source_digest'], row['schema_version'], _dt(row['created_at'])) for row in self.connection.execute("SELECT * FROM demo_backup_manifests WHERE tenant_id=? ORDER BY created_at,id", (tenant_id,)))
 
     def save_notification_preference(self, value: DemoNotificationPreference) -> DemoNotificationPreference:
         row = self.connection.execute("SELECT * FROM demo_notification_preferences WHERE tenant_id=? AND notification_key=?", (value.tenant_id, value.notification_key)).fetchone()

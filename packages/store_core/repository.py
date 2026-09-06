@@ -20,6 +20,7 @@ from .domain import DemoCatalogImport, DemoCatalogSnapshot, DemoCanonicalProduct
 from .domain import DemoExecutionControl, ExecutionAttempt, AttemptObservation
 from .domain import DemoToolCommand, DemoAgentRun, DemoByokReference, DemoBudgetPolicy, DemoBudgetLedgerEntry
 from .domain import DemoNotificationPreference, DemoNotificationDelivery, DemoIncidentAcknowledgement
+from .domain import DemoStopControl, DemoBackupManifest
 
 
 class InMemoryRepository:
@@ -75,6 +76,24 @@ class InMemoryRepository:
         self.notification_preferences: dict[tuple[str, str], DemoNotificationPreference] = {}
         self.notification_deliveries: dict[tuple[str, str], DemoNotificationDelivery] = {}
         self.incident_acknowledgements: dict[tuple[str, str], DemoIncidentAcknowledgement] = {}
+        self.stop_controls: dict[tuple[str, str, str], DemoStopControl] = {}
+        self.backup_manifests: dict[tuple[str, str], DemoBackupManifest] = {}
+
+    def save_stop_control(self, value: DemoStopControl) -> DemoStopControl:
+        self.stop_controls[(value.tenant_id, value.scope_type, value.scope_ref)] = deepcopy(value); return deepcopy(value)
+
+    def stop_controls_for(self, tenant_id: str) -> tuple[DemoStopControl, ...]:
+        return tuple(deepcopy(row) for (tid, _, _), row in self.stop_controls.items() if tid == tenant_id)
+
+    def demo_stop_active(self, tenant_id: str, connection_id: str | None = None) -> bool:
+        controls = self.stop_controls_for(tenant_id)
+        return any(row.stopped and (row.scope_type == "tenant" or row.scope_type == "global" or (row.scope_type == "connection" and row.scope_ref == connection_id)) for row in controls)
+
+    def save_backup_manifest(self, value: DemoBackupManifest) -> DemoBackupManifest:
+        self.backup_manifests[(value.tenant_id, value.id)] = deepcopy(value); return deepcopy(value)
+
+    def backup_manifests_for(self, tenant_id: str) -> tuple[DemoBackupManifest, ...]:
+        return tuple(deepcopy(row) for (tid, _), row in self.backup_manifests.items() if tid == tenant_id)
 
     def save_notification_preference(self, value: DemoNotificationPreference) -> DemoNotificationPreference:
         prior = self.notification_preferences.get((value.tenant_id, value.notification_key))

@@ -648,6 +648,26 @@ class DemoIncidentAcknowledgement:
 
 
 @dataclass
+class DemoStopControl:
+    tenant_id: str
+    scope_type: str
+    scope_ref: str
+    stopped: bool
+    reason: str
+    version: int
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class DemoBackupManifest:
+    id: str
+    tenant_id: str
+    source_digest: str
+    schema_version: int
+    created_at: datetime
+
+
+@dataclass
 class RoutingDecision:
     id: str
     tenant_id: str
