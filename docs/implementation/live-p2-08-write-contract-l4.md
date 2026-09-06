@@ -117,3 +117,28 @@ common secret-pattern and forbidden filename checks passed. No network is
 available in the synthetic parsing/dispatch roundtrip tests. Claim execution,
 offer creation, complete batch/split contracts and operational wiring remain
 open; this slice is not P2-08 completion or real claim/refund verification.
+
+## Single-item listing fixture plan
+
+[Coupang creation](https://developers.coupang.com/ko/api/products/product-creation)
+requires shipping/return location, item, content and category fields. Bound the
+local slice to one new domestic item, ordinary/free shipping, explicit category,
+no automatic approval or pricing, and supplied synthetic category requirements.
+Use documented numeric/Boolean types; conflicting example strings are rejected.
+Validate required attributes/notices against the fixture metadata, bind full
+payload/supplier/metadata/rights digests, enforce fresh stock/cost and 10% margin,
+and reject extra unsupported fields. Keep contact/address/content only in the
+caller input; the resulting immutable review retains digests and scoped IDs.
+SUCCESS with warning details or item errors requires reconciliation; even a
+clean creation receipt proves neither vendor approval nor sale availability.
+No URLs are fetched and no request/credential/transport is created. Category
+entitlement, content rights, image validity, vendor address ownership and actual
+approval are unverified; synthetic evidence has no G1–G4 authority.
+
+Listing slice evidence: six targeted tests and 200 full Python tests passed;
+compileall, diff whitespace, common secret-pattern and forbidden filename gates
+passed. A socket-denied synthetic roundtrip validates review binding and treats
+creation ID as pending readback. This is a deliberately restricted fixture:
+the reserved `.invalid` image URL and synthetic category requirements cannot be
+used as vendor-compliant listing inputs. Product readback and batch/split/claim
+execution contracts remain open, as does application/worker wiring.
