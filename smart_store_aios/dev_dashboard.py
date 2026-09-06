@@ -93,6 +93,8 @@ class DevDashboardCollector:
         self.now = now or datetime.now(timezone.utc)
         self._session_cache_key: tuple[tuple[str, int, int], ...] | None = None
         self._session_cache: list[dict[str, Any]] | None = None
+        self._file_cache: dict[str, tuple[int, int, dict[str, Any] | None,
+                                          list[tuple[datetime, str, dict[str, Any]]]]] = {}
 
     def collect(self) -> dict[str, Any]:
         sessions = self._sessions()
@@ -169,22 +171,18 @@ class DevDashboardCollector:
         grouped: dict[str, dict[str, Any]] = {}
         records_by_session: dict[str, list[tuple[datetime, str, dict[str, Any]]]] = {}
         for path in files:
-            meta = self._read_meta(path)
-            if not meta or str(meta.get("cwd", "")) != str(self.project_root):
-                continue
-            records: list[tuple[datetime, str, dict[str, Any]]] = []
             try:
-                with path.open(encoding="utf-8") as stream:
-                    for raw in stream:
-                        try:
-                            record = json.loads(raw)
-                        except (TypeError, ValueError):
-                            continue
-                        payload = record.get("payload") or {}
-                        stamp = _timestamp(record.get("timestamp"))
-                        if stamp and isinstance(payload, dict):
-                            records.append((stamp, str(payload.get("type") or record.get("type", "event")), payload))
-            except (OSError, UnicodeError):
+                stat = path.stat()
+            except OSError:
+                continue
+            cached = self._file_cache.get(str(path))
+            if cached and cached[0] == stat.st_mtime_ns and cached[1] == stat.st_size:
+                meta, records = cached[2], cached[3]
+            else:
+                meta = self._read_meta(path)
+                records = self._read_records(path) if meta and str(meta.get("cwd", "")) == str(self.project_root) else []
+                self._file_cache[str(path)] = (stat.st_mtime_ns, stat.st_size, meta, records)
+            if not meta or str(meta.get("cwd", "")) != str(self.project_root):
                 continue
             session_id = str(meta.get("id") or meta.get("session_id") or path.name)
             grouped.setdefault(session_id, self._new_session(meta, session_id))
@@ -200,6 +198,24 @@ class DevDashboardCollector:
             result.append(item)
         self._session_cache_key, self._session_cache = signature, copy.deepcopy(result)
         return result
+
+    @staticmethod
+    def _read_records(path: Path) -> list[tuple[datetime, str, dict[str, Any]]]:
+        records: list[tuple[datetime, str, dict[str, Any]]] = []
+        try:
+            with path.open(encoding="utf-8") as stream:
+                for raw in stream:
+                    try:
+                        record = json.loads(raw)
+                    except (TypeError, ValueError):
+                        continue
+                    payload = record.get("payload") or {}
+                    stamp = _timestamp(record.get("timestamp"))
+                    if stamp and isinstance(payload, dict):
+                        records.append((stamp, str(payload.get("type") or record.get("type", "event")), payload))
+        except (OSError, UnicodeError):
+            return []
+        return records
 
     @staticmethod
     def _read_meta(path: Path) -> dict[str, Any] | None:
@@ -376,7 +392,11 @@ class DevDashboardHandler(BaseHTTPRequestHandler):
 class DevDashboardServer(ThreadingHTTPServer):
     def __init__(self, address: tuple[str, int], project_root: str | Path, codex_home: str | Path | None = None) -> None:
         super().__init__(address, DevDashboardHandler)
-        self.collector_factory = lambda: DevDashboardCollector(project_root, codex_home)
+        self.collector = DevDashboardCollector(project_root, codex_home)
+        def collector_factory() -> DevDashboardCollector:
+            self.collector.now = datetime.now(timezone.utc)
+            return self.collector
+        self.collector_factory = collector_factory
 
 
 def main() -> None:

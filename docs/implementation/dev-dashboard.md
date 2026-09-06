@@ -13,7 +13,7 @@
 python -m smart_store_aios.dev_dashboard --project-root C:\smart_store --port 8767
 ```
 
-`http://127.0.0.1:8767/`은 화면 활성 여부와 무관하게 2초마다 `GET /api/dev-dashboard`를 호출합니다.
+`http://127.0.0.1:8767/`은 화면 활성 여부와 무관하게 10초마다 `GET /api/dev-dashboard`를 호출합니다.
 독립 watchdog은 5초마다 포트를 확인하고 서버가 종료되면 다시 시작합니다. 조회와 복구에는 AI 호출이 없습니다.
 백그라운드 탭에서는 polling을 건너뛰고, 다시 활성화되면 즉시 조회합니다.
 POST와 상태 변경은 지원하지 않습니다.

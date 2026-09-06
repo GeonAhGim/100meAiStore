@@ -97,8 +97,16 @@ class DevDashboardCollectorTest(unittest.TestCase):
             self.assertEqual({"signal_lost", "usage_limited"}, {x["state"] for x in data["agents"]})
             self.assertEqual("historical_only", data["cli_worker"]["state"])
 
+    def test_server_reuses_collector_cache_between_requests(self):
+        with tempfile.TemporaryDirectory() as temp:
+            server = DevDashboardServer(("127.0.0.1", 0), temp, Path(temp) / "codex")
+            try:
+                self.assertIs(server.collector_factory(), server.collector_factory())
+            finally:
+                server.server_close()
+
     def test_read_only_api_and_static_polling_contract(self):
-        self.assertIn("setInterval(load,2000)", INDEX_HTML)
+        self.assertIn("setInterval(load,10000)", INDEX_HTML)
         self.assertNotIn("if(busy||document.hidden)", INDEX_HTML)
         self.assertNotIn("tenant_id", INDEX_HTML)
         with tempfile.TemporaryDirectory() as temp:
