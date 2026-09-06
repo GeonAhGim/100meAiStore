@@ -40,3 +40,9 @@ stale CAS, duplicate and corrected tracking, multi-supplier line isolation,
 restart recovery, tenant isolation, audit/outbox atomic rollback, and no
 external adapter invocation. The packet remains local DEMO until official
 channel/supplier contracts and approval gates are separately authorized.
+
+Implementation evidence: `tests/store_core/test_order_routing.py` covers
+pending and submitted cancellation races plus line-level duplicate/corrected
+tracking. Full verification is `python -B -m pytest -q -p no:cacheprovider` —
+91 passed on 2026-09-06; compileall, `git diff --check`, and repository
+secret-pattern scan passed.

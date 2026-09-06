@@ -112,5 +112,41 @@ class OrderRoutingTests(unittest.TestCase):
         with self.assertRaises(ConflictError): self.app.approve_demo_po(self.ctx, pos[0].id, True, "stale")
         self.assertEqual(PurchaseOrderState.APPROVAL_PENDING, self.app.purchase_orders(self.ctx, order.id)[0].status)
 
+    def routed_order(self):
+        order, _ = self.app.ingest_order(self.ctx, "demo-channel", self.payload_ref)
+        pos = self.app.propose_routing(self.ctx, order.id, {
+            "sku-a": [{"supplier_id": "supplier-a", "unit_cost_minor": 100, "available_quantity": 1}],
+            "sku-b": [{"supplier_id": "supplier-a", "unit_cost_minor": 150, "available_quantity": 1}],
+        })
+        return order, pos[0]
+
+    def test_order08_pending_cancel_is_cas_and_cancels_pending_po(self):
+        order, po = self.routed_order()
+        cancelled, replay = self.app.request_demo_cancel(self.ctx, order.id, "customer request", 2)
+        self.assertFalse(replay)
+        self.assertEqual(ChannelOrderState.CANCELLED, cancelled.status)
+        self.assertEqual(PurchaseOrderState.CANCELLED, self.app.purchase_orders(self.ctx, order.id)[0].status)
+        same, replay = self.app.request_demo_cancel(self.ctx, order.id, "replay", 999)
+        self.assertTrue(replay); self.assertEqual(cancelled.id, same.id)
+
+    def test_order09_submitted_cancel_keeps_evidence_and_requests_compensation(self):
+        order, po = self.routed_order()
+        self.app.approve_demo_po(self.ctx, po.id, True, "approve")
+        self.app.submit_demo_po(self.ctx, po.id)
+        self.app.request_demo_cancel(self.ctx, order.id, "after submit", 2)
+        self.assertEqual(PurchaseOrderState.CANCEL_REQUESTED, self.app.purchase_orders(self.ctx, order.id)[0].status)
+        self.assertTrue(any(event.topic == "purchase_order.cancel_requested" for event in self.repo.outbox_for(self.ctx.tenant_id)))
+
+    def test_order10_tracking_is_line_level_and_corrected_status_is_append_only(self):
+        order, _ = self.routed_order()
+        line = self.app.order_lines(self.ctx, order.id)[0]
+        first, replay = self.app.ingest_demo_tracking(self.ctx, line.id, "track-1", "IN_TRANSIT")
+        self.assertFalse(replay); self.assertEqual("IN_TRANSIT", first.tracking_status)
+        same, replay = self.app.ingest_demo_tracking(self.ctx, line.id, "track-1", "IN_TRANSIT")
+        self.assertTrue(replay); self.assertEqual(first.version, same.version)
+        corrected, replay = self.app.ingest_demo_tracking(self.ctx, line.id, "track-1", "DELIVERED")
+        self.assertFalse(replay); self.assertEqual("DELIVERED", corrected.tracking_status)
+        self.assertEqual(2, len(self.app.tracking_for(self.ctx, line.id)))
+
 
 if __name__ == "__main__": unittest.main()

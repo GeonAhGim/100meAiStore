@@ -379,6 +379,21 @@ class OrderLine:
     unit_minor: int
     routed_status: str = "unrouted"
     version: int = 1
+    tracking_key: str | None = None
+    tracking_status: str | None = None
+    tracking_version: int = 0
+    tracking_observed_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class TrackingObservation:
+    id: str
+    tenant_id: str
+    order_line_id: str
+    tracking_key: str
+    status: str
+    observed_at: datetime
+    response_digest: str
 
 
 @dataclass

@@ -13,6 +13,7 @@ from .domain import (AdapterCapabilityManifest, InboxMessage, InboxState, Approv
                      ExecutionPreparation, NormalizedInboundPayload, AdapterPollCheckpoint)
 from .domain import (ChannelOrder, OrderLine, RoutingDecision, SupplierPurchaseOrder, PurchaseLine,
                      ChannelOrderState, RoutingState, PurchaseOrderState)
+from .domain import TrackingObservation
 from .domain import DemoExecutionControl, ExecutionAttempt, AttemptObservation
 
 
@@ -50,6 +51,7 @@ class InMemoryRepository:
         self.routing_decisions: dict[tuple[str, str], RoutingDecision] = {}
         self.purchase_orders: dict[tuple[str, str], SupplierPurchaseOrder] = {}
         self.purchase_lines: dict[tuple[str, str], PurchaseLine] = {}
+        self.tracking_observations: dict[tuple[str, str], list[TrackingObservation]] = defaultdict(list)
 
     def save_demo_control(self, value: DemoExecutionControl) -> None:
         self.get_command(value.tenant_id, value.command_id)
@@ -243,6 +245,25 @@ class InMemoryRepository:
         if current is None: raise NotFoundError("order line not found")
         if current.version != expected_version or value.version != expected_version + 1: raise ConflictError("order line version conflict")
         self.order_lines[(value.tenant_id, value.id)] = deepcopy(value)
+
+    def get_order_line(self, tenant_id: str, line_id: str) -> OrderLine:
+        try: return deepcopy(self.order_lines[(tenant_id, line_id)])
+        except KeyError as exc: raise NotFoundError("order line not found") from exc
+
+    def save_tracking_observation(self, value: TrackingObservation) -> TrackingObservation:
+        rows = self.tracking_observations[(value.tenant_id, value.order_line_id)]
+        prior = next((row for row in rows if (row.tracking_key, row.status) == (value.tracking_key, value.status)), None)
+        if prior:
+            if prior.response_digest != value.response_digest: raise ConflictError("tracking identity reused with different content")
+            return deepcopy(prior)
+        rows.append(deepcopy(value)); return deepcopy(value)
+
+    def tracking_observation_for(self, tenant_id: str, line_id: str, tracking_key: str, status: str) -> TrackingObservation | None:
+        return next((deepcopy(row) for row in self.tracking_observations[(tenant_id, line_id)] if (row.tracking_key, row.status) == (tracking_key, status)), None)
+
+    def tracking_for(self, tenant_id: str, line_id: str) -> tuple[TrackingObservation, ...]:
+        self.get_order_line(tenant_id, line_id)
+        return tuple(deepcopy(row) for row in self.tracking_observations[(tenant_id, line_id)])
 
     def order_lines_for(self, tenant_id: str, order_id: str) -> tuple[OrderLine, ...]:
         self.get_channel_order(tenant_id, order_id)

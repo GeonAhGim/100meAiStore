@@ -199,6 +199,22 @@ class StoreControlPlane:
         from .order02 import reconcile_demo_po
         return reconcile_demo_po(self, context, po_id, response)
 
+    def request_demo_cancel(self, context: TenantContext, order_id: str, reason: str,
+                            expected_order_version: int) -> tuple[Any, bool]:
+        from .order03 import request_demo_cancel
+        return request_demo_cancel(self, context, order_id, reason, expected_order_version)
+
+    def ingest_demo_tracking(self, context: TenantContext, order_line_id: str, tracking_key: str,
+                             status: str, observed_at: datetime | None = None,
+                             expected_line_version: int | None = None) -> tuple[Any, bool]:
+        from .order03 import ingest_demo_tracking
+        return ingest_demo_tracking(self, context, order_line_id, tracking_key, status,
+                                    observed_at, expected_line_version)
+
+    def tracking_for(self, context: TenantContext, order_line_id: str) -> tuple[Any, ...]:
+        self.require(context, Capability.TENANT_ADMIN)
+        return self.repo.tracking_for(context.tenant_id, order_line_id)
+
     def dashboard_snapshot(self, context: TenantContext, *, project_root: str | None = None) -> dict[str, Any]:
         """Return a tenant-scoped, read-only dashboard projection.
 

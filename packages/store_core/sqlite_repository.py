@@ -17,6 +17,7 @@ from .domain import (
     NormalizedInboundPayload, AdapterPollCheckpoint,
     ChannelOrder, OrderLine, RoutingDecision, SupplierPurchaseOrder, PurchaseLine,
     ChannelOrderState, RoutingState, PurchaseOrderState,
+    TrackingObservation,
 )
 from .errors import ConflictError, NotFoundError, TenantBoundaryError
 
@@ -227,6 +228,19 @@ CREATE INDEX purchase_orders_tenant_status ON supplier_purchase_orders(tenant_id
 ALTER TABLE supplier_purchase_orders ADD COLUMN provider_reference TEXT;
 ALTER TABLE supplier_purchase_orders ADD COLUMN last_response_digest TEXT;
 ALTER TABLE supplier_purchase_orders ADD COLUMN last_observed_at TEXT;
+"""), (11, """
+ALTER TABLE order_lines ADD COLUMN tracking_key TEXT;
+ALTER TABLE order_lines ADD COLUMN tracking_status TEXT;
+ALTER TABLE order_lines ADD COLUMN tracking_version INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE order_lines ADD COLUMN tracking_observed_at TEXT;
+CREATE TABLE tracking_observations(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, order_line_id TEXT NOT NULL, tracking_key TEXT NOT NULL,
+ status TEXT NOT NULL, observed_at TEXT NOT NULL, response_digest TEXT NOT NULL CHECK(length(response_digest)=64),
+ UNIQUE(tenant_id,order_line_id,tracking_key,status),
+ FOREIGN KEY(tenant_id,order_line_id) REFERENCES order_lines(tenant_id,id) ON DELETE RESTRICT);
+CREATE INDEX tracking_observations_tenant_line ON tracking_observations(tenant_id,order_line_id,observed_at);
+CREATE TRIGGER tracking_observations_no_update BEFORE UPDATE ON tracking_observations BEGIN SELECT RAISE(ABORT,'tracking observations are append-only'); END;
+CREATE TRIGGER tracking_observations_no_delete BEFORE DELETE ON tracking_observations BEGIN SELECT RAISE(ABORT,'tracking observations are append-only'); END;
 """))
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -540,23 +554,53 @@ class SQLiteRepository:
         if changed != 1: raise ConflictError('order version conflict')
 
     def save_order_line(self, value: OrderLine) -> None:
-        self.connection.execute("INSERT INTO order_lines VALUES (?,?,?,?,?,?,?,?)",
-            (value.id, value.tenant_id, value.channel_order_id, value.sku, value.quantity, value.unit_minor, value.routed_status, value.version))
+        self.connection.execute("INSERT INTO order_lines (id,tenant_id,channel_order_id,sku,quantity,unit_minor,routed_status,version,tracking_key,tracking_status,tracking_version,tracking_observed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (value.id, value.tenant_id, value.channel_order_id, value.sku, value.quantity, value.unit_minor, value.routed_status, value.version,
+             value.tracking_key, value.tracking_status, value.tracking_version,
+             value.tracking_observed_at.isoformat() if value.tracking_observed_at else None))
 
     def update_order_line(self, value: OrderLine, expected_version: int) -> None:
         if value.version != expected_version + 1: raise ConflictError('order line version conflict')
-        changed = self.connection.execute("UPDATE order_lines SET routed_status=?,version=? WHERE tenant_id=? AND id=? AND version=?",
-            (value.routed_status, value.version, value.tenant_id, value.id, expected_version)).rowcount
+        changed = self.connection.execute("UPDATE order_lines SET routed_status=?,version=?,tracking_key=?,tracking_status=?,tracking_version=?,tracking_observed_at=? WHERE tenant_id=? AND id=? AND version=?",
+            (value.routed_status, value.version, value.tracking_key, value.tracking_status, value.tracking_version,
+             value.tracking_observed_at.isoformat() if value.tracking_observed_at else None,
+             value.tenant_id, value.id, expected_version)).rowcount
         if changed != 1: raise ConflictError('order line version conflict')
 
     @staticmethod
     def _order_line(row: sqlite3.Row) -> OrderLine:
-        return OrderLine(row['id'], row['tenant_id'], row['channel_order_id'], row['sku'], row['quantity'], row['unit_minor'], row['routed_status'], row['version'])
+        return OrderLine(row['id'], row['tenant_id'], row['channel_order_id'], row['sku'], row['quantity'], row['unit_minor'], row['routed_status'], row['version'], row['tracking_key'], row['tracking_status'], row['tracking_version'], _dt(row['tracking_observed_at']))
 
     def order_lines_for(self, tenant_id: str, order_id: str) -> tuple[OrderLine, ...]:
         self.get_channel_order(tenant_id, order_id)
         return tuple(self._order_line(row) for row in self.connection.execute(
             "SELECT * FROM order_lines WHERE tenant_id=? AND channel_order_id=? ORDER BY rowid", (tenant_id, order_id)))
+
+    def get_order_line(self, tenant_id: str, line_id: str) -> OrderLine:
+        row = self.connection.execute("SELECT * FROM order_lines WHERE tenant_id=? AND id=?", (tenant_id, line_id)).fetchone()
+        if row is None: raise NotFoundError('order line not found')
+        return self._order_line(row)
+
+    def save_tracking_observation(self, value: TrackingObservation) -> TrackingObservation:
+        row = self.connection.execute("SELECT * FROM tracking_observations WHERE tenant_id=? AND order_line_id=? AND tracking_key=? AND status=?",
+            (value.tenant_id, value.order_line_id, value.tracking_key, value.status)).fetchone()
+        if row:
+            prior = TrackingObservation(row['id'], row['tenant_id'], row['order_line_id'], row['tracking_key'], row['status'], _dt(row['observed_at']), row['response_digest'])
+            if prior.response_digest != value.response_digest: raise ConflictError('tracking identity reused with different content')
+            return prior
+        try:
+            self.connection.execute("INSERT INTO tracking_observations VALUES (?,?,?,?,?,?,?)",
+                (value.id, value.tenant_id, value.order_line_id, value.tracking_key, value.status, value.observed_at.isoformat(), value.response_digest))
+        except sqlite3.IntegrityError as exc: raise ConflictError('tracking observation already exists') from exc
+        return value
+
+    def tracking_observation_for(self, tenant_id: str, line_id: str, tracking_key: str, status: str) -> TrackingObservation | None:
+        row = self.connection.execute("SELECT * FROM tracking_observations WHERE tenant_id=? AND order_line_id=? AND tracking_key=? AND status=?", (tenant_id, line_id, tracking_key, status)).fetchone()
+        return TrackingObservation(row['id'], row['tenant_id'], row['order_line_id'], row['tracking_key'], row['status'], _dt(row['observed_at']), row['response_digest']) if row else None
+
+    def tracking_for(self, tenant_id: str, line_id: str) -> tuple[TrackingObservation, ...]:
+        self.get_order_line(tenant_id, line_id)
+        return tuple(TrackingObservation(row['id'], row['tenant_id'], row['order_line_id'], row['tracking_key'], row['status'], _dt(row['observed_at']), row['response_digest']) for row in self.connection.execute("SELECT * FROM tracking_observations WHERE tenant_id=? AND order_line_id=? ORDER BY rowid", (tenant_id, line_id)))
 
     def save_routing_decision(self, value: RoutingDecision) -> None:
         try:
