@@ -7,7 +7,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
-from .channel_order_contracts import ContractQuarantine, OfflineOrderPage, canonical_json
+from .channel_order_contracts import (ContractQuarantine, OfflineOrderPage, canonical_json,
+                                     parse_naver_details)
 
 
 def _digest(value: Any) -> str:
@@ -56,6 +57,61 @@ class FixtureTrackingReview:
         return _digest(asdict(self))
 
 
+@dataclass(frozen=True)
+class FixtureNaverDispatchReview:
+    tenant_ref: str = field(repr=False)
+    connection_ref: str = field(repr=False)
+    product_order_id: str = field(repr=False)
+    invoice_number: str = field(repr=False)
+    source_digest: str = field(repr=False)
+    observed_at: str
+    review_expires_at: str
+    dispatch_date: str
+    delivery_method: str = field(default="DELIVERY", init=False)
+    carrier: str = field(default="CJGLS", init=False)
+    mode: str = field(default="OFFLINE_CONTRACT", init=False)
+    external_write_authorized: bool = field(default=False, init=False)
+
+    @property
+    def approval_digest(self) -> str:
+        return _digest(asdict(self))
+
+
+def build_naver_dispatch_review(body: Any, *, tenant_ref: str, connection_ref: str,
+                                product_order_id: str, invoice_number: str,
+                                observed_at: datetime, now: datetime,
+                                review_expires_at: datetime, dispatch_date: datetime,
+                                max_age_seconds: int = 300) -> FixtureNaverDispatchReview:
+    refs = tuple(map(_ref, (tenant_ref, connection_ref, product_order_id)))
+    page = parse_naver_details(body, requested_ids=(product_order_id,))
+    now, observed_at, review_expires_at, dispatch_date = map(
+        _aware, (now, observed_at, review_expires_at, dispatch_date))
+    if type(max_age_seconds) is not int or not 1 <= max_age_seconds <= 3600:
+        raise ContractQuarantine("invalid_freshness_policy")
+    if not timedelta(0) <= now - observed_at < timedelta(seconds=max_age_seconds):
+        raise ContractQuarantine("stale_or_future_observation")
+    if not now < review_expires_at <= observed_at + timedelta(seconds=max_age_seconds):
+        raise ContractQuarantine("invalid_review_expiry")
+    if not isinstance(invoice_number, str) or not re.fullmatch(r"[0-9]{1,40}", invoice_number):
+        raise ContractQuarantine("invalid_fixture_invoice")
+    line = page.snapshots[0]
+    product = body["data"][0]["productOrder"]
+    if line.status != "PAYED" or line.claim_review_required or line.remaining_quantity <= 0:
+        raise ContractQuarantine("shipment_state_review_required")
+    if product.get("placeOrderStatus") != "OK":
+        raise ContractQuarantine("order_confirmation_required")
+    try:
+        confirmed_at = datetime.fromisoformat(product["placeOrderDate"].replace("Z", "+00:00"))
+    except (KeyError, AttributeError, TypeError, ValueError):
+        raise ContractQuarantine("invalid_order_confirmation_time") from None
+    _aware(confirmed_at)
+    if not confirmed_at <= dispatch_date <= observed_at:
+        raise ContractQuarantine("dispatch_time_invalid")
+    return FixtureNaverDispatchReview(*refs, invoice_number, page.source_digest,
+                                      observed_at.isoformat(), review_expires_at.isoformat(),
+                                      dispatch_date.isoformat())
+
+
 def build_coupang_tracking_review(
     page: OfflineOrderPage, *, tenant_ref: str, connection_ref: str,
     order_id: str, shipment_id: str, vendor_item_id: str, invoice_number: str,
@@ -92,9 +148,9 @@ def build_coupang_tracking_review(
                                  review_expires_at.isoformat())
 
 
-def verify_fixture_review(plan: FixtureTrackingReview, *, approval_digest: str,
+def verify_fixture_review(plan: FixtureTrackingReview | FixtureNaverDispatchReview, *, approval_digest: str,
                           tenant_ref: str, connection_ref: str, now: datetime) -> str:
-    if not isinstance(plan, FixtureTrackingReview):
+    if not isinstance(plan, (FixtureTrackingReview, FixtureNaverDispatchReview)):
         raise ContractQuarantine("fixture_review_required")
     _aware(now)
     if (tenant_ref, connection_ref) != (plan.tenant_ref, plan.connection_ref):
@@ -137,3 +193,15 @@ def interpret_coupang_tracking_fixture(plan: FixtureTrackingReview, body: Any) -
     if row.get("succeed") is True and row.get("resultCode") == "OK" and row.get("retryRequired") is False:
         return result("MATCHED_SUCCESS_FIXTURE")
     return result("RECONCILE_REQUIRED")
+
+
+def interpret_naver_dispatch_fixture(plan: FixtureNaverDispatchReview, body: Any) -> FixtureTrackingResult:
+    if not isinstance(plan, FixtureNaverDispatchReview):
+        raise ContractQuarantine("naver_fixture_review_required")
+    digest = None if body is None else _digest(body)
+    if isinstance(body, dict) and isinstance(body.get("data"), dict):
+        data = body["data"]
+        if (data.get("successProductOrderIds") == [plan.product_order_id]
+                and data.get("failProductOrderInfos") == []):
+            return FixtureTrackingResult("MATCHED_SUCCESS_FIXTURE", digest)
+    return FixtureTrackingResult("RECONCILE_REQUIRED", digest)

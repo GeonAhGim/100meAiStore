@@ -1,7 +1,7 @@
 # P2-08 L4: non-executable channel change contracts
 
-Status: partial implementation; offer/stock/price/claims and Naver dispatch
-remain open. P2-04 source ambiguities still prevent a transport. This first
+Status: partial implementation; offer/stock/price/claims remain open. P2-04
+source ambiguities still prevent a transport. This first
 pure fixture slice depends only on P2-03 snapshots and never uses signing.
 
 ## 2026-09-07 official sources and scope
@@ -37,3 +37,21 @@ passed. compileall, diff whitespace, forbidden local-data filename and common
 secret-pattern checks passed. Socket creation is denied in the fixture
 roundtrip test. Synthetic approval has no operator identity/signature service;
 its matching digest is deliberately review-only and cannot authorize G4.
+
+## Naver single-product-order dispatch slice
+
+[Official dispatch reference](https://apicenter.commerce.naver.com/docs/commerce-api/current/seller-dispatch-product-orders-pay-order-seller)
+sets a maximum batch of 30. The first fixture intentionally supports one only.
+[Official Markdown schema](https://apicenter.commerce.naver.com/llms/post-v1-pay-order-seller-product-orders-dispatch.md)
+supplies productOrderId, deliveryMethod, deliveryCompanyCode, trackingNumber,
+dispatchDate, and separate success/failure collections. Only DELIVERY/CJGLS
+fixture fields are supported, not every documented delivery variant.
+[Order schema](https://apicenter.commerce.naver.com/docs/commerce-api/current/schemas/상품-주문-정보-구조체)
+distinguishes PAYED from placeOrderStatus OK (confirmed). Require both, plus
+placeOrderDate <= dispatchDate <= observation time. Retain no address/name.
+Bind complete source hash, scoped IDs, carrier/invoice and times to review digest.
+Missing/duplicate/unexpected success IDs or any failure entry require review;
+never infer resend authority from HTTP 200 or the documentation's retry prose.
+
+Naver slice verification: tracking suite 12 tests passed, full repository suite
+178 tests passed; compileall/diff/common secret-pattern/filename checks passed.

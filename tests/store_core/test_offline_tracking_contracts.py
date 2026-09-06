@@ -9,6 +9,7 @@ from unittest.mock import patch
 from packages.store_core.channel_order_contracts import ContractQuarantine, parse_coupang_day_page
 from packages.store_core.offline_tracking_contracts import (
     build_coupang_tracking_review, interpret_coupang_tracking_fixture, verify_fixture_review,
+    build_naver_dispatch_review, interpret_naver_dispatch_fixture,
 )
 
 
@@ -129,6 +130,82 @@ class OfflineTrackingContractTest(unittest.TestCase):
         for value in ("PRIVATE-NAME", "=123", "1\n2", 123, "", "1" * 41):
             with self.assertRaisesRegex(ContractQuarantine, "^invalid_fixture_invoice$"):
                 self.build(invoice_number=value)
+
+
+class NaverDispatchContractTest(unittest.TestCase):
+    def setUp(self):
+        self.body = json.loads((Path(__file__).parents[1] / "fixtures" / "channel_orders.json").read_text(encoding="utf-8"))["naver"]
+        product = self.body["data"][0]["productOrder"]
+        product["claimStatus"] = None
+        product["placeOrderStatus"] = "OK"
+        product["placeOrderDate"] = "2026-09-07T08:00:00+09:00"
+        self.now = datetime(2026, 9, 7, tzinfo=timezone.utc)
+        self.kw = dict(tenant_ref="fixture-tenant", connection_ref="fixture-naver",
+                       product_order_id="fixture-product-order-1", invoice_number="000001234567",
+                       observed_at=self.now, now=self.now, dispatch_date=self.now,
+                       review_expires_at=self.now + timedelta(seconds=60))
+
+    def build(self, body=None, **changes):
+        return build_naver_dispatch_review(self.body if body is None else body, **(self.kw | changes))
+
+    def test_naver_roundtrip_and_privacy(self):
+        with patch("socket.socket", side_effect=AssertionError("network prohibited")):
+            plan = self.build()
+            result = interpret_naver_dispatch_fixture(plan, {"data": {
+                "successProductOrderIds": [plan.product_order_id], "failProductOrderInfos": []}})
+        self.assertEqual("MATCHED_SUCCESS_FIXTURE", result.decision)
+        self.assertFalse(result.real_shipment_confirmed)
+        self.assertFalse(result.resend_authorized)
+        self.assertFalse(plan.external_write_authorized)
+        self.assertEqual("CJGLS", plan.carrier)
+        self.assertEqual("000001234567", plan.invoice_number)
+        self.assertNotIn("PRIVATE", repr(plan))
+        self.assertNotIn(plan.invoice_number, repr(plan))
+        self.assertEqual("FIXTURE_REVIEW_ONLY", verify_fixture_review(plan,
+            approval_digest=plan.approval_digest, tenant_ref="fixture-tenant",
+            connection_ref="fixture-naver", now=self.now))
+
+    def test_payment_does_not_imply_order_confirmation(self):
+        for status in (None, "NOT_YET", "CANCEL", "FUTURE"):
+            body = copy.deepcopy(self.body)
+            body["data"][0]["productOrder"]["placeOrderStatus"] = status
+            with self.assertRaisesRegex(ContractQuarantine, "order_confirmation_required"):
+                self.build(body)
+        body = copy.deepcopy(self.body)
+        body["data"][0]["productOrder"]["claimStatus"] = "CANCEL_REQUEST"
+        with self.assertRaisesRegex(ContractQuarantine, "shipment_state_review_required"):
+            self.build(body)
+
+    def test_naver_stale_and_dispatch_time_boundaries(self):
+        for change in (dict(observed_at=self.now - timedelta(seconds=300)),
+                       dict(dispatch_date=self.now + timedelta(seconds=1)),
+                       dict(dispatch_date=self.now - timedelta(hours=2)),
+                       dict(dispatch_date=self.now.replace(tzinfo=None)),
+                       dict(review_expires_at=self.now), dict(max_age_seconds=True)):
+            with self.subTest(change=change), self.assertRaises(ContractQuarantine):
+                self.build(**change)
+        for date in (None, "bad", "2026-09-07T08:00:00"):
+            body = copy.deepcopy(self.body)
+            body["data"][0]["productOrder"]["placeOrderDate"] = date
+            with self.assertRaises(ContractQuarantine):
+                self.build(body)
+
+    def test_partial_missing_duplicate_and_foreign_results_require_review(self):
+        plan = self.build()
+        for body in (None, {}, {"data": {}},
+                     {"data": {"successProductOrderIds": [], "failProductOrderInfos": []}},
+                     {"data": {"successProductOrderIds": [plan.product_order_id] * 2, "failProductOrderInfos": []}},
+                     {"data": {"successProductOrderIds": ["other"], "failProductOrderInfos": []}},
+                     {"data": {"successProductOrderIds": [plan.product_order_id], "failProductOrderInfos": [{}]}}):
+            self.assertEqual("RECONCILE_REQUIRED", interpret_naver_dispatch_fixture(plan, body).decision)
+
+    def test_changed_source_or_dispatch_date_invalidates_review(self):
+        plan = self.build()
+        for changed in (replace(plan, dispatch_date="2026-09-06T23:59:59+00:00"),
+                        replace(plan, source_digest="b" * 64)):
+            with self.assertRaisesRegex(ContractQuarantine, "approval_digest_mismatch"):
+                verify_fixture_review(changed, approval_digest=plan.approval_digest,
+                                      tenant_ref="fixture-tenant", connection_ref="fixture-naver", now=self.now)
 
 
 if __name__ == "__main__":
