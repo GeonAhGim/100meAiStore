@@ -46,3 +46,8 @@ pending and submitted cancellation races plus line-level duplicate/corrected
 tracking. Full verification is `python -B -m pytest -q -p no:cacheprovider` —
 91 passed on 2026-09-06; compileall, `git diff --check`, and repository
 secret-pattern scan passed.
+
+Gap follow-up: `tests/store_core/test_b05_restart_rollback.py` adds durable
+multi-supplier PO restart coverage through submit/reconcile and verifies a
+simulated outbox crash rolls back order status, routing decisions, and split
+POs atomically. No provider invocation is made.
