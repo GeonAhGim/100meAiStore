@@ -57,7 +57,13 @@ def import_demo_settlement(service: Any, context: Any, channel_id: str, period: 
             status = "reconciled" if sale_total == order.total_minor and all(line.match_status == "matched" for line in lines) else "exception"
             if status != "reconciled": all_match = False
             realized = sum(line.amount_minor for line in lines) if status == "reconciled" else None
-            service.repo.save_realized_profit(DemoRealizedProfit(str(uuid4()), context.tenant_id, batch.id, order_id, None, realized, status, now))
+            projected = None
+            purchase_cost = 0
+            for po in service.repo.purchase_orders_for(context.tenant_id, order_id):
+                purchase_cost += sum(line.quantity * line.unit_cost_minor for line in service.repo.purchase_lines_for(context.tenant_id, po.id))
+            if purchase_cost and status == "reconciled":
+                projected = order.total_minor - purchase_cost
+            service.repo.save_realized_profit(DemoRealizedProfit(str(uuid4()), context.tenant_id, batch.id, order_id, projected, realized, status, now))
         batch.status = SettlementStatus.RECONCILED if all_match else SettlementStatus.EXCEPTION
         # Batch status is immutable in the logical import, but this local update
         # is part of the same transaction and has no external effect.

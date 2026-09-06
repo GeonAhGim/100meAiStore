@@ -36,3 +36,9 @@ reconciliation, fee adjustment, missing/currency exceptions, duplicate source
 rows, idempotent replay, and projected/realized separation. Full verification
 is `python -B -m pytest -q -p no:cacheprovider` — 97 passed on 2026-09-06;
 compileall, `git diff --check`, and repository secret-pattern scan passed.
+
+Gap follow-up: when matched orders have durable DEMO PO lines, reconciliation
+now computes a separate projected contribution (`order total - PO cost`) while
+retaining settlement-derived realized amount. Orders without a cost snapshot
+continue to report projected as unavailable. `test_b07_projected_cost.py`
+covers this binding; split-order/restart/rollback evidence remains pending.

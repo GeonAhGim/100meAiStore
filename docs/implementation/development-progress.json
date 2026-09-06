@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "basis": "docs/architecture/11-adr-risks-backlog.md#implementation-backlog-dependency-ordered",
-  "updated_at": "2026-09-06T16:25:00+09:00",
+  "updated_at": "2026-09-06T16:50:00+09:00",
   "items": [
     {"id":"B01","title":"테넌트·권한·세션·정책·감사","status":"completed","evidence":"docs/implementation/core01-evidence.md"},
     {"id":"B02","title":"상품 원본·표준·채널 투영 및 계보","status":"completed","evidence":"docs/implementation/b02-demo-catalog-l4.md"},
