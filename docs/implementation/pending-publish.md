@@ -17,7 +17,8 @@ Root confirmed no retries or alternate publishing paths. Keep local work moving.
 | 457e8d7 | Correct named-field mapping and safe malformed-kind rejection | 153 tests |
 | 7543441 | Offline channel settlement/ledger mapping | 160 tests |
 | 176437b | Privacy/license inventory and deletion-free review tests | 165 tests |
-| Current P2-09 slice | Isolated PostgreSQL tenant RLS and atomicity proof | PostgreSQL 16.15 proof; 165 Python tests |
+| 8a6b266 | Isolated PostgreSQL tenant RLS and atomicity proof | PostgreSQL 16.15 proof; 165 Python tests |
+| Current P2-08 tracking slice | Non-executable single-item Coupang tracking review | 172 Python tests |
 
 No entry here claims remote publication. Later local commits will extend this
 list; only an explicit authorized publishing step may mark them published.

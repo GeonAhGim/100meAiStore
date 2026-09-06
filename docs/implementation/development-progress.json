@@ -27,7 +27,7 @@
     {"id":"P2-05","phase":"live_readiness","title":"공급처 파일·수동 처리 계약","status":"completed","evidence":"docs/implementation/live-p2-05-supplier-files-l4.md"},
     {"id":"P2-06","phase":"live_readiness","title":"채널 정산·장부 매핑 검증","status":"completed","evidence":"docs/implementation/live-p2-06-finance-l4.md"},
     {"id":"P2-07","phase":"live_readiness","title":"개인정보·보존·라이선스 검토 패키지","status":"completed","evidence":"docs/implementation/live-p2-07-privacy-license-l4.md"},
-    {"id":"P2-08","phase":"live_readiness","title":"상품·재고·송장·클레임 오프라인 계약","status":"pending","evidence":null},
+    {"id":"P2-08","phase":"live_readiness","title":"상품·재고·송장·클레임 오프라인 계약","status":"in_progress","evidence":"docs/implementation/live-p2-08-write-contract-l4.md"},
     {"id":"P2-09","phase":"live_readiness","title":"운영 DB·인증·PWA·복구 준비","status":"in_progress","evidence":"docs/implementation/live-p2-09-platform-l4.md"},
     {"id":"P2-10","phase":"live_readiness","title":"승인된 실제 채널·공급처 Discovery","status":"blocked","evidence":"docs/implementation/live-phase2-backlog.md","approval_gate":"G1/G2/G3"},
     {"id":"P2-11","phase":"live_readiness","title":"승인된 읽기 전용 Shadow 운영","status":"blocked","evidence":"docs/implementation/live-phase2-backlog.md","approval_gate":"G1/G3/G5"},
