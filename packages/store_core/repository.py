@@ -18,6 +18,7 @@ from .domain import DemoClaim, ClaimStatusObservation, ClaimStatus
 from .domain import DemoSettlementBatch, DemoSettlementLine, DemoRealizedProfit, SettlementStatus
 from .domain import DemoCatalogImport, DemoCatalogSnapshot, DemoCanonicalProduct, DemoProductLineage, DemoChannelOffer
 from .domain import DemoExecutionControl, ExecutionAttempt, AttemptObservation
+from .domain import DemoToolCommand, DemoAgentRun, DemoByokReference, DemoBudgetPolicy, DemoBudgetLedgerEntry
 
 
 class InMemoryRepository:
@@ -65,6 +66,55 @@ class InMemoryRepository:
         self.canonical_products: dict[tuple[str, str], DemoCanonicalProduct] = {}
         self.product_lineage: dict[tuple[str, str], DemoProductLineage] = {}
         self.channel_offers: dict[tuple[str, str], DemoChannelOffer] = {}
+        self.tool_commands: dict[tuple[str, str], DemoToolCommand] = {}
+        self.agent_runs: dict[tuple[str, str], DemoAgentRun] = {}
+        self.byok_references: dict[tuple[str, str], DemoByokReference] = {}
+        self.budget_policies: dict[str, DemoBudgetPolicy] = {}
+        self.budget_ledger: dict[tuple[str, str], DemoBudgetLedgerEntry] = {}
+
+    def save_tool_command(self, value: DemoToolCommand) -> tuple[DemoToolCommand, bool]:
+        prior = next((row for (tid, _), row in self.tool_commands.items() if tid == value.tenant_id and row.idempotency_key == value.idempotency_key), None)
+        if prior:
+            if prior.input_json != value.input_json or prior.tool != value.tool: raise ConflictError("tool idempotency key reused")
+            return deepcopy(prior), True
+        self.tool_commands[(value.tenant_id, value.id)] = deepcopy(value); return deepcopy(value), False
+
+    def tool_commands_for(self, tenant_id: str) -> tuple[DemoToolCommand, ...]:
+        return tuple(deepcopy(row) for (tid, _), row in self.tool_commands.items() if tid == tenant_id)
+
+    def save_agent_run(self, value: DemoAgentRun) -> DemoAgentRun:
+        self.agent_runs[(value.tenant_id, value.id)] = deepcopy(value); return deepcopy(value)
+
+    def agent_runs_for(self, tenant_id: str) -> tuple[DemoAgentRun, ...]:
+        return tuple(deepcopy(row) for (tid, _), row in self.agent_runs.items() if tid == tenant_id)
+
+    def get_agent_run(self, tenant_id: str, run_id: str) -> DemoAgentRun:
+        try: return deepcopy(self.agent_runs[(tenant_id, run_id)])
+        except KeyError as exc: raise NotFoundError("agent run not found") from exc
+
+    def save_byok_reference(self, value: DemoByokReference) -> DemoByokReference:
+        prior = self.byok_references.get((value.tenant_id, value.provider))
+        if prior and prior.secret_ref != value.secret_ref: raise ConflictError("BYOK provider reference already exists")
+        self.byok_references[(value.tenant_id, value.provider)] = deepcopy(value); return deepcopy(value)
+
+    def byok_references_for(self, tenant_id: str) -> tuple[DemoByokReference, ...]:
+        return tuple(deepcopy(row) for (tid, _), row in self.byok_references.items() if tid == tenant_id)
+
+    def save_budget_policy(self, value: DemoBudgetPolicy) -> DemoBudgetPolicy:
+        self.budget_policies[value.tenant_id] = deepcopy(value); return deepcopy(value)
+
+    def get_budget_policy(self, tenant_id: str) -> DemoBudgetPolicy | None:
+        return deepcopy(self.budget_policies.get(tenant_id))
+
+    def save_budget_entry(self, value: DemoBudgetLedgerEntry) -> DemoBudgetLedgerEntry:
+        prior = next((row for (tid, _), row in self.budget_ledger.items() if tid == value.tenant_id and row.idempotency_key == value.idempotency_key), None)
+        if prior:
+            if prior.amount_minor != value.amount_minor: raise ConflictError("budget idempotency key reused")
+            return deepcopy(prior)
+        self.budget_ledger[(value.tenant_id, value.id)] = deepcopy(value); return deepcopy(value)
+
+    def budget_entries_for(self, tenant_id: str) -> tuple[DemoBudgetLedgerEntry, ...]:
+        return tuple(deepcopy(row) for (tid, _), row in self.budget_ledger.items() if tid == tenant_id)
 
     def save_catalog_import(self, value: DemoCatalogImport) -> tuple[DemoCatalogImport, bool]:
         prior = next((row for (tid, _), row in self.catalog_imports.items()

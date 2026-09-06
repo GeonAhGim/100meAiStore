@@ -26,6 +26,7 @@ from .finance01 import import_demo_settlement
 from .inventory import DemoInventoryObservation, DemoPriceCalculation, calculate_demo_price, observe_demo_inventory
 from .catalog import ingest_demo_catalog, project_demo_offer
 from .approvals import approval_inbox, approval_detail, decide_approval
+from .gateway import configure_demo_byok, set_demo_budget_policy, record_demo_agent_run, submit_demo_tool
 
 __all__ = [
     "ApprovalKind",
@@ -69,6 +70,10 @@ __all__ = [
     "approval_inbox",
     "approval_detail",
     "decide_approval",
+    "configure_demo_byok",
+    "set_demo_budget_policy",
+    "record_demo_agent_run",
+    "submit_demo_tool",
     "normalize_demo_order",
     "validate_demo_page",
 ]

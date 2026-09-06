@@ -541,6 +541,79 @@ class DemoChannelOffer:
 
 
 @dataclass
+class DemoToolCommand:
+    id: str
+    tenant_id: str
+    actor_type: str
+    actor_id: str
+    tool: str
+    target_type: str
+    target_id: str
+    input_json: str
+    idempotency_key: str
+    requested_policy_version: int
+    approval_id: str | None
+    mode: str
+    state: str
+    blocked_reason: str | None
+    created_at: datetime
+
+
+@dataclass
+class DemoAgentRun:
+    id: str
+    tenant_id: str
+    agent_id: str
+    goal: str
+    policy_version: int
+    model: str
+    prompt_version: str
+    input_digest: str
+    decision_json: str
+    confidence: str
+    tool_calls: int
+    reviewer: str | None
+    estimated_cost_minor: int
+    charged_cost_minor: int | None
+    outcome: str
+    created_at: datetime
+
+
+@dataclass
+class DemoByokReference:
+    id: str
+    tenant_id: str
+    provider: str
+    secret_ref: str
+    validation_status: str
+    created_at: datetime
+    version: int = 1
+
+
+@dataclass
+class DemoBudgetPolicy:
+    tenant_id: str
+    daily_limit_minor: int
+    monthly_limit_minor: int
+    generation_limit: int
+    agent_run_limit: int
+    max_tokens: int
+    max_tool_calls: int
+    model_tier: str
+    version: int = 1
+
+
+@dataclass(frozen=True)
+class DemoBudgetLedgerEntry:
+    id: str
+    tenant_id: str
+    run_id: str
+    amount_minor: int
+    occurred_at: datetime
+    idempotency_key: str
+
+
+@dataclass
 class RoutingDecision:
     id: str
     tenant_id: str

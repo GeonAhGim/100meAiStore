@@ -289,6 +289,31 @@ class StoreControlPlane:
         from .approvals import decide_approval
         return decide_approval(self, context, approval_id, approve, reason, confirmation_nonce)
 
+    def configure_demo_byok(self, context: TenantContext, provider: str, secret_ref: str,
+                            validation_status: str = "UNVERIFIED") -> Any:
+        from .gateway import configure_demo_byok
+        return configure_demo_byok(self, context, provider, secret_ref, validation_status)
+
+    def set_demo_budget_policy(self, context: TenantContext, **kwargs: Any) -> Any:
+        from .gateway import set_demo_budget_policy
+        return set_demo_budget_policy(self, context, **kwargs)
+
+    def record_demo_agent_run(self, context: TenantContext, **kwargs: Any) -> Any:
+        from .gateway import record_demo_agent_run
+        return record_demo_agent_run(self, context, **kwargs)
+
+    def submit_demo_tool(self, context: TenantContext, **kwargs: Any) -> dict[str, Any]:
+        from .gateway import submit_demo_tool
+        return submit_demo_tool(self, context, **kwargs)
+
+    def agent_runs(self, context: TenantContext) -> tuple[Any, ...]:
+        self.require(context, Capability.TENANT_ADMIN)
+        return self.repo.agent_runs_for(context.tenant_id)
+
+    def budget_entries(self, context: TenantContext) -> tuple[Any, ...]:
+        self.require(context, Capability.TENANT_ADMIN)
+        return self.repo.budget_entries_for(context.tenant_id)
+
     def dashboard_snapshot(self, context: TenantContext, *, project_root: str | None = None) -> dict[str, Any]:
         """Return a tenant-scoped, read-only dashboard projection.
 

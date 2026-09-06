@@ -21,6 +21,7 @@ from .domain import (
     DemoClaim, ClaimStatusObservation, ClaimStatus,
     DemoSettlementBatch, DemoSettlementLine, DemoRealizedProfit, SettlementStatus,
     DemoCatalogImport, DemoCatalogSnapshot, DemoCanonicalProduct, DemoProductLineage, DemoChannelOffer,
+    DemoToolCommand, DemoAgentRun, DemoByokReference, DemoBudgetPolicy, DemoBudgetLedgerEntry,
 )
 from .errors import ConflictError, NotFoundError, TenantBoundaryError
 
@@ -309,6 +310,36 @@ CREATE TABLE demo_channel_offers(
  UNIQUE(tenant_id,id), UNIQUE(tenant_id,channel_id,canonical_product_id),
  FOREIGN KEY(tenant_id,canonical_product_id) REFERENCES demo_canonical_products(tenant_id,id) ON DELETE RESTRICT,
  FOREIGN KEY(tenant_id,source_snapshot_id) REFERENCES demo_catalog_snapshots(tenant_id,id) ON DELETE RESTRICT);
+"""), (15, """
+CREATE UNIQUE INDEX approval_tenant_id ON approvals(tenant_id,id);
+CREATE TABLE demo_tool_commands(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, actor_type TEXT NOT NULL, actor_id TEXT NOT NULL,
+ tool TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL, input_json TEXT NOT NULL,
+ idempotency_key TEXT NOT NULL, requested_policy_version INTEGER NOT NULL CHECK(requested_policy_version>0),
+ approval_id TEXT, mode TEXT NOT NULL, state TEXT NOT NULL, blocked_reason TEXT, created_at TEXT NOT NULL,
+ UNIQUE(tenant_id,id), UNIQUE(tenant_id,idempotency_key), FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT,
+ FOREIGN KEY(tenant_id,approval_id) REFERENCES approvals(tenant_id,id) ON DELETE RESTRICT);
+CREATE TABLE demo_agent_runs(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, agent_id TEXT NOT NULL, goal TEXT NOT NULL,
+ policy_version INTEGER NOT NULL CHECK(policy_version>0), model TEXT NOT NULL, prompt_version TEXT NOT NULL,
+ input_digest TEXT NOT NULL CHECK(length(input_digest)=64), decision_json TEXT NOT NULL, confidence TEXT NOT NULL,
+ tool_calls INTEGER NOT NULL CHECK(tool_calls>=0), reviewer TEXT, estimated_cost_minor INTEGER NOT NULL CHECK(estimated_cost_minor>=0),
+ charged_cost_minor INTEGER, outcome TEXT NOT NULL, created_at TEXT NOT NULL,
+ UNIQUE(tenant_id,id), FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT);
+CREATE TABLE demo_byok_references(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, provider TEXT NOT NULL, secret_ref TEXT NOT NULL,
+ validation_status TEXT NOT NULL, created_at TEXT NOT NULL, version INTEGER NOT NULL CHECK(version>0),
+ UNIQUE(tenant_id,provider), FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT);
+CREATE TABLE demo_budget_policies(
+ tenant_id TEXT PRIMARY KEY, daily_limit_minor INTEGER NOT NULL CHECK(daily_limit_minor>=0), monthly_limit_minor INTEGER NOT NULL CHECK(monthly_limit_minor>=0),
+ generation_limit INTEGER NOT NULL CHECK(generation_limit>=0), agent_run_limit INTEGER NOT NULL CHECK(agent_run_limit>=0),
+ max_tokens INTEGER NOT NULL CHECK(max_tokens>0), max_tool_calls INTEGER NOT NULL CHECK(max_tool_calls>0), model_tier TEXT NOT NULL, version INTEGER NOT NULL CHECK(version>0),
+ FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT);
+CREATE TABLE demo_budget_ledger(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, run_id TEXT NOT NULL, amount_minor INTEGER NOT NULL CHECK(amount_minor>=0),
+ occurred_at TEXT NOT NULL, idempotency_key TEXT NOT NULL, UNIQUE(tenant_id,id), UNIQUE(tenant_id,idempotency_key),
+ FOREIGN KEY(tenant_id,run_id) REFERENCES demo_agent_runs(tenant_id,id) ON DELETE RESTRICT);
+CREATE INDEX demo_budget_ledger_tenant_time ON demo_budget_ledger(tenant_id,occurred_at);
 """))
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -950,6 +981,76 @@ class SQLiteRepository:
         if foreign_keys:
             raise ConflictError("sqlite foreign key check failed")
         return {"ready": True, "schema_version": actual, "integrity": integrity}
+
+    @staticmethod
+    def _tool_command(row: sqlite3.Row) -> DemoToolCommand:
+        return DemoToolCommand(row['id'], row['tenant_id'], row['actor_type'], row['actor_id'], row['tool'], row['target_type'], row['target_id'], row['input_json'], row['idempotency_key'], row['requested_policy_version'], row['approval_id'], row['mode'], row['state'], row['blocked_reason'], _dt(row['created_at']))
+
+    def save_tool_command(self, value: DemoToolCommand) -> tuple[DemoToolCommand, bool]:
+        row = self.connection.execute("SELECT * FROM demo_tool_commands WHERE tenant_id=? AND idempotency_key=?", (value.tenant_id, value.idempotency_key)).fetchone()
+        if row:
+            prior = self._tool_command(row)
+            if prior.input_json != value.input_json or prior.tool != value.tool: raise ConflictError('tool idempotency key reused')
+            return prior, True
+        try: self.connection.execute("INSERT INTO demo_tool_commands VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (value.id, value.tenant_id, value.actor_type, value.actor_id, value.tool, value.target_type, value.target_id, value.input_json, value.idempotency_key, value.requested_policy_version, value.approval_id, value.mode, value.state, value.blocked_reason, value.created_at.isoformat()))
+        except sqlite3.IntegrityError as exc: raise ConflictError('tool command already exists') from exc
+        return value, False
+
+    def tool_commands_for(self, tenant_id: str) -> tuple[DemoToolCommand, ...]:
+        return tuple(self._tool_command(row) for row in self.connection.execute("SELECT * FROM demo_tool_commands WHERE tenant_id=? ORDER BY created_at,id", (tenant_id,)))
+
+    @staticmethod
+    def _agent_run(row: sqlite3.Row) -> DemoAgentRun:
+        return DemoAgentRun(row['id'], row['tenant_id'], row['agent_id'], row['goal'], row['policy_version'], row['model'], row['prompt_version'], row['input_digest'], row['decision_json'], row['confidence'], row['tool_calls'], row['reviewer'], row['estimated_cost_minor'], row['charged_cost_minor'], row['outcome'], _dt(row['created_at']))
+
+    def save_agent_run(self, value: DemoAgentRun) -> DemoAgentRun:
+        self.connection.execute("INSERT INTO demo_agent_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (value.id, value.tenant_id, value.agent_id, value.goal, value.policy_version, value.model, value.prompt_version, value.input_digest, value.decision_json, value.confidence, value.tool_calls, value.reviewer, value.estimated_cost_minor, value.charged_cost_minor, value.outcome, value.created_at.isoformat()))
+        return value
+
+    def agent_runs_for(self, tenant_id: str) -> tuple[DemoAgentRun, ...]:
+        return tuple(self._agent_run(row) for row in self.connection.execute("SELECT * FROM demo_agent_runs WHERE tenant_id=? ORDER BY created_at,id", (tenant_id,)))
+
+    def get_agent_run(self, tenant_id: str, run_id: str) -> DemoAgentRun:
+        row = self.connection.execute("SELECT * FROM demo_agent_runs WHERE tenant_id=? AND id=?", (tenant_id, run_id)).fetchone()
+        if not row: raise NotFoundError('agent run not found')
+        return self._agent_run(row)
+
+    @staticmethod
+    def _byok(row: sqlite3.Row) -> DemoByokReference:
+        return DemoByokReference(row['id'], row['tenant_id'], row['provider'], row['secret_ref'], row['validation_status'], _dt(row['created_at']), row['version'])
+
+    def save_byok_reference(self, value: DemoByokReference) -> DemoByokReference:
+        row = self.connection.execute("SELECT * FROM demo_byok_references WHERE tenant_id=? AND provider=?", (value.tenant_id, value.provider)).fetchone()
+        if row:
+            prior = self._byok(row)
+            if prior.secret_ref != value.secret_ref: raise ConflictError('BYOK provider reference already exists')
+            return prior
+        try: self.connection.execute("INSERT INTO demo_byok_references VALUES (?,?,?,?,?,?,?)", (value.id, value.tenant_id, value.provider, value.secret_ref, value.validation_status, value.created_at.isoformat(), value.version))
+        except sqlite3.IntegrityError as exc: raise ConflictError('BYOK reference already exists') from exc
+        return value
+
+    def byok_references_for(self, tenant_id: str) -> tuple[DemoByokReference, ...]:
+        return tuple(self._byok(row) for row in self.connection.execute("SELECT * FROM demo_byok_references WHERE tenant_id=? ORDER BY provider", (tenant_id,)))
+
+    def save_budget_policy(self, value: DemoBudgetPolicy) -> DemoBudgetPolicy:
+        self.connection.execute("INSERT INTO demo_budget_policies VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id) DO UPDATE SET daily_limit_minor=excluded.daily_limit_minor,monthly_limit_minor=excluded.monthly_limit_minor,generation_limit=excluded.generation_limit,agent_run_limit=excluded.agent_run_limit,max_tokens=excluded.max_tokens,max_tool_calls=excluded.max_tool_calls,model_tier=excluded.model_tier,version=excluded.version", (value.tenant_id, value.daily_limit_minor, value.monthly_limit_minor, value.generation_limit, value.agent_run_limit, value.max_tokens, value.max_tool_calls, value.model_tier, value.version))
+        return value
+
+    def get_budget_policy(self, tenant_id: str) -> DemoBudgetPolicy | None:
+        row = self.connection.execute("SELECT * FROM demo_budget_policies WHERE tenant_id=?", (tenant_id,)).fetchone()
+        return DemoBudgetPolicy(row['tenant_id'], row['daily_limit_minor'], row['monthly_limit_minor'], row['generation_limit'], row['agent_run_limit'], row['max_tokens'], row['max_tool_calls'], row['model_tier'], row['version']) if row else None
+
+    def save_budget_entry(self, value: DemoBudgetLedgerEntry) -> DemoBudgetLedgerEntry:
+        row = self.connection.execute("SELECT * FROM demo_budget_ledger WHERE tenant_id=? AND idempotency_key=?", (value.tenant_id, value.idempotency_key)).fetchone()
+        if row:
+            if row['amount_minor'] != value.amount_minor: raise ConflictError('budget idempotency key reused')
+            return DemoBudgetLedgerEntry(row['id'], row['tenant_id'], row['run_id'], row['amount_minor'], _dt(row['occurred_at']), row['idempotency_key'])
+        try: self.connection.execute("INSERT INTO demo_budget_ledger VALUES (?,?,?,?,?,?)", (value.id, value.tenant_id, value.run_id, value.amount_minor, value.occurred_at.isoformat(), value.idempotency_key))
+        except sqlite3.IntegrityError as exc: raise ConflictError('budget ledger entry already exists') from exc
+        return value
+
+    def budget_entries_for(self, tenant_id: str) -> tuple[DemoBudgetLedgerEntry, ...]:
+        return tuple(DemoBudgetLedgerEntry(row['id'], row['tenant_id'], row['run_id'], row['amount_minor'], _dt(row['occurred_at']), row['idempotency_key']) for row in self.connection.execute("SELECT * FROM demo_budget_ledger WHERE tenant_id=? ORDER BY occurred_at,id", (tenant_id,)))
 
     def save_agent_status(self, status: AgentStatusSnapshot) -> None:
         """Persist the latest worker/PM heartbeat as a tenant-owned checkpoint."""
