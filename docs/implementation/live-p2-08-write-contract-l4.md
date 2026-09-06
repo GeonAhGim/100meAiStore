@@ -66,3 +66,29 @@ This is a local policy defect correction, not an accounting/tax determination.
 
 Boundary regression and full suite passed (179 tests), along with compileall,
 diff whitespace and pattern/filename secret gates.
+
+## Coupang price/quantity fixture slice
+
+[Price changes](https://developers.coupang.com/ko/api/products/changing-price-of-each-item-of-a-product)
+require 10-KRW increments. Default change bounds are -50%/+100%; this scaffold
+never enables forceSalePriceUpdate or automatic price adjustment options.
+[Quantity changes](https://developers.coupang.com/ko/api/products/changing-quantity-of-each-product-item)
+target vendorItemId after product approval. No actual product approval exists.
+[Inventory read](https://developers.coupang.com/ko/api/products/query-quantitypricestatus-by-product-items)
+returns sellerItemId, amountInStock, salePrice, onSale. The fixture checks exact
+numeric ID against expected vendorItemId; the differing names remain an explicit
+real-sample roundtrip check under G1, not proof of vendor entitlement.
+
+Use one local CSV row and explicit synthetic identity-mapping digest. Reject
+unready reports, non-KRW data, stale/future supplier or channel observations,
+stopped listings, insufficient quantity after reservations/buffer, caller cap
+violations, and margins below 10% using B04. Required fee/variable-cost inputs
+are fixture assumptions, never actual channel cost promises. Each plan changes
+only price or quantity, binds source hashes/context/expiry, and authorizes no
+external write. SUCCESS alone requires a separate exact-ID/value readback;
+unknown results never permit retry. Offer creation and claim contracts remain.
+
+Price/quantity slice evidence: seven focused tests and 186 full tests passed;
+compileall, diff whitespace, forbidden filenames and common secret-pattern scans
+passed. Fixture CSV→cost guard→scoped review→matching readback runs with socket
+creation forbidden. This remains separate from the production worker/outbox.

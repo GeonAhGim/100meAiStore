@@ -20,7 +20,8 @@ Root confirmed no retries or alternate publishing paths. Keep local work moving.
 | 8a6b266 | Isolated PostgreSQL tenant RLS and atomicity proof | PostgreSQL 16.15 proof; 165 Python tests |
 | 3c6b9a3 | Non-executable single-item Coupang tracking review | 172 Python tests |
 | caed35e | Confirmed-order, dated, scoped dispatch review fixture | 178 Python tests |
-| Current price guard fix | Reject unrounded margins below 10% | 179 Python tests |
+| b0b1558 | Reject unrounded margins below 10% | 179 Python tests |
+| Current catalog slice | Supplier-bound price/quantity review and fixture readback | 186 Python tests |
 
 No entry here claims remote publication. Later local commits will extend this
 list; only an explicit authorized publishing step may mark them published.
