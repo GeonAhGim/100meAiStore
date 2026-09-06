@@ -341,6 +341,25 @@ class StoreControlPlane:
         from .readiness import evaluate_demo_readiness
         return evaluate_demo_readiness(self.repo, **kwargs)
 
+    def record_demo_inventory(self, context: TenantContext, sku: str, supplier_id: str,
+                              quantity: int, observed_at: datetime | None = None) -> Any:
+        from .inventory import record_demo_inventory
+        return record_demo_inventory(self, context, sku, supplier_id, quantity, observed_at)
+
+    def record_demo_price_projection(self, context: TenantContext, sku: str,
+                                     selling_price_minor: int, supply_cost_minor: int,
+                                     variable_cost_minor: int = 0, fee_rate: Any = "0") -> Any:
+        from .inventory import record_demo_price_projection
+        return record_demo_price_projection(self, context, sku, selling_price_minor, supply_cost_minor, variable_cost_minor, fee_rate)
+
+    def inventory_snapshots(self, context: TenantContext, sku: str | None = None) -> tuple[Any, ...]:
+        self.require(context, Capability.TENANT_ADMIN)
+        return self.repo.inventory_snapshots_for(context.tenant_id, sku)
+
+    def price_projections(self, context: TenantContext, sku: str | None = None) -> tuple[Any, ...]:
+        self.require(context, Capability.TENANT_ADMIN)
+        return self.repo.price_projections_for(context.tenant_id, sku)
+
     def set_demo_stop(self, context: TenantContext, scope_type: str, scope_ref: str,
                       stopped: bool, reason: str) -> Any:
         from .safety import set_demo_stop

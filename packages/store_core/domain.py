@@ -667,6 +667,31 @@ class DemoBackupManifest:
     created_at: datetime
 
 
+@dataclass(frozen=True)
+class DemoInventorySnapshot:
+    id: str
+    tenant_id: str
+    sku: str
+    supplier_id: str
+    quantity: int
+    observed_at: datetime
+
+
+@dataclass(frozen=True)
+class DemoPriceProjection:
+    id: str
+    tenant_id: str
+    sku: str
+    selling_price_minor: int
+    supply_cost_minor: int
+    variable_cost_minor: int
+    fee_rate: str
+    projected_contribution_minor: int
+    projected_margin: str
+    status: str
+    calculated_at: datetime
+
+
 @dataclass
 class RoutingDecision:
     id: str

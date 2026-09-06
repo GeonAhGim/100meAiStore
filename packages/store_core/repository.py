@@ -21,6 +21,7 @@ from .domain import DemoExecutionControl, ExecutionAttempt, AttemptObservation
 from .domain import DemoToolCommand, DemoAgentRun, DemoByokReference, DemoBudgetPolicy, DemoBudgetLedgerEntry
 from .domain import DemoNotificationPreference, DemoNotificationDelivery, DemoIncidentAcknowledgement
 from .domain import DemoStopControl, DemoBackupManifest
+from .domain import DemoInventorySnapshot, DemoPriceProjection
 
 
 class InMemoryRepository:
@@ -78,6 +79,20 @@ class InMemoryRepository:
         self.incident_acknowledgements: dict[tuple[str, str], DemoIncidentAcknowledgement] = {}
         self.stop_controls: dict[tuple[str, str, str], DemoStopControl] = {}
         self.backup_manifests: dict[tuple[str, str], DemoBackupManifest] = {}
+        self.inventory_snapshots: dict[tuple[str, str], DemoInventorySnapshot] = {}
+        self.price_projections: dict[tuple[str, str], DemoPriceProjection] = {}
+
+    def save_inventory_snapshot(self, value: DemoInventorySnapshot) -> DemoInventorySnapshot:
+        self.inventory_snapshots[(value.tenant_id, value.id)] = deepcopy(value); return deepcopy(value)
+
+    def inventory_snapshots_for(self, tenant_id: str, sku: str | None = None) -> tuple[DemoInventorySnapshot, ...]:
+        return tuple(deepcopy(row) for (tid, _), row in self.inventory_snapshots.items() if tid == tenant_id and (sku is None or row.sku == sku))
+
+    def save_price_projection(self, value: DemoPriceProjection) -> DemoPriceProjection:
+        self.price_projections[(value.tenant_id, value.id)] = deepcopy(value); return deepcopy(value)
+
+    def price_projections_for(self, tenant_id: str, sku: str | None = None) -> tuple[DemoPriceProjection, ...]:
+        return tuple(deepcopy(row) for (tid, _), row in self.price_projections.items() if tid == tenant_id and (sku is None or row.sku == sku))
 
     def save_stop_control(self, value: DemoStopControl) -> DemoStopControl:
         self.stop_controls[(value.tenant_id, value.scope_type, value.scope_ref)] = deepcopy(value); return deepcopy(value)

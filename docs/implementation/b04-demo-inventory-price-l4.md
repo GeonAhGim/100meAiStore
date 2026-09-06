@@ -16,3 +16,7 @@ inventory validation, projected contribution, and the 10% guard. Full
 verification: `python -B -m pytest -q -p no:cacheprovider` — 100 passed on
 2026-09-06; compileall, `git diff --check`, and repository secret-pattern scan
 passed.
+
+Gap follow-up: schema 18 now persists tenant-scoped inventory observations and
+price projection results, with restart coverage in `test_b04_gap.py`. Offer
+projection integration/freshness and full B04 completion remain pending.

@@ -23,7 +23,7 @@ from .order02 import approve_demo_po, submit_demo_po, reconcile_demo_po
 from .order03 import request_demo_cancel, ingest_demo_tracking
 from .claim01 import open_demo_claim, record_demo_claim_status
 from .finance01 import import_demo_settlement
-from .inventory import DemoInventoryObservation, DemoPriceCalculation, calculate_demo_price, observe_demo_inventory
+from .inventory import DemoInventoryObservation, DemoPriceCalculation, calculate_demo_price, observe_demo_inventory, record_demo_inventory, record_demo_price_projection
 from .catalog import ingest_demo_catalog, project_demo_offer
 from .approvals import approval_inbox, approval_detail, decide_approval
 from .gateway import configure_demo_byok, set_demo_budget_policy, record_demo_agent_run, submit_demo_tool
@@ -68,6 +68,8 @@ __all__ = [
     "DemoPriceCalculation",
     "calculate_demo_price",
     "observe_demo_inventory",
+    "record_demo_inventory",
+    "record_demo_price_projection",
     "ingest_demo_catalog",
     "project_demo_offer",
     "approval_inbox",

@@ -24,6 +24,7 @@ from .domain import (
     DemoToolCommand, DemoAgentRun, DemoByokReference, DemoBudgetPolicy, DemoBudgetLedgerEntry,
     DemoNotificationPreference, DemoNotificationDelivery, DemoIncidentAcknowledgement,
     DemoStopControl, DemoBackupManifest,
+    DemoInventorySnapshot, DemoPriceProjection,
 )
 from .errors import ConflictError, NotFoundError, TenantBoundaryError
 
@@ -366,6 +367,18 @@ CREATE TABLE demo_backup_manifests(
  id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, source_digest TEXT NOT NULL CHECK(length(source_digest)=64),
  schema_version INTEGER NOT NULL CHECK(schema_version>0), created_at TEXT NOT NULL, UNIQUE(tenant_id,id),
  FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT);
+"""), (18, """
+CREATE TABLE demo_inventory_snapshots(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, sku TEXT NOT NULL, supplier_id TEXT NOT NULL,
+ quantity INTEGER NOT NULL CHECK(quantity>=0), observed_at TEXT NOT NULL, UNIQUE(tenant_id,id),
+ FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT);
+CREATE INDEX demo_inventory_tenant_sku_time ON demo_inventory_snapshots(tenant_id,sku,observed_at);
+CREATE TABLE demo_price_projections(
+ id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, sku TEXT NOT NULL, selling_price_minor INTEGER NOT NULL CHECK(selling_price_minor>0),
+ supply_cost_minor INTEGER NOT NULL CHECK(supply_cost_minor>=0), variable_cost_minor INTEGER NOT NULL CHECK(variable_cost_minor>=0),
+ fee_rate TEXT NOT NULL, projected_contribution_minor INTEGER NOT NULL, projected_margin TEXT NOT NULL, status TEXT NOT NULL,
+ calculated_at TEXT NOT NULL, UNIQUE(tenant_id,id), FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT);
+CREATE INDEX demo_price_tenant_sku_time ON demo_price_projections(tenant_id,sku,calculated_at);
 """))
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -1024,6 +1037,22 @@ class SQLiteRepository:
 
     def backup_manifests_for(self, tenant_id: str) -> tuple[DemoBackupManifest, ...]:
         return tuple(DemoBackupManifest(row['id'], row['tenant_id'], row['source_digest'], row['schema_version'], _dt(row['created_at'])) for row in self.connection.execute("SELECT * FROM demo_backup_manifests WHERE tenant_id=? ORDER BY created_at,id", (tenant_id,)))
+
+    def save_inventory_snapshot(self, value: DemoInventorySnapshot) -> DemoInventorySnapshot:
+        self.connection.execute("INSERT INTO demo_inventory_snapshots VALUES (?,?,?,?,?,?)", (value.id, value.tenant_id, value.sku, value.supplier_id, value.quantity, value.observed_at.isoformat()))
+        return value
+
+    def inventory_snapshots_for(self, tenant_id: str, sku: str | None = None) -> tuple[DemoInventorySnapshot, ...]:
+        rows = self.connection.execute("SELECT * FROM demo_inventory_snapshots WHERE tenant_id=? AND (? IS NULL OR sku=?) ORDER BY observed_at,id", (tenant_id, sku, sku))
+        return tuple(DemoInventorySnapshot(row['id'], row['tenant_id'], row['sku'], row['supplier_id'], row['quantity'], _dt(row['observed_at'])) for row in rows)
+
+    def save_price_projection(self, value: DemoPriceProjection) -> DemoPriceProjection:
+        self.connection.execute("INSERT INTO demo_price_projections VALUES (?,?,?,?,?,?,?,?,?,?,?)", (value.id, value.tenant_id, value.sku, value.selling_price_minor, value.supply_cost_minor, value.variable_cost_minor, value.fee_rate, value.projected_contribution_minor, value.projected_margin, value.status, value.calculated_at.isoformat()))
+        return value
+
+    def price_projections_for(self, tenant_id: str, sku: str | None = None) -> tuple[DemoPriceProjection, ...]:
+        rows = self.connection.execute("SELECT * FROM demo_price_projections WHERE tenant_id=? AND (? IS NULL OR sku=?) ORDER BY calculated_at,id", (tenant_id, sku, sku))
+        return tuple(DemoPriceProjection(row['id'], row['tenant_id'], row['sku'], row['selling_price_minor'], row['supply_cost_minor'], row['variable_cost_minor'], row['fee_rate'], row['projected_contribution_minor'], row['projected_margin'], row['status'], _dt(row['calculated_at'])) for row in rows)
 
     def save_notification_preference(self, value: DemoNotificationPreference) -> DemoNotificationPreference:
         row = self.connection.execute("SELECT * FROM demo_notification_preferences WHERE tenant_id=? AND notification_key=?", (value.tenant_id, value.notification_key)).fetchone()
