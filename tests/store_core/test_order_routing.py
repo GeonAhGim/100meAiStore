@@ -78,5 +78,39 @@ class OrderRoutingTests(unittest.TestCase):
         other = self.app.bootstrap_tenant("Other", "other@example.test")
         with self.assertRaises(Exception): self.app.order(other, first.id)
 
+    def test_order06_approval_revalidates_then_demo_response_reconciles(self):
+        order, _ = self.app.ingest_order(self.ctx, "demo-channel", self.payload_ref)
+        pos = self.app.propose_routing(self.ctx, order.id, {
+            "sku-a": [{"supplier_id": "supplier-a", "unit_cost_minor": 100, "available_quantity": 1}],
+            "sku-b": [{"supplier_id": "supplier-a", "unit_cost_minor": 150, "available_quantity": 1}],
+        })
+        approved = self.app.approve_demo_po(self.ctx, pos[0].id, True, "fixture approval")
+        self.assertEqual(PurchaseOrderState.APPROVED, approved.status)
+        submitted = self.app.submit_demo_po(self.ctx, approved.id)
+        self.assertEqual(PurchaseOrderState.SUBMITTED, submitted.status)
+        response = {"status": "ACKNOWLEDGED", "provider_reference": "ack-1",
+                    "observed_at": datetime.now(timezone.utc)}
+        acknowledged, replay = self.app.reconcile_demo_po(self.ctx, submitted.id, response)
+        self.assertFalse(replay)
+        self.assertEqual(PurchaseOrderState.ACKNOWLEDGED, acknowledged.status)
+        same, replay = self.app.reconcile_demo_po(self.ctx, submitted.id, response)
+        self.assertTrue(replay)
+        self.assertEqual(acknowledged.version, same.version)
+        with self.assertRaises(ConflictError):
+            self.app.reconcile_demo_po(self.ctx, submitted.id, {**response, "provider_reference": "ack-2"})
+
+    def test_order07_changed_order_blocks_approval_without_mutation(self):
+        order, _ = self.app.ingest_order(self.ctx, "demo-channel", self.payload_ref)
+        pos = self.app.propose_routing(self.ctx, order.id, {
+            "sku-a": [{"supplier_id": "supplier-a", "unit_cost_minor": 100, "available_quantity": 1}],
+            "sku-b": [{"supplier_id": "supplier-a", "unit_cost_minor": 150, "available_quantity": 1}],
+        })
+        current = self.app.order(self.ctx, order.id)
+        current.status = ChannelOrderState.CANCELLED
+        current.version += 1
+        self.repo.update_channel_order(current, current.version - 1)
+        with self.assertRaises(ConflictError): self.app.approve_demo_po(self.ctx, pos[0].id, True, "stale")
+        self.assertEqual(PurchaseOrderState.APPROVAL_PENDING, self.app.purchase_orders(self.ctx, order.id)[0].status)
+
 
 if __name__ == "__main__": unittest.main()

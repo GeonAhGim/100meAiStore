@@ -19,6 +19,7 @@ from .ingestion import (
 )
 from .domain import AdapterCapability, AdapterCapabilityManifest, DemoPage
 from .orders import ingest_order, propose_routing
+from .order02 import approve_demo_po, submit_demo_po, reconcile_demo_po
 
 __all__ = [
     "ApprovalKind",
@@ -45,6 +46,9 @@ __all__ = [
     "DemoPage",
     "ingest_order",
     "propose_routing",
+    "approve_demo_po",
+    "submit_demo_po",
+    "reconcile_demo_po",
     "normalize_demo_order",
     "validate_demo_page",
 ]

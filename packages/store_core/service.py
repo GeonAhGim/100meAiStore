@@ -187,6 +187,18 @@ class StoreControlPlane:
         self.require(context, Capability.TENANT_ADMIN)
         return self.repo.purchase_orders_for(context.tenant_id, order_id)
 
+    def approve_demo_po(self, context: TenantContext, po_id: str, approve: bool, reason: str) -> Any:
+        from .order02 import approve_demo_po
+        return approve_demo_po(self, context, po_id, approve, reason)
+
+    def submit_demo_po(self, context: TenantContext, po_id: str) -> Any:
+        from .order02 import submit_demo_po
+        return submit_demo_po(self, context, po_id)
+
+    def reconcile_demo_po(self, context: TenantContext, po_id: str, response: Mapping[str, Any]) -> tuple[Any, bool]:
+        from .order02 import reconcile_demo_po
+        return reconcile_demo_po(self, context, po_id, response)
+
     def dashboard_snapshot(self, context: TenantContext, *, project_root: str | None = None) -> dict[str, Any]:
         """Return a tenant-scoped, read-only dashboard projection.
 

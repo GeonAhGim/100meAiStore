@@ -223,6 +223,10 @@ CREATE TABLE purchase_lines(
  FOREIGN KEY(tenant_id,purchase_order_id) REFERENCES supplier_purchase_orders(tenant_id,id) ON DELETE RESTRICT,
  FOREIGN KEY(tenant_id,order_line_id) REFERENCES order_lines(tenant_id,id) ON DELETE RESTRICT);
 CREATE INDEX purchase_orders_tenant_status ON supplier_purchase_orders(tenant_id,status,created_at);
+"""), (10, """
+ALTER TABLE supplier_purchase_orders ADD COLUMN provider_reference TEXT;
+ALTER TABLE supplier_purchase_orders ADD COLUMN last_response_digest TEXT;
+ALTER TABLE supplier_purchase_orders ADD COLUMN last_observed_at TEXT;
 """))
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -572,7 +576,7 @@ class SQLiteRepository:
 
     @staticmethod
     def _purchase_order(row: sqlite3.Row) -> SupplierPurchaseOrder:
-        return SupplierPurchaseOrder(row['id'], row['tenant_id'], row['channel_order_id'], row['supplier_id'], PurchaseOrderState(row['status']), row['idempotency_key'], row['approval_command_id'], _dt(row['created_at']), row['version'])
+        return SupplierPurchaseOrder(row['id'], row['tenant_id'], row['channel_order_id'], row['supplier_id'], PurchaseOrderState(row['status']), row['idempotency_key'], row['approval_command_id'], _dt(row['created_at']), row['version'], row['provider_reference'], row['last_response_digest'], _dt(row['last_observed_at']))
 
     def save_purchase_order(self, value: SupplierPurchaseOrder) -> tuple[SupplierPurchaseOrder, bool]:
         row = self.connection.execute("SELECT * FROM supplier_purchase_orders WHERE tenant_id=? AND idempotency_key=?", (value.tenant_id, value.idempotency_key)).fetchone()
@@ -582,12 +586,25 @@ class SQLiteRepository:
                 raise ConflictError('purchase idempotency key reused')
             return prior, True
         try:
-            self.connection.execute("INSERT INTO supplier_purchase_orders VALUES (?,?,?,?,?,?,?,?,?)",
+            self.connection.execute("INSERT INTO supplier_purchase_orders (id,tenant_id,channel_order_id,supplier_id,status,idempotency_key,approval_command_id,created_at,version) VALUES (?,?,?,?,?,?,?,?,?)",
                 (value.id, value.tenant_id, value.channel_order_id, value.supplier_id, value.status.value,
                  value.idempotency_key, value.approval_command_id, value.created_at.isoformat(), value.version))
         except sqlite3.IntegrityError as exc:
             raise ConflictError('purchase order already exists') from exc
         return value, False
+
+    def update_purchase_order(self, value: SupplierPurchaseOrder, expected_version: int) -> None:
+        if value.version != expected_version + 1: raise ConflictError('purchase order version conflict')
+        changed = self.connection.execute("UPDATE supplier_purchase_orders SET status=?,version=?,provider_reference=?,last_response_digest=?,last_observed_at=? WHERE tenant_id=? AND id=? AND version=?",
+            (value.status.value, value.version, value.provider_reference, value.last_response_digest,
+             value.last_observed_at.isoformat() if value.last_observed_at else None,
+             value.tenant_id, value.id, expected_version)).rowcount
+        if changed != 1: raise ConflictError('purchase order version conflict')
+
+    def get_purchase_order(self, tenant_id: str, po_id: str) -> SupplierPurchaseOrder:
+        row = self.connection.execute("SELECT * FROM supplier_purchase_orders WHERE tenant_id=? AND id=?", (tenant_id, po_id)).fetchone()
+        if row is None: raise NotFoundError('purchase order not found')
+        return self._purchase_order(row)
 
     def save_purchase_line(self, value: PurchaseLine) -> None:
         self.connection.execute("INSERT INTO purchase_lines VALUES (?,?,?,?,?,?)",

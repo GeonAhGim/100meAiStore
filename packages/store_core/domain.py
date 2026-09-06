@@ -351,6 +351,7 @@ class PurchaseOrderState(str, Enum):
     ACKNOWLEDGED = "acknowledged"
     CANCEL_REQUESTED = "cancel_requested"
     CANCELLED = "cancelled"
+    EXCEPTION = "exception"
 
 
 @dataclass
@@ -403,6 +404,9 @@ class SupplierPurchaseOrder:
     approval_command_id: str | None
     created_at: datetime
     version: int = 1
+    provider_reference: str | None = None
+    last_response_digest: str | None = None
+    last_observed_at: datetime | None = None
 
 
 @dataclass

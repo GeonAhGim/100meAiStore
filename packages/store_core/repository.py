@@ -272,6 +272,16 @@ class InMemoryRepository:
         self.purchase_orders[key] = deepcopy(value)
         return deepcopy(value), False
 
+    def update_purchase_order(self, value: SupplierPurchaseOrder, expected_version: int) -> None:
+        current = self.purchase_orders.get((value.tenant_id, value.id))
+        if current is None: raise NotFoundError("purchase order not found")
+        if current.version != expected_version or value.version != expected_version + 1: raise ConflictError("purchase order version conflict")
+        self.purchase_orders[(value.tenant_id, value.id)] = deepcopy(value)
+
+    def get_purchase_order(self, tenant_id: str, po_id: str) -> SupplierPurchaseOrder:
+        try: return deepcopy(self.purchase_orders[(tenant_id, po_id)])
+        except KeyError as exc: raise NotFoundError("purchase order not found") from exc
+
     def save_purchase_line(self, value: PurchaseLine) -> None:
         self.purchase_lines[(value.tenant_id, value.id)] = deepcopy(value)
 
