@@ -202,6 +202,18 @@ synthetic executor only: it cannot accept a production provider type, open a
 socket, or activate a marketplace connection. State: closed locally; fixture-
 specific P2-08 command composition and production deployment remain open.
 
+### A-004a bounded correction: listing review application composition
+
+The verified Coupang listing fixture previously stopped at a pure review object;
+no application function converted it into the exact approval and typed gateway
+command consumed by A-016. The new bridge rechecks tenant/connection/expiry,
+uses a privacy-minimized immutable payload, requires PRODUCT approval and binds
+the same offer target and policy at submission. Acceptance proves pending
+approval and a changed reviewed quantity cannot emit an executable command,
+while the exact reviewed intent reaches one synthetic verified effect. State:
+closed for the one-item listing slice only. A-004 remains open for remaining
+P2-08 fixture families and every real provider transport/readback.
+
 ## A-010 bounded correction: explicit synthetic absence authority
 
 Final-review continuation reproduced `authoritative_absence="false"` changing a

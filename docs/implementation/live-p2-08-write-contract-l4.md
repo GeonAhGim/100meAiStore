@@ -217,3 +217,18 @@ socket-denied two-step roundtrip includes identity remapping, deferred date,
 claim/freshness denial, wrong/missing mapping, altered review and expiry checks.
 More-than-two item splits and vendor response-to-invoice readback remain
 unsupported and must not be inferred from this bounded fixture.
+
+## Listing review to durable DEMO execution wiring
+
+The single-item Coupang listing fixture now has an explicit application bridge.
+It revalidates fixture scope and expiry, projects only the immutable review
+digest plus SKU/price/quantity into a PRODUCT approval, and submits the exact
+same payload as `publish_offer`. Pending approval and any changed review are
+blocked by the gateway. An accepted command flows through the fenced outbox and
+durable synthetic worker added in A-016, with one verified local effect.
+
+This is not a Coupang write adapter: the worker accepts only the exact synthetic
+provider type and no listing HTTP request, credential, marketplace ID or sale
+state is produced. The focused acceptance test denies implicit pre-approval,
+rejects a changed quantity/review digest and proves the exact reviewed command
+finishes locally. Other P2-08 change types and real transport remain open.

@@ -49,7 +49,8 @@ successful push is recorded; unrelated uncommitted launcher changes are excluded
 | 70fa067 | A-002b server sessions and one-use approval confirmation | 247 Python tests; HTTP/raw-ID/session/restart/replay tests; compileall/diff/pattern checks |
 | fba6258 | A-014 exact approval-intent binding at tool gateway | 249 Python tests; mismatch/revocation/single-use/restart/cross-tenant tests; compileall/diff/pattern checks |
 | e47cd3b | A-015 normalized nested secret-key rejection | 249 Python tests; spelling variants/no-write/opaque-ref regression; compileall/diff/pattern checks |
-| Next local commit (pending) | A-016 durable approved-tool synthetic consumer | 251 Python tests; success/restart/timeout-after-effect reconciliation; compileall/diff/pattern checks |
+| f0cb0a5 | A-016 durable approved-tool synthetic consumer | 251 Python tests; success/restart/timeout-after-effect reconciliation; compileall/diff/pattern checks |
+| Next local commit (pending) | A-004a exact listing review-to-DEMO execution bridge | 252 Python tests; pre-approval/change denial and one synthetic verified effect; compileall/diff/pattern checks |
 
 Later commits extend this list; only a successful authorized publishing step
 marks them published.
