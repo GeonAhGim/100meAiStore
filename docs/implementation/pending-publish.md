@@ -26,7 +26,8 @@ Root confirmed no retries or alternate publishing paths. Keep local work moving.
 | 45f4be3 | Bounded synthetic listing review and warning-aware creation receipt | 200 Python tests; compileall/diff/pattern/filename checks |
 | ecc0129 | Single-receipt synthetic return review and exact-ID completion reconciliation | 205 Python tests; compileall/diff/pattern/filename checks |
 | a5bff2e | A-007 delegated approval resources and durable direct-decision expiry | 208 Python tests; compileall/diff/pattern/filename checks |
-| Next local commit | Exact listing readback with separate draft/approved fixture observations | 210 Python tests; compileall/diff/pattern checks |
+| d111ce0 | Exact listing readback with separate draft/approved fixture observations | 210 Python tests; compileall/diff/pattern/filename checks |
+| Next local commit | Scoped Naver/Coupang tracking batch composition and correlation | 214 Python tests; compileall/diff/pattern/filename checks |
 
 No entry here claims remote publication. Later local commits will extend this
 list; only an explicit authorized publishing step may mark them published.

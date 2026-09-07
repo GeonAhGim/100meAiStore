@@ -179,3 +179,19 @@ Readback evidence: eight listing tests and 210 full tests passed; compileall,
 diff whitespace and common secret-pattern checks passed. Both draft and approved
 synthetic states are exercised without sockets; vendor-generated ID values are
 preserved exactly, while mismatched field/type/option/status/time requires review.
+
+## Tracking batch correlation
+
+Compose existing checked single-item reviews into one immutable scoped batch.
+Naver allows at most 30 product-order IDs; the Coupang fixture uses a local cap
+of 30 distinct shipment IDs, without claiming this is the vendor maximum.
+Require one provider/tenant/connection, nonduplicate exact result identities and
+all component reviews unexpired. Batch review digest includes every component.
+Naver unordered success coverage must equal the requested set with no failures;
+Coupang aggregate and each shipment result must all be successful. Missing,
+duplicate, foreign, partial or retry-marked results require whole-batch
+reconciliation; no batch or sub-item receives automatic resend authority.
+
+Batch evidence: four focused tests and 214 full tests passed; compileall, diff
+whitespace, common secret-pattern and forbidden filename gates passed. The
+30-item Naver and two-shipment Coupang fixture results run without sockets.
