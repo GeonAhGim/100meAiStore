@@ -41,6 +41,7 @@ infrastructure. No operational database deletion or real PII is permitted.
 | A-009 operations dashboard interpolates unescaped HTML | high | reproduced image/SVG injection; encoded dynamic template text in dashboard.py | app/security | real embedded JS rendering regression, three focused / 221 full tests | closed locally |
 | A-010 malformed synthetic absence setting authorizes resend | high | constructor coerced string false to true in synthetic_provider.py | core/recovery | provider type-boundary and durable UNKNOWN/manual-review regression; 223 full tests | closed locally |
 | A-011 mobile purchase decision leaves PO pending; submission misses revalidation | high | mobile decision and changed-target/expiry regressions in test_order_routing.py | core/orders | three-role mobile/direct decisions, restart, rollback injection, revoked/changed-target denial; 228 full tests | closed locally |
+| A-012 durable stops do not reach dispatch or PO submission | high | three failing dispatch/absence-retry/PO regressions | core/safety | scoped denial, explicit resume, reconciliation with one existing effect; 231 full tests | closed locally |
 
 This ledger is a seed for the exhaustive matrix, not a claim that there are only
 six gaps. Approval-gated high risks remain visible; they must not be relabelled
@@ -78,6 +79,19 @@ Five new integration tests pass; four original regression cases failed before
 the fix. All 228 repository tests, compileall, diff whitespace and common secret
 pattern checks passed. This closes local PO decision/submission wiring only;
 production identity, supplier transport and contract adapter integration remain.
+
+## A-012 bounded correction: durable stop at dispatch boundary
+
+Three new regressions show B10 durable stops block the tool gateway but not
+synthetic dispatch, PO submission or authoritative-absence retry. Severity:
+high; owner: core/safety. Check tenant-owned global/tenant/current connection
+stops when preparing/beginning an attempt and before PO submission (its channel
+ID is the local DEMO connection scope). Recheck stops when absence might enable
+retry. Read-only reconciliation remains allowed to preserve existing-effect
+evidence. Unrelated connections/tenants are not stopped. Verify explicit resume,
+zero effects on denial and restart persistence without changing operational data.
+All 231 tests passed, including existing durable-stop backup/restart evidence;
+compileall, diff whitespace and common secret-pattern checks passed.
 
 ## Required final verdict
 

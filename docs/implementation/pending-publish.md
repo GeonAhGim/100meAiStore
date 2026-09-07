@@ -1,4 +1,4 @@
-# Local commits awaiting explicit destination approval
+# Publication evidence and pending local commits
 
 Destination observed in git configuration:
 `https://github.com/GeonAhGim/100meAiStore.git`, branch `main`.
@@ -6,6 +6,12 @@ Destination observed in git configuration:
 Automatic approval review rejected a push of P2-01 because authorization for
 the external GitHub destination/default-branch payload was not established.
 Root confirmed no retries or alternate publishing paths. Keep local work moving.
+
+2026-09-08: the user explicitly authorized verified small commits to origin/main.
+Root restored GitHub CLI authentication and confirmed successful publication
+through `ac44237`; the local origin/main reference matches. Historical entries
+through that commit are now published. Later entries remain pending until a
+successful push is recorded; unrelated uncommitted launcher changes are excluded.
 
 | Commit | Local deliverable | Verification |
 |---|---|---|
@@ -32,7 +38,8 @@ Root confirmed no retries or alternate publishing paths. Keep local work moving.
 | a658043 | A-008 explicit Boolean readiness evidence, fail-closed storage/inputs | 220 Python tests; compileall/diff/pattern/filename checks |
 | 23b79a6 | A-009 operations-dashboard HTML injection correction | 221 Python tests; embedded JS rendering; compileall/diff/pattern/filename checks |
 | f87e369 | A-010 strict synthetic absence authority prevents malformed-config resend | 223 Python tests; durable UNKNOWN/manual-review regression; compileall/diff/pattern checks |
-| Next local commit | A-011 linked purchase decision and submission revalidation | 228 Python tests; three-user/mobile/restart/atomicity regressions; compileall/diff/pattern checks |
+| ac44237 | A-011 linked purchase decision and submission revalidation | 228 Python tests; three-user/mobile/restart/atomicity regressions; compileall/diff/pattern checks |
+| Next local commit (pending) | A-012 durable stop checks at dispatch, retry and PO submission | 231 Python tests; scope/resume/no-effect/readback regressions; compileall/diff/pattern checks |
 
-No entry here claims remote publication. Later local commits will extend this
-list; only an explicit authorized publishing step may mark them published.
+Later commits extend this list; only a successful authorized publishing step
+marks them published.

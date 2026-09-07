@@ -129,6 +129,28 @@ class ExecutionTests(unittest.TestCase):
                 self.app.dispatch_demo(self.ctx, value.id, 'worker', value.fencing_token, self.provider)
         self.assertEqual(0, self.provider.effect_count(self.ctx.tenant_id))
 
+    def test_durable_scope_stop_blocks_dispatch_but_allows_reconciliation(self):
+        value = self.claim()
+        for scope, ref in (('global', 'global'), ('tenant', self.ctx.tenant_id), ('connection', 'demo')):
+            self.app.set_demo_stop(self.ctx, scope, ref, True, 'incident')
+            with self.subTest(scope=scope), self.assertRaises(ConflictError):
+                self.app.dispatch_demo(self.ctx, value.id, 'worker', value.fencing_token, self.provider)
+            self.assertEqual(0, self.provider.effect_count(self.ctx.tenant_id))
+            self.app.set_demo_stop(self.ctx, scope, ref, False, 'resumed')
+        self.provider.mode = 'timeout_after'
+        self.app.dispatch_demo(self.ctx, value.id, 'worker', value.fencing_token, self.provider)
+        self.app.set_demo_stop(self.ctx, 'connection', 'demo', True, 'incident')
+        self.assertEqual(AttemptState.VERIFIED_SUCCESS, self.reconcile().state)
+        self.assertEqual(1, self.provider.effect_count(self.ctx.tenant_id))
+
+    def test_durable_stop_prevents_authoritative_absence_retry(self):
+        self.provider.mode, self.provider.authoritative_absence = 'timeout_before', True
+        value = self.claim()
+        self.app.dispatch_demo(self.ctx, value.id, 'worker', value.fencing_token, self.provider)
+        self.app.set_demo_stop(self.ctx, 'tenant', self.ctx.tenant_id, True, 'incident')
+        self.assertEqual(AttemptState.MANUAL_REVIEW, self.reconcile().state)
+        self.assertEqual(0, self.provider.effect_count(self.ctx.tenant_id))
+
     def test_ex07_expiry_and_revoked_approver_block_dispatch(self):
         member = self.app.add_member(self.ctx, 'funds@example.test', [Role.FUNDS])
         command, _ = self.app.request_approval(self.ctx, ApprovalKind.PURCHASE, 'po:second', {}, 'second', 1, 1)

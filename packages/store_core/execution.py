@@ -21,7 +21,9 @@ class DemoExecutionControlPlane(StoreControlPlane):
             self.repo.save_demo_control(DemoExecutionControl(context.tenant_id, command_id, policy_version, target_version, stopped))
             self._audit(context.tenant_id, context.user_id, 'demo.control_updated', command_id, 'accepted', {'stopped': stopped})
 
-    def _gate(self, context, command_id):
+    def _gate(self, context, command_id, connection_id=None):
+        if self.repo.demo_stop_active(context.tenant_id, connection_id):
+            raise ConflictError('DEMO scope stopped')
         control = self.repo.get_demo_control(context.tenant_id, command_id)
         if control.stopped:
             raise ConflictError('demo execution stopped')
@@ -39,7 +41,7 @@ class DemoExecutionControlPlane(StoreControlPlane):
             for value in (provider, connection_id, adapter_version):
                 self._inbound_identifier(value)
             self._manifest(context, provider, connection_id, adapter_version)
-            preparation = self._gate(context, command_id)
+            preparation = self._gate(context, command_id, connection_id)
             self.prepare_execution(context, command_id, policy_version, target_version)
             key = _strict_intent_digest({'tenant': context.tenant_id, 'command': command_id, 'operation_version': 1})
             prior = self.repo.attempt_for_key(context.tenant_id, key)
@@ -102,7 +104,7 @@ class DemoExecutionControlPlane(StoreControlPlane):
             value = self._leased(context, attempt_id, worker_id, token)
             if value.state != AttemptState.PREPARED:
                 raise ConflictError('dispatch requires prepared state')
-            preparation = self._gate(context, value.command_id)
+            preparation = self._gate(context, value.command_id, value.connection_id)
             if preparation.canonical_digest != value.intent_digest:
                 raise ConflictError('attempt intent mismatch')
             self._manifest(context, value.provider, value.connection_id, value.adapter_version)
@@ -148,7 +150,7 @@ class DemoExecutionControlPlane(StoreControlPlane):
                 state = AttemptState.MANUAL_REVIEW
                 if observation.get('authoritative_absence') is True:
                     try:
-                        self._gate(context, value.command_id)
+                        self._gate(context, value.command_id, value.connection_id)
                     except (AuthorizationError, ConflictError):
                         pass
                     else:

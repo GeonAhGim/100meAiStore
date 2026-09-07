@@ -79,6 +79,8 @@ def submit_demo_po(service: Any, context: Any, po_id: str):
         if po.status != PurchaseOrderState.APPROVED or po.approval_command_id is None:
             raise ConflictError("only an approved PO can be submitted")
         order = service.repo.get_channel_order(context.tenant_id, po.channel_order_id)
+        if service.repo.demo_stop_active(context.tenant_id, order.channel_id):
+            raise ConflictError("DEMO scope stopped")
         command = service.repo.get_command(context.tenant_id, po.approval_command_id)
         approval = service.repo.get_approval_for_command(context.tenant_id, command.id)
         intent = service.repo.get_approval_intent(context.tenant_id, command.id)

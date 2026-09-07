@@ -210,6 +210,18 @@ class OrderRoutingTests(unittest.TestCase):
         with self.assertRaises(ConflictError):
             self.app.submit_demo_po(self.ctx, po.id)
 
+    def test_durable_stop_is_rechecked_before_po_submission(self):
+        order, po = self.routed_order()
+        self.app.approve_demo_po(self.ctx, po.id, True, 'review')
+        for scope, ref in (('global', 'global'), ('tenant', self.ctx.tenant_id), ('connection', 'demo-channel')):
+            self.app.set_demo_stop(self.ctx, scope, ref, True, 'incident')
+            with self.subTest(scope=scope), self.assertRaises(ConflictError):
+                self.app.submit_demo_po(self.ctx, po.id)
+            self.assertEqual(PurchaseOrderState.APPROVED, self.app.purchase_orders(self.ctx, order.id)[0].status)
+            self.app.set_demo_stop(self.ctx, scope, ref, False, 'resumed')
+        self.app.set_demo_stop(self.ctx, 'connection', 'unrelated-channel', True, 'other incident')
+        self.assertEqual(PurchaseOrderState.SUBMITTED, self.app.submit_demo_po(self.ctx, po.id).status)
+
     def test_linked_decision_failure_rolls_back_approval_po_and_events(self):
         order, po = self.routed_order()
         approval = self.repo.get_approval_for_command(self.ctx.tenant_id, po.approval_command_id)
