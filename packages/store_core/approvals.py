@@ -3,13 +3,68 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Any
+from typing import Any, Mapping
 from uuid import uuid4
 
 from .domain import APPROVAL_CAPABILITY, ApprovalState, Capability, CommandState, OutboxEvent, OutboxState
 from .errors import AuthorizationError, ConflictError
 
 _OPAQUE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,254}\Z")
+_SENSITIVE_KEY = re.compile(
+    r"(?i)(api[_-]?key|authorization|access[_-]?token|refresh[_-]?token|password|secret|"
+    r"receiver[_-]?(phone|email|address)|recipient[_-]?(phone|email|address)|customer[_-]?(phone|email|address))"
+)
+
+
+def _safe_preview(value: Any, depth: int = 0) -> tuple[Any, bool]:
+    """Redact client-unsafe fields without mutating authoritative command data."""
+    if depth > 8:
+        return "[REDACTED]", True
+    if isinstance(value, Mapping):
+        result: dict[str, Any] = {}
+        redacted = False
+        for key, item in value.items():
+            label = str(key)
+            if _SENSITIVE_KEY.search(label):
+                result[label] = "[REDACTED]"
+                redacted = True
+            else:
+                safe, changed = _safe_preview(item, depth + 1)
+                result[label] = safe
+                redacted = redacted or changed
+        return result, redacted
+    if isinstance(value, (list, tuple)):
+        items, redacted = [], False
+        for item in value:
+            safe, changed = _safe_preview(item, depth + 1)
+            items.append(safe)
+            redacted = redacted or changed
+        return items, redacted
+    return value, False
+
+
+def _material_preview(command: Any, evidence: Any) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[Any], list[str]]:
+    payload = command.payload if isinstance(command.payload, Mapping) else {}
+    raw_before = payload.get("before", {})
+    raw_after = payload.get("after", payload)
+    before, before_redacted = _safe_preview(raw_before)
+    after, after_redacted = _safe_preview(raw_after)
+    safe_evidence, evidence_redacted = _safe_preview(evidence)
+    raw_profit = payload.get("profit", {})
+    if not isinstance(raw_profit, Mapping):
+        raw_profit = {}
+    profit = {
+        "projected_profit_minor": raw_profit.get("projected_profit_minor") if type(raw_profit.get("projected_profit_minor")) is int else None,
+        "margin_ex_ad": raw_profit.get("margin_ex_ad") if isinstance(raw_profit.get("margin_ex_ad"), str) else None,
+        "margin_with_ad": raw_profit.get("margin_with_ad") if isinstance(raw_profit.get("margin_with_ad"), str) else None,
+        "currency": raw_profit.get("currency") if isinstance(raw_profit.get("currency"), str) else None,
+    }
+    badges = []
+    if before_redacted or after_redacted or evidence_redacted:
+        badges.append("sensitive_fields_redacted")
+    if profit["projected_profit_minor"] is None:
+        badges.append("profit_evidence_missing")
+    return before, after, profit, safe_evidence, badges
 
 
 def _permissions(service: Any, context: Any) -> list[str]:
@@ -41,15 +96,16 @@ def _item(service: Any, context: Any, approval: Any, command: Any,
           permissions: list[str]) -> dict[str, Any]:
     pending = approval.state == ApprovalState.PENDING
     decision = "approval_required" if pending else ("allow" if approval.state == ApprovalState.APPROVED else "deny")
+    before, after, profit, evidence, risk_badges = _material_preview(command, approval.evidence)
     return {
         "approval_id": approval.id,
         "kind": approval.kind.value,
-        "risk_badges": [],
+        "risk_badges": risk_badges,
         "target": {"label": command.target_ref, "ref": command.target_ref},
-        "before": {},
-        "after": dict(command.payload),
-        "profit": {"projected_profit_minor": None, "margin_ex_ad": None, "margin_with_ad": None, "currency": command.payload.get("currency") if isinstance(command.payload, dict) else None},
-        "evidence": [dict(item) for item in approval.evidence],
+        "before": before,
+        "after": after,
+        "profit": profit,
+        "evidence": evidence,
         "policy": {"version": "v" + str(service.repo.get_approval_intent(context.tenant_id, command.id).policy_version) if service.repo.get_approval_intent(context.tenant_id, command.id) else "unknown", "decision": decision, "reasons": []},
         "rollback": {"available": False, "description": "DEMO only; no external side effect"},
         "expires_at": approval.expires_at.isoformat(),

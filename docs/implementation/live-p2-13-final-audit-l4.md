@@ -88,6 +88,41 @@ test checks every fail-closed field and confirms no guessed header is exposed.
 Authoritative Discovery may replace this boundary later under G1; it does not
 make P2-04 or LIVE complete.
 
+### A-002a bounded correction: safe material approval preview
+
+The mobile approval resource currently returns arbitrary command payload and
+evidence values verbatim while `before`, profit and risk fields are placeholders.
+An approval command containing an API key, authorization header or recipient
+contact could therefore expose it to every authorized approval reader, including
+the auditor role. Severity: high; owner: app/security. Build a display-only,
+bounded recursive projection that redacts secret and direct-contact fields from
+payload and evidence without changing the immutable approval intent. Populate
+explicit before/after and profit fields only from supplied evidence, and add
+risk badges when redaction occurred or profit evidence is missing. Acceptance:
+master, delegated approver and auditor receive the same safe material preview;
+raw sensitive values never occur in its representation; decisions still verify
+the unchanged authoritative intent and survive restart. This is a service/UI
+resource correction, not production login, MFA or a browser PWA.
+
+Correction evidence: the regression exposed all four synthetic private values
+before the change. The focused seven-test approval suite and complete 240-test
+suite pass afterward; compileall, diff whitespace and common secret-pattern
+scans pass. The delegated catalog decision verifies the unchanged intent and
+the original authoritative payload survives SQLite restart.
+
+### A-002b newly confirmed: unauthenticated browser identity and weak nonce
+
+The served dashboard accepts `tenant_id` and `user_id` from URL parameters,
+stores them in browser localStorage and reconstructs a context from membership
+without credential/session proof. `confirmation_nonce` is caller-chosen,
+format-checked and discarded rather than server-issued, session-bound and
+single-use. Severity: high; owner: app/security. Until a server-side authenticated
+session boundary exists, the UI is DEMO-only and must not be exposed as a
+production PWA. Acceptance requires anonymous/raw-ID denial, secure cookie
+sessions with tenant override rejection, three-role browser authorization,
+revocation/rotation, short-lived approval-bound one-time nonces and browser
+storage/cache inspection with no identity/session/BYOK material. State: open.
+
 ## A-010 bounded correction: explicit synthetic absence authority
 
 Final-review continuation reproduced `authoritative_absence="false"` changing a

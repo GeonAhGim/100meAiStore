@@ -79,6 +79,21 @@ SQLite restart preserves each delegated decider and a valid audit hash chain.
 Foreign approval IDs fail without exposing the resource. A-007 is closed for
 the local service boundary; A-002 production identity/UI work stays open.
 
+## Safe material approval preview
+
+The local mobile approval resource previously returned arbitrary command payload
+and evidence values verbatim while its before/profit/risk fields were static
+placeholders. It now creates a display-only recursive projection that redacts
+secret, authorization and direct recipient/customer contact fields. Explicit
+before/after and profit evidence are shown without changing the immutable
+command; missing profit and redaction are visible risk badges. Master, delegated
+catalog approver and auditor receive the same safe preview, while only the
+authorized approver receives decision actions. The authoritative unchanged
+intent remains decidable and durable after restart.
+
+This closes A-002a at the local service boundary. Production browser identity,
+MFA, server-issued one-time confirmation nonces and the PWA remain open.
+
 ## Readiness evidence correction
 
 The local readiness evaluator defaults five absent checks to true and coerces

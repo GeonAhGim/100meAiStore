@@ -99,5 +99,38 @@ class B06ApprovalTests(unittest.TestCase):
             self.assertEqual(baseline, (len(self.repo.outbox_for(self.ctx.tenant_id)), len(self.repo.audits_for(self.ctx.tenant_id))))
         self.assertEqual(ApprovalState.REJECTED, self.app.decide(self.ctx, command.id, False, 'explicit rejection').state)
 
+    def test_material_preview_redacts_secrets_and_contacts_without_changing_intent(self):
+        auditor = self.app.add_member(self.ctx, "preview-auditor@example.test", [Role.AUDITOR])
+        catalog = self.app.add_member(self.ctx, "preview-catalog@example.test", [Role.CATALOG_CS])
+        payload = {
+            "before": {"price_minor": 1200},
+            "after": {"price_minor": 1000, "api_key": "PRIVATE-API-KEY", "receiver_phone": "010-1111-2222"},
+            "profit": {"projected_profit_minor": 200, "margin_ex_ad": "0.20", "margin_with_ad": "0.15", "currency": "KRW"},
+            "authorization": "PRIVATE-AUTH",
+        }
+        evidence = ({"label": "quote", "ref": "source-1", "customer_email": "private@example.test",
+                     "observed_at": self.now.isoformat()},)
+        command, approval = self.app.request_approval(
+            self.ctx, ApprovalKind.PRODUCT, "product-preview", payload, "preview-1", 1, 1, evidence)
+        preview = self.app.approval_detail(auditor, approval.id)
+        catalog_preview = self.app.approval_detail(catalog, approval.id)
+        self.assertEqual({key: value for key, value in preview.items() if key != "actions"},
+                         {key: value for key, value in catalog_preview.items() if key != "actions"})
+        self.assertEqual([], preview["actions"])
+        self.assertEqual(["approve", "reject", "ask_question"], catalog_preview["actions"])
+        rendered = repr(preview)
+        for private in ("PRIVATE-API-KEY", "010-1111-2222", "PRIVATE-AUTH", "private@example.test"):
+            self.assertNotIn(private, rendered)
+        self.assertEqual({"price_minor": 1200}, preview["before"])
+        self.assertEqual(1000, preview["after"]["price_minor"])
+        self.assertEqual(200, preview["profit"]["projected_profit_minor"])
+        self.assertIn("sensitive_fields_redacted", preview["risk_badges"])
+        self.app.decide_approval(catalog, approval.id, True, "safe preview checked", "preview-nonce")
+        self.assertEqual(payload, self.repo.get_command(self.ctx.tenant_id, command.id).payload)
+        self.repo.close()
+        self.repo = SQLiteRepository(Path(self.temp.name) / "approval.sqlite3")
+        self.app = StoreControlPlane(self.repo, lambda: self.now)
+        self.assertEqual(payload, self.repo.get_command(self.ctx.tenant_id, command.id).payload)
+
 
 if __name__ == "__main__": unittest.main()
