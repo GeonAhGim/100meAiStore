@@ -39,10 +39,27 @@ infrastructure. No operational database deletion or real PII is permitted.
 | A-007 delegated users cannot use mobile approval resources | high | reproduced master-only wrapper and rolled-back direct expiry; fixed approvals.py, see P2-09 L4 | app/security | 15 focused tests / 208 full tests, scoped three-user decisions, restart audit, wrong-role/cross-tenant/revocation and expiry | closed locally |
 | A-008 readiness infers missing safety evidence | high | reproduced missing/false-string defaults; corrected readiness.py, P2-09 L4 | core/release | three focused tests / 220 full tests, missing/invalid checks and storage block dependent gates | closed locally |
 | A-009 operations dashboard interpolates unescaped HTML | high | reproduced image/SVG injection; encoded dynamic template text in dashboard.py | app/security | real embedded JS rendering regression, three focused / 221 full tests | closed locally |
+| A-010 malformed synthetic absence setting authorizes resend | high | constructor coerced string false to true in synthetic_provider.py | core/recovery | provider type-boundary and durable UNKNOWN/manual-review regression; 223 full tests | closed locally |
 
 This ledger is a seed for the exhaustive matrix, not a claim that there are only
 six gaps. Approval-gated high risks remain visible; they must not be relabelled
 low severity or treated as passed to manufacture a zero-gap report.
+
+## A-010 bounded correction: explicit synthetic absence authority
+
+Final-review continuation reproduced `authoritative_absence="false"` changing a
+timed-out DEMO attempt from UNKNOWN to PREPARED after lookup, permitting resend.
+The constructor currently coerces the value with bool(). Mutable assignment also
+permits non-Boolean response fields. Severity: high; owner: core/recovery.
+Only the literal Boolean True may enable the synthetic absence guarantee, both
+at construction and later configuration. All other values must remain false.
+Acceptance: invalid-value provider tests plus durable approval/dispatch/lookup
+integration showing UNKNOWN -> MANUAL_REVIEW with zero effects and no claim;
+the existing explicit-True, stable-key retry acceptance remains valid.
+This corrects a DEMO configuration boundary, not any marketplace guarantee.
+Both regressions failed before correction. All 223 tests passed after correction,
+including existing authoritative retry and crash/restart coverage. compileall,
+diff whitespace and common secret-pattern scans passed.
 
 ## Required final verdict
 

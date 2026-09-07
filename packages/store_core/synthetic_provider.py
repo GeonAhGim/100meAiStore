@@ -18,7 +18,7 @@ class DurableSyntheticProvider:
     def __init__(self, path, mode="success", authoritative_absence=False):
         self.path = Path(path)
         self.mode = mode
-        self.authoritative_absence = bool(authoritative_absence)
+        self.authoritative_absence = authoritative_absence
         self._lock = threading.RLock()
         self._db = sqlite3.connect(str(self.path), timeout=10, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
@@ -29,6 +29,15 @@ class DurableSyntheticProvider:
             provider_reference TEXT NOT NULL, hidden_lookups INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (tenant_id, operation_key))""")
         self._db.commit()
+
+    @property
+    def authoritative_absence(self):
+        return self._authoritative_absence
+
+    @authoritative_absence.setter
+    def authoritative_absence(self, value):
+        # A truthy configuration string must never authorize another dispatch.
+        self._authoritative_absence = value is True
 
     @property
     def mode(self):

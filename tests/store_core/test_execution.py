@@ -109,6 +109,18 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual(self.attempt.operation_key, result.operation_key)
         self.assertEqual(1, self.provider.effect_count(self.ctx.tenant_id))
 
+    def test_ex06_false_string_configuration_cannot_authorize_retry(self):
+        self.provider.close()
+        self.provider = DurableSyntheticProvider(self.provider_path, mode='timeout_before',
+                                                 authoritative_absence='false')
+        value = self.claim()
+        result = self.app.dispatch_demo(self.ctx, value.id, 'worker', value.fencing_token, self.provider)
+        self.assertEqual(AttemptState.UNKNOWN, result.state)
+        self.assertEqual(AttemptState.MANUAL_REVIEW, self.reconcile().state)
+        with self.assertRaises(ConflictError):
+            self.claim()
+        self.assertEqual(0, self.provider.effect_count(self.ctx.tenant_id))
+
     def test_ex07_stop_or_changed_policy_prevents_dispatch(self):
         value = self.claim()
         for policy, stopped in ((1, True), (2, False)):

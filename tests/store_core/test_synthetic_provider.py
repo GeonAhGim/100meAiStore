@@ -68,3 +68,14 @@ class SyntheticProviderTests(unittest.TestCase):
     def test_invalid_mode(self):
         with self.assertRaises(ValueError):
             self.provider.mode = "live"
+
+    def test_absence_authority_requires_explicit_boolean(self):
+        for value in (None, "false", "true", 1, [], {}, False, True):
+            with self.subTest(value=value):
+                provider = DurableSyntheticProvider(self.path, authoritative_absence=value)
+                try:
+                    self.assertIs(provider.lookup("new", "key", "digest")["authoritative_absence"], value is True)
+                    provider.authoritative_absence = value
+                    self.assertIs(provider.lookup("new", "key", "digest")["authoritative_absence"], value is True)
+                finally:
+                    provider.close()
