@@ -50,22 +50,26 @@ def _verify_po(service: Any, context: Any, po_id: str):
 
 
 def approve_demo_po(service: Any, context: Any, po_id: str, approve: bool, reason: str):
-    service.require(context, Capability.TENANT_ADMIN)
+    service.require(context, Capability.APPROVE_PURCHASE)
     if type(approve) is not bool or not isinstance(reason, str) or not reason.strip():
         raise ConflictError("approval decision and reason are required")
     with service.repo.transaction():
+        service.require(context, Capability.APPROVE_PURCHASE)
         po, order, command, approval = _verify_po(service, context, po_id)
-        decided = service.decide(context, command.id, approve, reason)
-        po.status = PurchaseOrderState.APPROVED if approve else PurchaseOrderState.CANCELLED
-        po.version += 1
-        service.repo.update_purchase_order(po, po.version - 1)
-        now = service._clock()
-        service._audit(context.tenant_id, context.user_id, "purchase_order.approved" if approve else "purchase_order.rejected", po.id, "succeeded", {"command_id": command.id})
-        service.repo.append_outbox(OutboxEvent(str(uuid4()), context.tenant_id,
-            "purchase_order.approved" if approve else "purchase_order.rejected", po.id,
-            {"purchase_order_id": po.id, "command_id": command.id, "state": po.status.value},
-            f"po:{po.id}:{po.status.value}", OutboxState.PENDING, now))
-        return po
+        _, expired = service._decide(context, command.id, approve, reason)
+        if not expired:
+            po.status = PurchaseOrderState.APPROVED if approve else PurchaseOrderState.CANCELLED
+            po.version += 1
+            service.repo.update_purchase_order(po, po.version - 1)
+            now = service._clock()
+            service._audit(context.tenant_id, context.user_id, "purchase_order.approved" if approve else "purchase_order.rejected", po.id, "succeeded", {"command_id": command.id})
+            service.repo.append_outbox(OutboxEvent(str(uuid4()), context.tenant_id,
+                "purchase_order.approved" if approve else "purchase_order.rejected", po.id,
+                {"purchase_order_id": po.id, "command_id": command.id, "state": po.status.value},
+                f"po:{po.id}:{po.status.value}", OutboxState.PENDING, now))
+    if expired:
+        raise ConflictError("approval expired")
+    return po
 
 
 def submit_demo_po(service: Any, context: Any, po_id: str):
@@ -81,7 +85,7 @@ def submit_demo_po(service: Any, context: Any, po_id: str):
         now = service._clock()
         if order.status != ChannelOrderState.PO_PENDING or approval.state != ApprovalState.APPROVED or intent is None or now >= approval.expires_at:
             raise ConflictError("approved PO is no longer executable")
-        service._check_intent(command, approval, intent)
+        service.prepare_execution(context, command.id, intent.policy_version, order.version)
         po.status, po.version = PurchaseOrderState.SUBMITTED, po.version + 1
         service.repo.update_purchase_order(po, po.version - 1)
         service._audit(context.tenant_id, context.user_id, "purchase_order.submitted_demo", po.id, "succeeded", {"mode": "DEMO"})

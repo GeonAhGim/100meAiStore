@@ -580,7 +580,7 @@ class StoreControlPlane:
     def decide(self, context: TenantContext, command_id: str, approve: bool, reason: str) -> Approval:
         # Record boundary probes in their own committed unit before re-raising.
         try:
-            self.repo.get_command(context.tenant_id, command_id)
+            command = self.repo.get_command(context.tenant_id, command_id)
         except AuthorizationError:
             with self.repo.transaction():
                 self._audit(
@@ -588,6 +588,13 @@ class StoreControlPlane:
                     "redacted", "blocked", {},
                 )
             raise
+        # Linked purchases have a domain projection that must change atomically
+        # with the approval, including decisions made through the mobile inbox.
+        if command.kind == ApprovalKind.PURCHASE and isinstance(command.payload.get('order_id'), str):
+            for po in self.repo.purchase_orders_for(context.tenant_id, command.payload['order_id']):
+                if po.approval_command_id == command_id:
+                    self.approve_demo_po(context, po.id, approve, reason)
+                    return self.repo.get_approval_for_command(context.tenant_id, command_id)
         expired = False
         result: Approval | None = None
         with self.repo.transaction():

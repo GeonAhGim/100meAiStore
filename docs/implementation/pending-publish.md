@@ -31,7 +31,8 @@ Root confirmed no retries or alternate publishing paths. Keep local work moving.
 | 500acf4 | Two-item split fixture with deferred-item and remapped-shipment follow-up | 218 Python tests; compileall/diff/pattern/filename checks |
 | a658043 | A-008 explicit Boolean readiness evidence, fail-closed storage/inputs | 220 Python tests; compileall/diff/pattern/filename checks |
 | 23b79a6 | A-009 operations-dashboard HTML injection correction | 221 Python tests; embedded JS rendering; compileall/diff/pattern/filename checks |
-| Next local commit | A-010 strict synthetic absence authority prevents malformed-config resend | 223 Python tests; durable UNKNOWN/manual-review regression; compileall/diff/pattern checks |
+| f87e369 | A-010 strict synthetic absence authority prevents malformed-config resend | 223 Python tests; durable UNKNOWN/manual-review regression; compileall/diff/pattern checks |
+| Next local commit | A-011 linked purchase decision and submission revalidation | 228 Python tests; three-user/mobile/restart/atomicity regressions; compileall/diff/pattern checks |
 
 No entry here claims remote publication. Later local commits will extend this
 list; only an explicit authorized publishing step may mark them published.

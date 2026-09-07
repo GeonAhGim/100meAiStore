@@ -40,6 +40,7 @@ infrastructure. No operational database deletion or real PII is permitted.
 | A-008 readiness infers missing safety evidence | high | reproduced missing/false-string defaults; corrected readiness.py, P2-09 L4 | core/release | three focused tests / 220 full tests, missing/invalid checks and storage block dependent gates | closed locally |
 | A-009 operations dashboard interpolates unescaped HTML | high | reproduced image/SVG injection; encoded dynamic template text in dashboard.py | app/security | real embedded JS rendering regression, three focused / 221 full tests | closed locally |
 | A-010 malformed synthetic absence setting authorizes resend | high | constructor coerced string false to true in synthetic_provider.py | core/recovery | provider type-boundary and durable UNKNOWN/manual-review regression; 223 full tests | closed locally |
+| A-011 mobile purchase decision leaves PO pending; submission misses revalidation | high | mobile decision and changed-target/expiry regressions in test_order_routing.py | core/orders | three-role mobile/direct decisions, restart, rollback injection, revoked/changed-target denial; 228 full tests | closed locally |
 
 This ledger is a seed for the exhaustive matrix, not a claim that there are only
 six gaps. Approval-gated high risks remain visible; they must not be relabelled
@@ -60,6 +61,23 @@ This corrects a DEMO configuration boundary, not any marketplace guarantee.
 Both regressions failed before correction. All 223 tests passed after correction,
 including existing authoritative retry and crash/restart coverage. compileall,
 diff whitespace and common secret-pattern scans passed.
+
+## A-011 bounded correction: purchase approval domain wiring
+
+Four new integration tests reproduce mobile approval leaving the linked PO
+pending, FUNDS users blocked by the PO wrapper, expired PO decisions rolling
+back their expiry evidence, and changed-target PO submission being accepted.
+Severity: high; owner: core/orders. Route linked purchase decisions through one
+domain transition shared by generic/mobile/direct entry points, atomically
+update approval/PO/audit/outbox, and require APPROVE_PURCHASE. Commit expiry
+before reporting conflict. Before DEMO submission, use core execution preparation
+to revalidate target version, current approver membership and immutable intent.
+Acceptance includes three roles, restart, rejection, expiry and revoked/changed
+target denial, with fault injection proving no half-committed approval/PO.
+Five new integration tests pass; four original regression cases failed before
+the fix. All 228 repository tests, compileall, diff whitespace and common secret
+pattern checks passed. This closes local PO decision/submission wiring only;
+production identity, supplier transport and contract adapter integration remain.
 
 ## Required final verdict
 
