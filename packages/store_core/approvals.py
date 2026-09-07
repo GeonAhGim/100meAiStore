@@ -6,8 +6,8 @@ from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
-from .domain import ApprovalState, Capability, CommandState, OutboxEvent, OutboxState
-from .errors import ConflictError
+from .domain import APPROVAL_CAPABILITY, ApprovalState, Capability, CommandState, OutboxEvent, OutboxState
+from .errors import AuthorizationError, ConflictError
 
 _OPAQUE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,254}\Z")
 
@@ -32,7 +32,13 @@ def _expire(service: Any, context: Any, approval: Any, command: Any, now: dateti
     return approval
 
 
-def _item(service: Any, context: Any, approval: Any, command: Any) -> dict[str, Any]:
+def _can_read(approval: Any, permissions: list[str]) -> bool:
+    return (APPROVAL_CAPABILITY[approval.kind].value in permissions
+            or Capability.READ_AUDIT.value in permissions)
+
+
+def _item(service: Any, context: Any, approval: Any, command: Any,
+          permissions: list[str]) -> dict[str, Any]:
     pending = approval.state == ApprovalState.PENDING
     decision = "approval_required" if pending else ("allow" if approval.state == ApprovalState.APPROVED else "deny")
     return {
@@ -47,37 +53,40 @@ def _item(service: Any, context: Any, approval: Any, command: Any) -> dict[str, 
         "policy": {"version": "v" + str(service.repo.get_approval_intent(context.tenant_id, command.id).policy_version) if service.repo.get_approval_intent(context.tenant_id, command.id) else "unknown", "decision": decision, "reasons": []},
         "rollback": {"available": False, "description": "DEMO only; no external side effect"},
         "expires_at": approval.expires_at.isoformat(),
-        "actions": ["approve", "reject", "ask_question"] if pending else [],
+        "actions": ["approve", "reject", "ask_question"] if pending and APPROVAL_CAPABILITY[approval.kind].value in permissions else [],
     }
 
 
 def approval_inbox(service: Any, context: Any) -> dict[str, Any]:
-    service.require(context, Capability.TENANT_ADMIN)
     now = service._clock()
     with service.repo.transaction():
+        permissions = _permissions(service, context)
         items = []
         for approval in service.repo.approvals_for(context.tenant_id):
+            if not _can_read(approval, permissions):
+                continue
             command = service.repo.get_command(context.tenant_id, approval.command_id)
             approval = _expire(service, context, approval, command, now)
             if approval.state == ApprovalState.PENDING:
-                items.append(_item(service, context, approval, command))
-        return {"items": items, "next_cursor": None, "as_of": now.isoformat(), "stale": False, "permissions": _permissions(service, context)}
+                items.append(_item(service, context, approval, command, permissions))
+        return {"items": items, "next_cursor": None, "as_of": now.isoformat(), "stale": False, "permissions": permissions}
 
 
 def approval_detail(service: Any, context: Any, approval_id: str) -> dict[str, Any]:
-    service.require(context, Capability.TENANT_ADMIN)
     if not isinstance(approval_id, str) or not _OPAQUE.fullmatch(approval_id):
         raise ConflictError("invalid approval id")
     now = service._clock()
     with service.repo.transaction():
+        permissions = _permissions(service, context)
         approval = service.repo.get_approval(context.tenant_id, approval_id)
+        if not _can_read(approval, permissions):
+            raise AuthorizationError("missing approval read capability")
         command = service.repo.get_command(context.tenant_id, approval.command_id)
-        return _item(service, context, _expire(service, context, approval, command, now), command)
+        return _item(service, context, _expire(service, context, approval, command, now), command, permissions)
 
 
 def decide_approval(service: Any, context: Any, approval_id: str, approve: bool,
                     reason: str, confirmation_nonce: str) -> Any:
-    service.require(context, Capability.TENANT_ADMIN)
     if not isinstance(approval_id, str) or not _OPAQUE.fullmatch(approval_id) or type(approve) is not bool:
         raise ConflictError("invalid approval decision")
     if not isinstance(reason, str) or not reason.strip() or len(reason) > 1000:
@@ -85,11 +94,9 @@ def decide_approval(service: Any, context: Any, approval_id: str, approve: bool,
     if not isinstance(confirmation_nonce, str) or not _OPAQUE.fullmatch(confirmation_nonce):
         raise ConflictError("confirmation nonce is required")
     with service.repo.transaction():
+        service._membership(context)
         approval = service.repo.get_approval(context.tenant_id, approval_id)
-        command = service.repo.get_command(context.tenant_id, approval.command_id)
-        _expire(service, context, approval, command, service._clock())
-        if approval.state != ApprovalState.PENDING:
-            raise ConflictError("approval is no longer pending")
-        # Existing decide performs the authoritative capability, expiry, intent,
-        # and single-decider transition and emits the standard command result.
-        return service.decide(context, command.id, approve, reason)
+        service.require(context, APPROVAL_CAPABILITY[approval.kind])
+    # Core decide re-checks membership, intent and single-decider state in its
+    # own transaction. Let it commit expiry evidence before raising to callers.
+    return service.decide(context, approval.command_id, approve, reason)

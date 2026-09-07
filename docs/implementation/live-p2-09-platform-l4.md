@@ -53,3 +53,28 @@ Verification: 165 Python tests passed; compileall and diff whitespace checks
 passed; forbidden local-data filename and common secret-pattern scans found
 no matches. The fixture runner was rerun after adding explicit post-cleanup
 container-absence verification and passed again.
+
+## Delegated approval resource correction
+
+Review found B06 inbox/detail/decision wrappers require master administration,
+so the existing FUNDS/CATALOG_CS domain approval permissions cannot be exercised
+through the mobile service resources. Replace the blanket requirement with
+current membership and approval-kind capabilities. Lists expose only authorized
+approval kinds; auditor read access has no decision actions. Detail/decision
+deny another role's kind before exposing payload. Keep transaction-local
+membership validation and the authoritative core single-decider transition.
+Also verify a direct expired decision commits expiry audit/outbox before raising;
+an enclosing wrapper transaction currently rolls back that evidence.
+
+Acceptance uses SQLite with master, funds and catalog users; approval by the
+delegated account, wrong role/cross-tenant/revoked session denial, auditor read-only
+actions, restart persistence and durable expiry. This fixes local service
+wiring, not production login or PWA implementation.
+
+Evidence: the three new regression scenarios failed before the fix (delegated
+users/auditor blocked; direct expiry remained pending) and pass after it.
+Fifteen targeted approval tests and 208 full Python tests passed. compileall,
+diff whitespace, common secret-pattern and forbidden filename gates passed.
+SQLite restart preserves each delegated decider and a valid audit hash chain.
+Foreign approval IDs fail without exposing the resource. A-007 is closed for
+the local service boundary; A-002 production identity/UI work stays open.

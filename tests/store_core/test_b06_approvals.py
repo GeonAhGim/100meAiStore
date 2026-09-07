@@ -3,7 +3,9 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from packages.store_core import ApprovalKind, ApprovalState, ConflictError, SQLiteRepository, StoreControlPlane
+from packages.store_core import (ApprovalKind, ApprovalState, AuthorizationError, ConflictError,
+                                 Role, SQLiteRepository, StoreControlPlane)
+from packages.store_core.errors import NotFoundError
 
 
 class B06ApprovalTests(unittest.TestCase):
@@ -37,6 +39,55 @@ class B06ApprovalTests(unittest.TestCase):
         self.assertEqual(ApprovalState.EXPIRED, self.repo.get_approval(self.ctx.tenant_id, approval.id).state)
         with self.assertRaises(ConflictError): self.app.decide_approval(self.ctx, approval.id, True, "late", "nonce")
         with self.assertRaises(ConflictError): self.app.decide_approval(self.ctx, approval.id, True, "late", "bad nonce!")
+
+    def test_three_user_inbox_and_decision_are_scoped_by_approval_kind(self):
+        funds = self.app.add_member(self.ctx, "funds@example.test", [Role.FUNDS])
+        catalog = self.app.add_member(self.ctx, "catalog@example.test", [Role.CATALOG_CS])
+        _, purchase = self.app.request_approval(self.ctx, ApprovalKind.PURCHASE, "po-1", {"amount_minor": 1000}, "po-1", 1, 1)
+        _, product = self.app.request_approval(self.ctx, ApprovalKind.PRODUCT, "product-1", {"sku": "fixture"}, "product-1", 1, 1)
+        self.assertEqual({purchase.id, product.id}, {item["approval_id"] for item in self.app.approval_inbox(self.ctx)["items"]})
+        self.assertEqual([purchase.id], [item["approval_id"] for item in self.app.approval_inbox(funds)["items"]])
+        self.assertEqual([product.id], [item["approval_id"] for item in self.app.approval_inbox(catalog)["items"]])
+        for context, approval in ((funds, product), (catalog, purchase)):
+            with self.assertRaises(AuthorizationError):
+                self.app.approval_detail(context, approval.id)
+            with self.assertRaises(AuthorizationError):
+                self.app.decide_approval(context, approval.id, True, "wrong role", "nonce")
+        self.assertEqual(funds.user_id, self.app.decide_approval(funds, purchase.id, True, "checked", "nonce-funds").decided_by)
+        self.assertEqual(catalog.user_id, self.app.decide_approval(catalog, product.id, True, "checked", "nonce-catalog").decided_by)
+        self.repo.close()
+        self.repo = SQLiteRepository(Path(self.temp.name) / "approval.sqlite3")
+        self.app = StoreControlPlane(self.repo, lambda: self.now)
+        self.assertEqual(funds.user_id, self.repo.get_approval(funds.tenant_id, purchase.id).decided_by)
+        self.assertTrue(self.app.verify_audit_chain(self.ctx.tenant_id))
+
+    def test_auditor_can_read_but_cannot_decide_and_revoked_sessions_stop(self):
+        auditor = self.app.add_member(self.ctx, "auditor@example.test", [Role.AUDITOR])
+        _, approval = self.app.request_approval(self.ctx, ApprovalKind.PRODUCT, "product", {}, "auditor-product", 1, 1)
+        self.assertEqual([], self.app.approval_detail(auditor, approval.id)["actions"])
+        self.assertEqual([], self.app.approval_inbox(auditor)["items"][0]["actions"])
+        with self.assertRaises(AuthorizationError):
+            self.app.decide_approval(auditor, approval.id, True, "not allowed", "nonce")
+        self.app.revoke_member(self.ctx, auditor.user_id)
+        for read in (lambda: self.app.approval_inbox(auditor), lambda: self.app.approval_detail(auditor, approval.id)):
+            with self.assertRaises(AuthorizationError):
+                read()
+        foreign = self.app.bootstrap_tenant("foreign", "foreign@example.test")
+        with self.assertRaises(NotFoundError):
+            self.app.approval_detail(foreign, approval.id)
+        with self.assertRaises(NotFoundError):
+            self.app.decide_approval(foreign, approval.id, True, "foreign", "nonce")
+
+    def test_expired_direct_decision_commits_expiry_before_raising(self):
+        command, approval = self.app.request_approval(self.ctx, ApprovalKind.PRODUCT, "expired", {}, "expired-direct", 1, 1)
+        self.now += timedelta(hours=24)
+        with self.assertRaises(ConflictError):
+            self.app.decide_approval(self.ctx, approval.id, True, "too late", "nonce")
+        self.assertEqual(ApprovalState.EXPIRED, self.repo.get_approval(self.ctx.tenant_id, approval.id).state)
+        self.assertEqual(1, sum(event.topic == "approval.expired" and event.aggregate_ref == command.id
+                                for event in self.repo.outbox_for(self.ctx.tenant_id)))
+        self.assertEqual(1, sum(event.action == "approval.expire" and event.target_ref == approval.id
+                                for event in self.repo.audits_for(self.ctx.tenant_id)))
 
 
 if __name__ == "__main__": unittest.main()

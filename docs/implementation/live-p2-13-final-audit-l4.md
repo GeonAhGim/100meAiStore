@@ -36,6 +36,7 @@ infrastructure. No operational database deletion or real PII is permitted.
 | A-004 P2-08 coverage incomplete | high | write-contract L4: listing/claims and full split/batch coverage open | connector | bounded official-schema fixture plans and unknown/partial/replay tests | open |
 | A-005 P2-04 source discrepancies unresolved | medium | auth-retry L4: public dummy bcrypt salt invalid; requested-by spelling differs | connector | authoritative resolution or explicit unsupported-case boundary; no guessed live auth | open |
 | A-006 real-account/legal/hosting decisions missing | high | DEC-01/02/04/06/07/08 and G1–G5 | product/legal/ops | dated scope-specific owner decisions plus authorized evidence, never fabricated by fixture tests | approval gate |
+| A-007 delegated users cannot use mobile approval resources | high | reproduced master-only wrapper and rolled-back direct expiry; fixed approvals.py, see P2-09 L4 | app/security | 15 focused tests / 208 full tests, scoped three-user decisions, restart audit, wrong-role/cross-tenant/revocation and expiry | closed locally |
 
 This ledger is a seed for the exhaustive matrix, not a claim that there are only
 six gaps. Approval-gated high risks remain visible; they must not be relabelled
