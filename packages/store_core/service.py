@@ -605,6 +605,8 @@ class StoreControlPlane:
         return result
 
     def _decide(self, context: TenantContext, command_id: str, approve: bool, reason: str) -> tuple[Approval, bool]:
+        if type(approve) is not bool or not isinstance(reason, str) or not reason.strip() or len(reason) > 1000:
+            raise ConflictError("Boolean approval decision and bounded reason are required")
         command = self.repo.get_command(context.tenant_id, command_id)
         approval = self.repo.get_approval_for_command(context.tenant_id, command_id)
         self.require(context, APPROVAL_CAPABILITY[command.kind])

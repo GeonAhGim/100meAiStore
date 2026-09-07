@@ -42,6 +42,7 @@ infrastructure. No operational database deletion or real PII is permitted.
 | A-010 malformed synthetic absence setting authorizes resend | high | constructor coerced string false to true in synthetic_provider.py | core/recovery | provider type-boundary and durable UNKNOWN/manual-review regression; 223 full tests | closed locally |
 | A-011 mobile purchase decision leaves PO pending; submission misses revalidation | high | mobile decision and changed-target/expiry regressions in test_order_routing.py | core/orders | three-role mobile/direct decisions, restart, rollback injection, revoked/changed-target denial; 228 full tests | closed locally |
 | A-012 durable stops do not reach dispatch or PO submission | high | three failing dispatch/absence-retry/PO regressions | core/safety | scoped denial, explicit resume, reconciliation with one existing effect; 231 full tests | closed locally |
+| A-013 core approval interprets string false as consent | high | malformed direct decision regression | core/approval | exact Boolean and bounded reason; no invalid-input mutation; 232 full tests | closed locally |
 
 This ledger is a seed for the exhaustive matrix, not a claim that there are only
 six gaps. Approval-gated high risks remain visible; they must not be relabelled
@@ -91,6 +92,18 @@ retry. Read-only reconciliation remains allowed to preserve existing-effect
 evidence. Unrelated connections/tenants are not stopped. Verify explicit resume,
 zero effects on denial and restart persistence without changing operational data.
 All 231 tests passed, including existing durable-stop backup/restart evidence;
+compileall, diff whitespace and common secret-pattern checks passed.
+
+## A-013 bounded correction: strict core decision input
+
+Direct StoreControlPlane.decide accepted the string "false" as approval;
+the mobile wrapper checked types but the authoritative core did not. Severity:
+high; owner: core/approval. Require exact Boolean decisions and nonempty bounded
+text reasons in the core transition. Invalid requests must leave approval,
+command, audit and outbox unchanged. Cover all malformed Boolean/reason values
+and explicit False rejection; existing True approval tests remain the positive
+control. This applies to local service inputs and introduces no external action.
+The regression failed before correction; all 232 tests passed after correction.
 compileall, diff whitespace and common secret-pattern checks passed.
 
 ## Required final verdict

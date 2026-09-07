@@ -89,5 +89,15 @@ class B06ApprovalTests(unittest.TestCase):
         self.assertEqual(1, sum(event.action == "approval.expire" and event.target_ref == approval.id
                                 for event in self.repo.audits_for(self.ctx.tenant_id)))
 
+    def test_core_decision_rejects_non_boolean_and_missing_reason(self):
+        command, approval = self.app.request_approval(self.ctx, ApprovalKind.PRODUCT, 'strict-decision', {}, 'strict-decision', 1, 1)
+        baseline = len(self.repo.outbox_for(self.ctx.tenant_id)), len(self.repo.audits_for(self.ctx.tenant_id))
+        for approve, reason in [(value, 'review') for value in ('false', 'true', 0, 1, None, [], {})] + [(True, value) for value in ('', ' ', None, 1, 'x' * 1001)]:
+            with self.subTest(approve=approve, reason_type=type(reason).__name__), self.assertRaises(ConflictError):
+                self.app.decide(self.ctx, command.id, approve, reason)
+            self.assertEqual(ApprovalState.PENDING, self.repo.get_approval(self.ctx.tenant_id, approval.id).state)
+            self.assertEqual(baseline, (len(self.repo.outbox_for(self.ctx.tenant_id)), len(self.repo.audits_for(self.ctx.tenant_id))))
+        self.assertEqual(ApprovalState.REJECTED, self.app.decide(self.ctx, command.id, False, 'explicit rejection').state)
+
 
 if __name__ == "__main__": unittest.main()

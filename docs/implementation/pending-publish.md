@@ -39,7 +39,12 @@ successful push is recorded; unrelated uncommitted launcher changes are excluded
 | 23b79a6 | A-009 operations-dashboard HTML injection correction | 221 Python tests; embedded JS rendering; compileall/diff/pattern/filename checks |
 | f87e369 | A-010 strict synthetic absence authority prevents malformed-config resend | 223 Python tests; durable UNKNOWN/manual-review regression; compileall/diff/pattern checks |
 | ac44237 | A-011 linked purchase decision and submission revalidation | 228 Python tests; three-user/mobile/restart/atomicity regressions; compileall/diff/pattern checks |
-| Next local commit (pending) | A-012 durable stop checks at dispatch, retry and PO submission | 231 Python tests; scope/resume/no-effect/readback regressions; compileall/diff/pattern checks |
+| ac656ba (pending) | A-012 durable stop checks at dispatch, retry and PO submission | 231 Python tests; scope/resume/no-effect/readback regressions; compileall/diff/pattern checks |
+| Next local commit (pending) | A-013 exact Boolean core decisions and bounded reasons | 232 Python tests; invalid-input no-mutation regression; compileall/diff/pattern checks |
 
 Later commits extend this list; only a successful authorized publishing step
 marks them published.
+
+A-012 push was rejected by automatic approval review in the child audit context,
+which did not establish destination/payload authorization despite the root's
+reported user approval. No alternate push or retry was attempted; root notified.
