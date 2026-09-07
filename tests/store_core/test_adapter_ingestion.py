@@ -4,12 +4,14 @@ import tempfile
 import threading
 import unittest
 import sqlite3
+from unittest.mock import patch
 
 from packages.store_core import (
     AdapterCapability, AdapterCapabilityManifest, ConflictError, DemoPage,
     FixtureDemoReadAdapter, SQLiteRepository, StoreControlPlane,
 )
 from packages.store_core.errors import NotFoundError
+from packages.store_core.sqlite_repository import LATEST_SCHEMA_VERSION
 
 
 class AdapterIngestionTests(unittest.TestCase):
@@ -145,7 +147,7 @@ class AdapterIngestionTests(unittest.TestCase):
         self.assertEqual(2, len(self.app.normalized_payloads_for(self.ctx)))
 
     def test_ad10_migration_and_immutable_payload_triggers(self):
-        self.assertEqual(18, self.repo.readiness()["schema_version"])
+        self.assertEqual(LATEST_SCHEMA_VERSION, self.repo.readiness()["schema_version"])
         result = self.app.poll_demo_connection(self.ctx, "demo", "orders", 0,
             self.adapter(DemoPage((self.row(),), None, False, datetime.now(timezone.utc))))
         with self.assertRaises(sqlite3.IntegrityError):
@@ -153,6 +155,35 @@ class AdapterIngestionTests(unittest.TestCase):
         with self.assertRaises(sqlite3.IntegrityError):
             self.repo.connection.execute("UPDATE normalized_inbound_payloads SET payload_json='{}' WHERE tenant_id=? AND immutable_ref=?",
                                         (self.ctx.tenant_id, result.payload_refs[0]))
+
+    def test_ad11_v18_order_lines_upgrade_with_null_source_identity(self):
+        from packages.store_core.sqlite_repository import MIGRATIONS
+        path = Path(self.temp.name) / "v18-lines.sqlite3"
+        with patch("packages.store_core.sqlite_repository.MIGRATIONS", MIGRATIONS[:18]):
+            legacy = SQLiteRepository(path)
+            try:
+                now = datetime.now(timezone.utc).isoformat()
+                digest = "0" * 64
+                legacy.connection.execute("INSERT INTO tenants VALUES (?,?,?)", ("tenant-legacy", "legacy", now))
+                legacy.connection.execute(
+                    "INSERT INTO normalized_inbound_payloads VALUES (?,?,?,?,?,?,?)",
+                    ("tenant-legacy", "payload-legacy", digest, 1, "{}", None, now))
+                legacy.connection.execute(
+                    "INSERT INTO channel_orders VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    ("order-legacy", "tenant-legacy", "demo", "external-legacy", "payload-legacy",
+                     "KRW", 100, "accepted", now, "order:legacy", 1))
+                legacy.connection.execute(
+                    "INSERT INTO order_lines(id,tenant_id,channel_order_id,sku,quantity,unit_minor,routed_status,version) VALUES (?,?,?,?,?,?,?,?)",
+                    ("line-legacy", "tenant-legacy", "order-legacy", "sku-legacy", 1, 100, "unrouted", 1))
+                legacy.connection.commit()
+            finally:
+                legacy.close()
+        upgraded = SQLiteRepository(path)
+        try:
+            self.assertEqual(LATEST_SCHEMA_VERSION, upgraded.readiness()["schema_version"])
+            self.assertIsNone(upgraded.order_lines_for("tenant-legacy", "order-legacy")[0].source_line_key)
+        finally:
+            upgraded.close()
 
 
 if __name__ == "__main__":

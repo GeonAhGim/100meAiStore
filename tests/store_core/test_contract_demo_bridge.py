@@ -91,6 +91,8 @@ class ContractDemoBridgeTests(unittest.TestCase):
                 self.assertTrue(app.verify_audit_chain(master.tenant_id))
                 for order_id in order_ids:
                     self.assertEqual(PurchaseOrderState.ACKNOWLEDGED, app.purchase_orders(master, order_id)[0].status)
+                source_keys = {line.source_line_key for order_id in order_ids for line in app.order_lines(master, order_id)}
+                self.assertEqual({'fixture-product-order-1', '9007199254740995:001'}, source_keys)
             finally:
                 repo.close()
 
@@ -131,6 +133,15 @@ class ContractDemoBridgeTests(unittest.TestCase):
         with self.assertRaises(ContractQuarantine):
             ContractFixtureReadAdapter('naver', body, sku_bindings=mapping, observed_at=self.now,
                 clock=lambda: self.now, requested_ids=('fixture-product-order-1', 'second-line'))
+
+    def test_duplicate_channel_line_identity_is_quarantined(self):
+        body, mapping = self.clean('naver')
+        second = copy.deepcopy(body['data'][0])
+        body['data'].append(second)
+        with self.assertRaises(ContractQuarantine):
+            ContractFixtureReadAdapter('naver', body, sku_bindings=mapping,
+                observed_at=self.now, clock=lambda: self.now,
+                requested_ids=('fixture-product-order-1',))
 
 
 if __name__ == '__main__': unittest.main()

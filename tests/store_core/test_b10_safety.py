@@ -3,6 +3,7 @@ import tempfile
 import unittest
 
 from packages.store_core import ConflictError, SQLiteRepository, StoreControlPlane
+from packages.store_core.sqlite_repository import LATEST_SCHEMA_VERSION
 
 
 class B10SafetyTests(unittest.TestCase):
@@ -25,7 +26,7 @@ class B10SafetyTests(unittest.TestCase):
     def test_new_path_backup_reopens_with_integrity_and_manifest(self):
         backup = Path(self.temp.name) / "backup.sqlite3"
         manifest = self.app.backup_demo_sqlite(str(backup), self.ctx.tenant_id)
-        self.assertTrue(backup.exists()); self.assertEqual(18, manifest.schema_version)
+        self.assertTrue(backup.exists()); self.assertEqual(LATEST_SCHEMA_VERSION, manifest.schema_version)
         restored = SQLiteRepository(backup)
         self.assertTrue(restored.readiness()["ready"]); self.assertEqual(self.ctx.tenant_id, restored.get_membership(self.ctx.tenant_id, self.ctx.user_id).tenant_id)
         restored.close()

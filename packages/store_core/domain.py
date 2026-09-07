@@ -383,6 +383,7 @@ class OrderLine:
     tracking_status: str | None = None
     tracking_version: int = 0
     tracking_observed_at: datetime | None = None
+    source_line_key: str | None = None
 
 
 @dataclass(frozen=True)

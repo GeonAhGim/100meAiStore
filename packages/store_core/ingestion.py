@@ -27,6 +27,7 @@ MAX_STRING_LENGTH = 255
 MAX_PAYLOAD_BYTES = 64 * 1024
 ALLOWED_CURRENCIES = frozenset({"KRW", "USD", "JPY", "EUR", "GBP", "CNY"})
 _OPAQUE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,254}\Z")
+_SOURCE_LINE_KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,254}\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 
 
@@ -117,8 +118,11 @@ def normalize_demo_order(item: Mapping[str, Any]) -> tuple[NormalizedDemoOrder, 
         raise ConflictError("lines must be a nonempty bounded list")
     lines: list[dict[str, Any]] = []
     calculated = 0
+    source_line_keys: set[str] = set()
     for raw in raw_lines:
-        if not isinstance(raw, Mapping) or set(raw) != {"sku", "quantity", "unit_minor"}:
+        if (not isinstance(raw, Mapping)
+                or not {"sku", "quantity", "unit_minor"}.issubset(raw)
+                or set(raw) - {"sku", "quantity", "unit_minor", "source_line_key"}):
             raise ConflictError("invalid DEMO order line schema")
         sku = _opaque(raw["sku"], "sku")
         quantity, unit = raw["quantity"], raw["unit_minor"]
@@ -127,7 +131,16 @@ def normalize_demo_order(item: Mapping[str, Any]) -> tuple[NormalizedDemoOrder, 
         if type(unit) is not int or unit < 0:
             raise ConflictError("line unit_minor must be a nonnegative integer")
         calculated += quantity * unit
-        lines.append({"sku": sku, "quantity": quantity, "unit_minor": unit})
+        normalized_line = {"sku": sku, "quantity": quantity, "unit_minor": unit}
+        if "source_line_key" in raw:
+            source_line_key = raw["source_line_key"]
+            if not isinstance(source_line_key, str) or not _SOURCE_LINE_KEY.fullmatch(source_line_key):
+                raise ConflictError("invalid source_line_key")
+            if source_line_key in source_line_keys:
+                raise ConflictError("duplicate source_line_key")
+            source_line_keys.add(source_line_key)
+            normalized_line["source_line_key"] = source_line_key
+        lines.append(normalized_line)
     if calculated != total:
         raise ConflictError("order amount does not match line amounts")
     source_digest = item.get("source_digest")

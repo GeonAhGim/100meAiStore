@@ -51,7 +51,30 @@ low severity or treated as passed to manufacture a zero-gap report.
 A-003 partial progress: `contract-demo-bridge-l4.md` now records Naver/Coupang
 fixture parsing through durable DEMO ingestion, routing, delegated purchase
 approval, supplier readback, settlement and restart. The 236-test suite passes.
-This does not close production channel-line/write-adapter/worker wiring gaps.
+The first bridge did not close production channel-line/write-adapter/worker
+wiring gaps. A-003a now closes the durable channel-line identity sub-gap; live
+transport and write-worker wiring remain open.
+
+### A-003a bounded correction: durable channel-line identity
+
+The bridge includes exact channel line IDs in its fixture digest but drops them
+from the normalized payload and generated `order_lines`. After restart there is
+therefore no durable way to correlate a core line with Naver `productOrderId` or
+Coupang `vendorItemId`. Severity: high; owner: connector/core. Add an optional
+`source_line_key` to normalized schema v1 and durable order lines so existing
+generic DEMO fixtures remain compatible. Contract-backed fixtures must supply
+it; duplicate keys within an order must fail closed. Acceptance: both channel
+fixtures retain exact keys through poll, ingest and SQLite restart; malformed or
+duplicate keys do not mutate durable state; the schema migration preserves old
+rows with a null key. This does not implement a live transport or channel write.
+
+Correction evidence: the regression failed before the new field existed. Both
+channel fixtures now retain their exact source keys across poll, ingestion and
+SQLite restart. A v18 database with an existing order line upgrades to v19 with
+a null compatibility value. Duplicate or malformed source keys fail before any
+durable write. Five bridge tests, eleven adapter-ingestion tests and the complete
+238-test suite pass; compileall, diff whitespace and common secret-pattern scans
+pass.
 
 ## A-010 bounded correction: explicit synthetic absence authority
 

@@ -65,8 +65,9 @@ class ContractFixtureReadAdapter:
             item = {"external_order_id": order_id, "event_id": "fixture-" + digest,
                     "revision": 1, "currency": "KRW",
                     "total_minor": sum(unit * quantity for _, _, unit, quantity in rows),
-                    "lines": [{"sku": sku, "quantity": quantity, "unit_minor": unit}
-                              for _, sku, unit, quantity in sorted(rows, key=lambda value: value[0].line_id)],
+                    "lines": [{"sku": sku, "quantity": quantity, "unit_minor": unit,
+                               "source_line_key": row.line_id}
+                              for row, sku, unit, quantity in sorted(rows, key=lambda value: value[0].line_id)],
                     "source_digest": digest}
             normalize_demo_order(item)
             items.append(item)

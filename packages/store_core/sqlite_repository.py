@@ -379,6 +379,10 @@ CREATE TABLE demo_price_projections(
  fee_rate TEXT NOT NULL, projected_contribution_minor INTEGER NOT NULL, projected_margin TEXT NOT NULL, status TEXT NOT NULL,
  calculated_at TEXT NOT NULL, UNIQUE(tenant_id,id), FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT);
 CREATE INDEX demo_price_tenant_sku_time ON demo_price_projections(tenant_id,sku,calculated_at);
+"""), (19, """
+ALTER TABLE order_lines ADD COLUMN source_line_key TEXT;
+CREATE UNIQUE INDEX order_lines_tenant_order_source_key
+ ON order_lines(tenant_id,channel_order_id,source_line_key) WHERE source_line_key IS NOT NULL;
 """))
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -696,10 +700,10 @@ class SQLiteRepository:
         if changed != 1: raise ConflictError('order version conflict')
 
     def save_order_line(self, value: OrderLine) -> None:
-        self.connection.execute("INSERT INTO order_lines (id,tenant_id,channel_order_id,sku,quantity,unit_minor,routed_status,version,tracking_key,tracking_status,tracking_version,tracking_observed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        self.connection.execute("INSERT INTO order_lines (id,tenant_id,channel_order_id,sku,quantity,unit_minor,routed_status,version,tracking_key,tracking_status,tracking_version,tracking_observed_at,source_line_key) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (value.id, value.tenant_id, value.channel_order_id, value.sku, value.quantity, value.unit_minor, value.routed_status, value.version,
              value.tracking_key, value.tracking_status, value.tracking_version,
-             value.tracking_observed_at.isoformat() if value.tracking_observed_at else None))
+             value.tracking_observed_at.isoformat() if value.tracking_observed_at else None, value.source_line_key))
 
     def update_order_line(self, value: OrderLine, expected_version: int) -> None:
         if value.version != expected_version + 1: raise ConflictError('order line version conflict')
@@ -711,7 +715,7 @@ class SQLiteRepository:
 
     @staticmethod
     def _order_line(row: sqlite3.Row) -> OrderLine:
-        return OrderLine(row['id'], row['tenant_id'], row['channel_order_id'], row['sku'], row['quantity'], row['unit_minor'], row['routed_status'], row['version'], row['tracking_key'], row['tracking_status'], row['tracking_version'], _dt(row['tracking_observed_at']))
+        return OrderLine(row['id'], row['tenant_id'], row['channel_order_id'], row['sku'], row['quantity'], row['unit_minor'], row['routed_status'], row['version'], row['tracking_key'], row['tracking_status'], row['tracking_version'], _dt(row['tracking_observed_at']), row['source_line_key'])
 
     def order_lines_for(self, tenant_id: str, order_id: str) -> tuple[OrderLine, ...]:
         self.get_channel_order(tenant_id, order_id)

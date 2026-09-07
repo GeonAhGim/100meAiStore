@@ -41,7 +41,8 @@ successful push is recorded; unrelated uncommitted launcher changes are excluded
 | ac44237 | A-011 linked purchase decision and submission revalidation | 228 Python tests; three-user/mobile/restart/atomicity regressions; compileall/diff/pattern checks |
 | ac656ba (pending) | A-012 durable stop checks at dispatch, retry and PO submission | 231 Python tests; scope/resume/no-effect/readback regressions; compileall/diff/pattern checks |
 | 8afcc0e (pending) | A-013 exact Boolean core decisions and bounded reasons | 232 Python tests; invalid-input no-mutation regression; compileall/diff/pattern checks |
-| Next local commit (pending) | A-003 bounded channel-schema fixture to durable DEMO flow | 236 Python tests; socket-denied two-channel approval/readback/settlement/restart flow; compileall/diff/pattern checks |
+| 93085d4 | A-003 bounded channel-schema fixture to durable DEMO flow | 236 Python tests; socket-denied two-channel approval/readback/settlement/restart flow; compileall/diff/pattern checks |
+| Next local commit (pending) | A-003a durable exact channel-line identity and v18→v19 migration | 238 Python tests; two-channel/restart/legacy/duplicate regressions; compileall/diff/pattern checks |
 
 Later commits extend this list; only a successful authorized publishing step
 marks them published.

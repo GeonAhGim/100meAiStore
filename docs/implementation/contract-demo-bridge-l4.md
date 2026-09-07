@@ -16,8 +16,9 @@ quote routing, delegated mobile purchase approval, submission/readback, local
 settlement and restart with sockets denied. Check page quarantine before cursor
 advance, replay, tenant isolation, malformed/missing mappings, freshness and
 input mutation. This is a local synthetic flow, not channel write contracts or
-a proof that live feeds are complete. A-003 remains open for durable channel-line
-mapping, operational write/readback adapters and complete worker/outbox wiring;
+a proof that live feeds are complete. Exact source-line identity is now durable
+through SQLite restart, with nullable compatibility for pre-v19 generic rows.
+A-003 remains open for operational write/readback adapters and complete worker/outbox wiring;
 A-002 identity/PWA and A-001 PostgreSQL are also still open.
 
 Evidence: four new tests pass, including both provider fixtures through durable

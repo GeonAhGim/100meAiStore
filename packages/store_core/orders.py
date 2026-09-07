@@ -68,7 +68,8 @@ def ingest_order(service: Any, context: Any, channel_id: str, payload_ref: str,
             return order, True
         for line in lines:
             service.repo.save_order_line(OrderLine(str(uuid4()), context.tenant_id, order.id, _opaque(line["sku"], "sku"),
-                                                   line["quantity"], line["unit_minor"]))
+                                                   line["quantity"], line["unit_minor"],
+                                                   source_line_key=line.get("source_line_key")))
         service._audit(context.tenant_id, context.user_id, "order.accepted", order.id, "succeeded",
                        {"external_order_key": external, "payload_ref": payload_ref, "event_id": event_id})
         service.repo.append_outbox(OutboxEvent(
