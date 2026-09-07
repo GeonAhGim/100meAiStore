@@ -105,6 +105,29 @@ class TenantContext:
     membership_version: int
 
 
+@dataclass(frozen=True)
+class BrowserSession:
+    token_digest: str
+    tenant_id: str
+    user_id: str
+    membership_version: int
+    identity_assertion_ref: str
+    issued_at: datetime
+    expires_at: datetime
+
+
+@dataclass
+class ApprovalConfirmationNonce:
+    token_digest: str
+    session_digest: str
+    tenant_id: str
+    approval_id: str
+    command_id: str
+    issued_at: datetime
+    expires_at: datetime
+    consumed_at: datetime | None = None
+
+
 @dataclass
 class Tenant:
     id: str

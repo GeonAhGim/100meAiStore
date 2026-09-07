@@ -474,6 +474,25 @@ class StoreControlPlane:
             raise AuthorizationError("membership revoked")
         return TenantContext(tenant_id, user_id, membership.version)
 
+    def issue_browser_session(self, context: TenantContext, *, identity_assertion_ref: str,
+                              ttl: timedelta = timedelta(hours=8)) -> Any:
+        from .browser_auth import issue_browser_session
+        return issue_browser_session(self, context, identity_assertion_ref=identity_assertion_ref, ttl=ttl)
+
+    def authenticate_browser_session(self, token: str) -> TenantContext:
+        from .browser_auth import authenticate_browser_session
+        return authenticate_browser_session(self, token)
+
+    def issue_approval_confirmation_nonce(self, session_token: str, approval_id: str,
+                                          ttl: timedelta = timedelta(minutes=5)) -> Any:
+        from .browser_auth import issue_approval_confirmation_nonce
+        return issue_approval_confirmation_nonce(self, session_token, approval_id, ttl)
+
+    def decide_approval_authenticated(self, session_token: str, approval_id: str,
+                                      approve: bool, reason: str, nonce_token: str) -> Any:
+        from .browser_auth import decide_approval_authenticated
+        return decide_approval_authenticated(self, session_token, approval_id, approve, reason, nonce_token)
+
     def _membership(self, context: TenantContext) -> Membership:
         membership = self.repo.get_membership(context.tenant_id, context.user_id)
         if not membership.active or membership.version != context.membership_version:

@@ -157,8 +157,8 @@ class OrderRoutingTests(unittest.TestCase):
         catalog = self.app.add_member(self.ctx, 'catalog@example.test', [Role.CATALOG_CS])
         approval = self.repo.get_approval_for_command(self.ctx.tenant_id, po.approval_command_id)
         with self.assertRaises(AuthorizationError):
-            self.app.decide_approval(catalog, approval.id, True, 'wrong role', 'nonce')
-        self.app.decide_approval(funds, approval.id, True, 'reviewed purchase', 'nonce')
+            self.app.decide(catalog, approval.command_id, True, 'wrong role')
+        self.app.decide(funds, approval.command_id, True, 'reviewed purchase')
         self.assertEqual(PurchaseOrderState.APPROVED, self.app.purchase_orders(self.ctx, order.id)[0].status)
         self.repo.close()
         self.repo = SQLiteRepository(self.path); self.app = StoreControlPlane(self.repo)
@@ -201,7 +201,7 @@ class OrderRoutingTests(unittest.TestCase):
         baseline = len(self.repo.outbox_for(self.ctx.tenant_id)), len(self.repo.audits_for(self.ctx.tenant_id))
         with patch.object(self.repo, 'update_purchase_order', side_effect=RuntimeError('injected PO commit failure')):
             with self.assertRaises(RuntimeError):
-                self.app.decide_approval(self.ctx, approval.id, True, 'review', 'nonce')
+                self.app.decide(self.ctx, approval.command_id, True, 'review')
         self.assertEqual(ApprovalState.PENDING, self.repo.get_approval(self.ctx.tenant_id, approval.id).state)
         self.assertEqual(PurchaseOrderState.APPROVAL_PENDING, self.app.purchase_orders(self.ctx, order.id)[0].status)
         self.assertEqual(baseline, (len(self.repo.outbox_for(self.ctx.tenant_id)), len(self.repo.audits_for(self.ctx.tenant_id))))
@@ -228,7 +228,7 @@ class OrderRoutingTests(unittest.TestCase):
         baseline = len(self.repo.outbox_for(self.ctx.tenant_id)), len(self.repo.audits_for(self.ctx.tenant_id))
         with patch.object(self.repo, 'update_purchase_order', side_effect=RuntimeError('injected PO commit failure')):
             with self.assertRaises(RuntimeError):
-                self.app.decide_approval(self.ctx, approval.id, True, 'review', 'nonce')
+                self.app.decide(self.ctx, approval.command_id, True, 'review')
         self.assertEqual(ApprovalState.PENDING, self.repo.get_approval(self.ctx.tenant_id, approval.id).state)
         self.assertEqual(PurchaseOrderState.APPROVAL_PENDING, self.app.purchase_orders(self.ctx, order.id)[0].status)
         self.assertEqual(baseline, (len(self.repo.outbox_for(self.ctx.tenant_id)), len(self.repo.audits_for(self.ctx.tenant_id))))

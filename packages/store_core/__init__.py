@@ -31,6 +31,8 @@ from .notifications import set_demo_notification_preference, notify_demo, acknow
 from .safety import set_demo_stop, backup_demo_sqlite
 from .readiness import evaluate_demo_readiness
 from .contract_demo_bridge import ContractFixtureReadAdapter
+from .browser_auth import (authenticate_browser_session, browser_session_cookie, decide_approval_authenticated,
+                           issue_approval_confirmation_nonce, issue_browser_session)
 
 __all__ = [
     "ApprovalKind",
@@ -89,4 +91,9 @@ __all__ = [
     "evaluate_demo_readiness",
     "normalize_demo_order",
     "validate_demo_page",
+    "authenticate_browser_session",
+    "browser_session_cookie",
+    "decide_approval_authenticated",
+    "issue_approval_confirmation_nonce",
+    "issue_browser_session",
 ]

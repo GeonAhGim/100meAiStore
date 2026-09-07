@@ -7,7 +7,8 @@ from contextlib import contextmanager
 from datetime import datetime
 from typing import Iterable
 
-from .domain import AgentStatusSnapshot, Approval, AuditEvent, Command, Membership, OutboxEvent, OutboxState, Tenant, User
+from .domain import (AgentStatusSnapshot, Approval, ApprovalConfirmationNonce, AuditEvent, BrowserSession,
+                     Command, Membership, OutboxEvent, OutboxState, Tenant, User)
 from .errors import ConflictError, NotFoundError, TenantBoundaryError
 from .domain import (AdapterCapabilityManifest, InboxMessage, InboxState, ApprovalIntent,
                      ExecutionPreparation, NormalizedInboundPayload, AdapterPollCheckpoint)
@@ -81,6 +82,32 @@ class InMemoryRepository:
         self.backup_manifests: dict[tuple[str, str], DemoBackupManifest] = {}
         self.inventory_snapshots: dict[tuple[str, str], DemoInventorySnapshot] = {}
         self.price_projections: dict[tuple[str, str], DemoPriceProjection] = {}
+        self.browser_sessions: dict[str, BrowserSession] = {}
+        self.approval_confirmation_nonces: dict[str, ApprovalConfirmationNonce] = {}
+
+    def save_browser_session(self, value: BrowserSession) -> None:
+        if value.token_digest in self.browser_sessions:
+            raise ConflictError("browser session already exists")
+        self.browser_sessions[value.token_digest] = deepcopy(value)
+
+    def get_browser_session(self, token_digest: str) -> BrowserSession | None:
+        value = self.browser_sessions.get(token_digest)
+        return deepcopy(value) if value else None
+
+    def save_approval_confirmation_nonce(self, value: ApprovalConfirmationNonce) -> None:
+        if value.token_digest in self.approval_confirmation_nonces:
+            raise ConflictError("approval confirmation nonce already exists")
+        self.approval_confirmation_nonces[value.token_digest] = deepcopy(value)
+
+    def consume_approval_confirmation_nonce(self, token_digest: str, session_digest: str,
+                                            tenant_id: str, approval_id: str,
+                                            command_id: str, now: datetime) -> None:
+        value = self.approval_confirmation_nonces.get(token_digest)
+        if (value is None or value.session_digest != session_digest or value.tenant_id != tenant_id
+                or value.approval_id != approval_id or value.command_id != command_id
+                or value.consumed_at is not None or now >= value.expires_at):
+            raise ConflictError("invalid or expired approval confirmation nonce")
+        value.consumed_at = now
 
     def save_inventory_snapshot(self, value: DemoInventorySnapshot) -> DemoInventorySnapshot:
         self.inventory_snapshots[(value.tenant_id, value.id)] = deepcopy(value); return deepcopy(value)

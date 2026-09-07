@@ -123,6 +123,17 @@ sessions with tenant override rejection, three-role browser authorization,
 revocation/rotation, short-lived approval-bound one-time nonces and browser
 storage/cache inspection with no identity/session/BYOK material. State: open.
 
+A-002b local boundary evidence: URL identity inputs and localStorage use were
+removed. Schema v20 stores only browser-session and confirmation-token digests;
+membership version/revocation and expiry are rechecked on every use. Approval
+nonces are server-generated, session/approval/command-bound, short-lived,
+single-use and restart durable. Same-origin JSON endpoints are the only browser
+decision path, while the legacy arbitrary-nonce wrapper denies every call.
+Seven focused tests cover anonymous/raw-ID override, secure cookie flags,
+wrong-session/cross-approval/arbitrary/expired/replayed nonce, restart and
+browser storage. State: closed locally; external email/MFA identity, TLS and
+production PWA deployment remain approval-gated parts of A-002.
+
 ## A-010 bounded correction: explicit synthetic absence authority
 
 Final-review continuation reproduced `authoritative_absence="false"` changing a

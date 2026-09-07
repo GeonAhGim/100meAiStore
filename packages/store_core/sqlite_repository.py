@@ -24,7 +24,7 @@ from .domain import (
     DemoToolCommand, DemoAgentRun, DemoByokReference, DemoBudgetPolicy, DemoBudgetLedgerEntry,
     DemoNotificationPreference, DemoNotificationDelivery, DemoIncidentAcknowledgement,
     DemoStopControl, DemoBackupManifest,
-    DemoInventorySnapshot, DemoPriceProjection,
+    DemoInventorySnapshot, DemoPriceProjection, BrowserSession, ApprovalConfirmationNonce,
 )
 from .errors import ConflictError, NotFoundError, TenantBoundaryError
 
@@ -383,6 +383,21 @@ CREATE INDEX demo_price_tenant_sku_time ON demo_price_projections(tenant_id,sku,
 ALTER TABLE order_lines ADD COLUMN source_line_key TEXT;
 CREATE UNIQUE INDEX order_lines_tenant_order_source_key
  ON order_lines(tenant_id,channel_order_id,source_line_key) WHERE source_line_key IS NOT NULL;
+"""), (20, """
+CREATE TABLE browser_sessions(
+ token_digest TEXT PRIMARY KEY CHECK(length(token_digest)=64), tenant_id TEXT NOT NULL, user_id TEXT NOT NULL,
+ membership_version INTEGER NOT NULL CHECK(membership_version>0), identity_assertion_ref TEXT NOT NULL,
+ issued_at TEXT NOT NULL, expires_at TEXT NOT NULL,
+ FOREIGN KEY(tenant_id,user_id) REFERENCES memberships(tenant_id,user_id) ON DELETE RESTRICT);
+CREATE INDEX browser_sessions_expiry ON browser_sessions(expires_at);
+CREATE TABLE approval_confirmation_nonces(
+ token_digest TEXT PRIMARY KEY CHECK(length(token_digest)=64), session_digest TEXT NOT NULL,
+ tenant_id TEXT NOT NULL, approval_id TEXT NOT NULL, command_id TEXT NOT NULL,
+ issued_at TEXT NOT NULL, expires_at TEXT NOT NULL, consumed_at TEXT,
+ FOREIGN KEY(session_digest) REFERENCES browser_sessions(token_digest) ON DELETE RESTRICT,
+ FOREIGN KEY(tenant_id,approval_id) REFERENCES approvals(tenant_id,id) ON DELETE RESTRICT,
+ FOREIGN KEY(tenant_id,command_id) REFERENCES commands(tenant_id,id) ON DELETE RESTRICT);
+CREATE INDEX approval_nonces_expiry ON approval_confirmation_nonces(expires_at);
 """))
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -449,6 +464,38 @@ class SQLiteRepository:
 
     def close(self) -> None:
         self.connection.close()
+
+    def save_browser_session(self, value: BrowserSession) -> None:
+        self.connection.execute(
+            "INSERT INTO browser_sessions VALUES (?,?,?,?,?,?,?)",
+            (value.token_digest, value.tenant_id, value.user_id, value.membership_version,
+             value.identity_assertion_ref, value.issued_at.isoformat(), value.expires_at.isoformat()))
+
+    def get_browser_session(self, token_digest: str) -> BrowserSession | None:
+        row = self.connection.execute(
+            "SELECT * FROM browser_sessions WHERE token_digest=?", (token_digest,)).fetchone()
+        return (BrowserSession(row['token_digest'], row['tenant_id'], row['user_id'], row['membership_version'],
+                               row['identity_assertion_ref'], _dt(row['issued_at']), _dt(row['expires_at']))
+                if row else None)
+
+    def save_approval_confirmation_nonce(self, value: ApprovalConfirmationNonce) -> None:
+        self.connection.execute(
+            "INSERT INTO approval_confirmation_nonces VALUES (?,?,?,?,?,?,?,?)",
+            (value.token_digest, value.session_digest, value.tenant_id, value.approval_id, value.command_id,
+             value.issued_at.isoformat(), value.expires_at.isoformat(),
+             value.consumed_at.isoformat() if value.consumed_at else None))
+
+    def consume_approval_confirmation_nonce(self, token_digest: str, session_digest: str,
+                                            tenant_id: str, approval_id: str,
+                                            command_id: str, now: datetime) -> None:
+        changed = self.connection.execute(
+            """UPDATE approval_confirmation_nonces SET consumed_at=?
+               WHERE token_digest=? AND session_digest=? AND tenant_id=? AND approval_id=? AND command_id=?
+                 AND consumed_at IS NULL AND expires_at>?""",
+            (now.isoformat(), token_digest, session_digest, tenant_id, approval_id, command_id,
+             now.isoformat())).rowcount
+        if changed != 1:
+            raise ConflictError("invalid or expired approval confirmation nonce")
 
     def save_demo_control(self, value: DemoExecutionControl) -> None:
         self.connection.execute('''INSERT INTO demo_execution_controls VALUES (?,?,?,?,?)

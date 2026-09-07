@@ -4,7 +4,7 @@ import tempfile
 import unittest
 
 from packages.store_core import (ApprovalKind, ApprovalState, AuthorizationError, ConflictError,
-                                 Role, SQLiteRepository, StoreControlPlane)
+                                 Role, SQLiteRepository, StoreControlPlane, TenantBoundaryError)
 from packages.store_core.errors import NotFoundError
 
 
@@ -26,10 +26,13 @@ class B06ApprovalTests(unittest.TestCase):
         self.assertEqual(["approve", "reject", "ask_question"], inbox["items"][0]["actions"])
         detail = self.app.approval_detail(self.ctx, approval.id)
         self.assertEqual(command.target_ref, detail["target"]["ref"])
-        decided = self.app.decide_approval(self.ctx, approval.id, True, "checked", "nonce-1")
+        session = self.app.issue_browser_session(self.ctx, identity_assertion_ref="fixture-email-mfa").token
+        nonce = self.app.issue_approval_confirmation_nonce(session, approval.id).token
+        decided = self.app.decide_approval_authenticated(session, approval.id, True, "checked", nonce)
         self.assertEqual(ApprovalState.APPROVED, decided.state)
         self.assertEqual([], self.app.approval_inbox(self.ctx)["items"])
-        with self.assertRaises(ConflictError): self.app.decide_approval(self.ctx, approval.id, False, "second", "nonce-2")
+        with self.assertRaises(AuthorizationError):
+            self.app.decide_approval(self.ctx, approval.id, False, "second", "nonce-2")
 
     def test_expiry_is_durable_and_changed_nonce_or_tenant_fails(self):
         _, approval = self.app.request_approval(self.ctx, ApprovalKind.PRODUCT, "product-2", {}, "approval-2", 1, 1)
@@ -37,8 +40,8 @@ class B06ApprovalTests(unittest.TestCase):
         inbox = self.app.approval_inbox(self.ctx)
         self.assertEqual([], inbox["items"])
         self.assertEqual(ApprovalState.EXPIRED, self.repo.get_approval(self.ctx.tenant_id, approval.id).state)
-        with self.assertRaises(ConflictError): self.app.decide_approval(self.ctx, approval.id, True, "late", "nonce")
-        with self.assertRaises(ConflictError): self.app.decide_approval(self.ctx, approval.id, True, "late", "bad nonce!")
+        with self.assertRaises(AuthorizationError): self.app.decide_approval(self.ctx, approval.id, True, "late", "nonce")
+        with self.assertRaises(AuthorizationError): self.app.decide_approval(self.ctx, approval.id, True, "late", "bad nonce!")
 
     def test_three_user_inbox_and_decision_are_scoped_by_approval_kind(self):
         funds = self.app.add_member(self.ctx, "funds@example.test", [Role.FUNDS])
@@ -52,9 +55,9 @@ class B06ApprovalTests(unittest.TestCase):
             with self.assertRaises(AuthorizationError):
                 self.app.approval_detail(context, approval.id)
             with self.assertRaises(AuthorizationError):
-                self.app.decide_approval(context, approval.id, True, "wrong role", "nonce")
-        self.assertEqual(funds.user_id, self.app.decide_approval(funds, purchase.id, True, "checked", "nonce-funds").decided_by)
-        self.assertEqual(catalog.user_id, self.app.decide_approval(catalog, product.id, True, "checked", "nonce-catalog").decided_by)
+                self.app.decide(context, approval.command_id, True, "wrong role")
+        self.assertEqual(funds.user_id, self.app.decide(funds, purchase.command_id, True, "checked").decided_by)
+        self.assertEqual(catalog.user_id, self.app.decide(catalog, product.command_id, True, "checked").decided_by)
         self.repo.close()
         self.repo = SQLiteRepository(Path(self.temp.name) / "approval.sqlite3")
         self.app = StoreControlPlane(self.repo, lambda: self.now)
@@ -67,7 +70,7 @@ class B06ApprovalTests(unittest.TestCase):
         self.assertEqual([], self.app.approval_detail(auditor, approval.id)["actions"])
         self.assertEqual([], self.app.approval_inbox(auditor)["items"][0]["actions"])
         with self.assertRaises(AuthorizationError):
-            self.app.decide_approval(auditor, approval.id, True, "not allowed", "nonce")
+            self.app.decide(auditor, approval.command_id, True, "not allowed")
         self.app.revoke_member(self.ctx, auditor.user_id)
         for read in (lambda: self.app.approval_inbox(auditor), lambda: self.app.approval_detail(auditor, approval.id)):
             with self.assertRaises(AuthorizationError):
@@ -75,14 +78,14 @@ class B06ApprovalTests(unittest.TestCase):
         foreign = self.app.bootstrap_tenant("foreign", "foreign@example.test")
         with self.assertRaises(NotFoundError):
             self.app.approval_detail(foreign, approval.id)
-        with self.assertRaises(NotFoundError):
-            self.app.decide_approval(foreign, approval.id, True, "foreign", "nonce")
+        with self.assertRaises(TenantBoundaryError):
+            self.app.decide(foreign, approval.command_id, True, "foreign")
 
     def test_expired_direct_decision_commits_expiry_before_raising(self):
         command, approval = self.app.request_approval(self.ctx, ApprovalKind.PRODUCT, "expired", {}, "expired-direct", 1, 1)
         self.now += timedelta(hours=24)
         with self.assertRaises(ConflictError):
-            self.app.decide_approval(self.ctx, approval.id, True, "too late", "nonce")
+            self.app.decide(self.ctx, approval.command_id, True, "too late")
         self.assertEqual(ApprovalState.EXPIRED, self.repo.get_approval(self.ctx.tenant_id, approval.id).state)
         self.assertEqual(1, sum(event.topic == "approval.expired" and event.aggregate_ref == command.id
                                 for event in self.repo.outbox_for(self.ctx.tenant_id)))
@@ -127,7 +130,9 @@ class B06ApprovalTests(unittest.TestCase):
         self.assertEqual(1000, preview["after"]["price_minor"])
         self.assertEqual(200, preview["profit"]["projected_profit_minor"])
         self.assertIn("sensitive_fields_redacted", preview["risk_badges"])
-        self.app.decide_approval(catalog, approval.id, True, "safe preview checked", "preview-nonce")
+        session = self.app.issue_browser_session(catalog, identity_assertion_ref="fixture-email-mfa").token
+        nonce = self.app.issue_approval_confirmation_nonce(session, approval.id).token
+        self.app.decide_approval_authenticated(session, approval.id, True, "safe preview checked", nonce)
         self.assertEqual(payload, self.repo.get_command(self.ctx.tenant_id, command.id).payload)
         self.repo.close()
         self.repo = SQLiteRepository(Path(self.temp.name) / "approval.sqlite3")

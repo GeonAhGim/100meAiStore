@@ -144,16 +144,10 @@ def approval_detail(service: Any, context: Any, approval_id: str) -> dict[str, A
 
 def decide_approval(service: Any, context: Any, approval_id: str, approve: bool,
                     reason: str, confirmation_nonce: str) -> Any:
-    if not isinstance(approval_id, str) or not _OPAQUE.fullmatch(approval_id) or type(approve) is not bool:
-        raise ConflictError("invalid approval decision")
-    if not isinstance(reason, str) or not reason.strip() or len(reason) > 1000:
-        raise ConflictError("approval decision reason is required")
-    if not isinstance(confirmation_nonce, str) or not _OPAQUE.fullmatch(confirmation_nonce):
-        raise ConflictError("confirmation nonce is required")
-    with service.repo.transaction():
-        service._membership(context)
-        approval = service.repo.get_approval(context.tenant_id, approval_id)
-        service.require(context, APPROVAL_CAPABILITY[approval.kind])
-    # Core decide re-checks membership, intent and single-decider state in its
-    # own transaction. Let it commit expiry evidence before raising to callers.
-    return service.decide(context, approval.command_id, approve, reason)
+    """Retained only as a fail-closed compatibility boundary.
+
+    Browser callers must use ``decide_approval_authenticated`` so the server can
+    bind and consume a nonce against the authenticated session and command.
+    Internal domain workflows call ``service.decide`` directly.
+    """
+    raise AuthorizationError("authenticated browser decision required")

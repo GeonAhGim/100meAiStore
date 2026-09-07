@@ -77,7 +77,7 @@ class ContractDemoBridgeTests(unittest.TestCase):
                                          'available_quantity': line.quantity}] for line in lines}
                     po = app.propose_routing(master, order.id, quotes)[0]
                     approval = repo.get_approval_for_command(master.tenant_id, po.approval_command_id)
-                    app.decide_approval(funds, approval.id, True, 'synthetic purchase reviewed', 'fixture-nonce')
+                    app.decide(funds, approval.command_id, True, 'synthetic purchase reviewed')
                     app.submit_demo_po(master, po.id)
                     acknowledged, _ = app.reconcile_demo_po(master, po.id,
                         {'status': 'ACKNOWLEDGED', 'provider_reference': channel + '-ack', 'observed_at': self.now})
