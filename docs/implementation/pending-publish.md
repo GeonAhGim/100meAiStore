@@ -29,7 +29,8 @@ Root confirmed no retries or alternate publishing paths. Keep local work moving.
 | d111ce0 | Exact listing readback with separate draft/approved fixture observations | 210 Python tests; compileall/diff/pattern/filename checks |
 | ed7be11 | Scoped Naver/Coupang tracking batch composition and correlation | 214 Python tests; compileall/diff/pattern/filename checks |
 | 500acf4 | Two-item split fixture with deferred-item and remapped-shipment follow-up | 218 Python tests; compileall/diff/pattern/filename checks |
-| Next local commit | A-008 explicit Boolean readiness evidence, fail-closed storage/inputs | 220 Python tests; compileall/diff/pattern/filename checks |
+| a658043 | A-008 explicit Boolean readiness evidence, fail-closed storage/inputs | 220 Python tests; compileall/diff/pattern/filename checks |
+| Next local commit | A-009 operations-dashboard HTML injection correction | 221 Python tests; embedded JS rendering; compileall/diff/pattern/filename checks |
 
 No entry here claims remote publication. Later local commits will extend this
 list; only an explicit authorized publishing step may mark them published.

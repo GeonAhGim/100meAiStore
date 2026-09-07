@@ -93,3 +93,19 @@ Evidence: the prior implementation failed six regression assertions. Three
 targeted tests and 220 full tests pass after the correction, plus compileall,
 diff whitespace, common secret-pattern and forbidden filename checks. A-008
 is closed locally; submitted booleans still require external evidence review.
+
+## Operations dashboard text rendering
+
+Dynamic task/status/error fields flow into HTML templates. The current esc
+helper only converts to string, so a hostile status can create elements and
+event attributes. Encode HTML metacharacters before all dynamic template
+interpolation. Verify by executing the actual embedded rendering script in a
+local Node sandbox, then parsing produced markup: hostile phase/task/blocker/
+commit text must produce no injected image/SVG/event attribute. This is a
+rendering regression test, not full-browser or production-auth evidence.
+
+Evidence: the rendering regression produced injected image/SVG elements before
+the fix and passes afterward. Three focused dashboard tests and 221 full Python
+tests passed, with Node executing the real embedded script locally (not skipped).
+compileall, diff whitespace, common secret-pattern and forbidden filename gates
+passed. A-009 is closed for this operations dashboard template.

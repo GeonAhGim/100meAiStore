@@ -24,7 +24,7 @@ INDEX_HTML = r"""<!doctype html>
 <section id="app" class="grid"><div class="card wide">tenant_id와 user_id를 입력하면 상태를 조회합니다.</div></section>
 <div class="footer">자동 새로고침 기본 10초. 백그라운드 탭에서는 중지하고 다시 활성화하면 즉시 조회합니다.</div></main>
 <script>
-const q=id=>document.getElementById(id), esc=s=>String(s??'');
+const q=id=>document.getElementById(id), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function list(items){return (items||[]).map(x=>`<li>${esc(x)}</li>`).join('')||'<li>없음</li>'}
 function card(title,body){return `<div class="card"><h2>${title}</h2>${body}</div>`}
 function render(d){
