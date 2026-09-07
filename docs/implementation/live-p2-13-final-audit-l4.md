@@ -159,6 +159,24 @@ restart and cross-tenant denial; compileall, diff and secret scans pass. State:
 closed locally. A production worker/adapter and P2-08 fixture-specific command
 composition remain open.
 
+### A-015 newly confirmed: gateway secret-key spelling bypass
+
+Gateway JSON validation rejects only five exact lowercase key names. Common
+variants such as `clientSecret`, `access-token` and `credential` can therefore
+enter durable tool/agent payloads. Severity: high; owner: core/security.
+Normalize camelCase, hyphens and underscores before checking sensitive key
+components. Permit only an explicitly named `secret_ref` whose value is a
+bounded `secret-ref:` opaque reference; never permit a raw credential value.
+Acceptance: nested spelling variants fail before command/agent/outbox writes,
+while an opaque reference remains usable and absent from secret-pattern output.
+
+A-015 correction evidence: all four nested spelling variants were accepted by
+the previous validator. CamelCase and separators are now normalized and secret,
+password, authorization, token, credential and API-key components fail before
+any durable write. Exact `secret_ref` accepts only a bounded `secret-ref:` value.
+The four focused gateway tests and full 249-test suite pass; compileall, diff and
+common secret scans pass. State: closed locally.
+
 ## A-010 bounded correction: explicit synthetic absence authority
 
 Final-review continuation reproduced `authoritative_absence="false"` changing a

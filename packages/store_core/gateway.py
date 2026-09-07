@@ -34,11 +34,24 @@ def _opaque(value: Any, label: str) -> str:
 
 
 def _json(value: Any, label: str = "input") -> str:
-    forbidden = {"api_key", "api_secret", "secret", "password", "authorization"}
+    forbidden_parts = {"secret", "password", "authorization", "token", "credential"}
+
+    def normalized_key(value: str) -> str:
+        return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", value).replace("-", "_").lower()
+
     def walk(item: Any) -> None:
         if isinstance(item, Mapping):
-            if any(not isinstance(k, str) or k.lower() in forbidden for k in item): raise ConflictError(f"raw secret in {label}")
-            for child in item.values(): walk(child)
+            for key, child in item.items():
+                if not isinstance(key, str):
+                    raise ConflictError(f"raw secret in {label}")
+                normalized = normalized_key(key)
+                parts = set(normalized.split("_"))
+                sensitive = bool(parts & forbidden_parts or {"api", "key"} <= parts)
+                if normalized == "secret_ref" and isinstance(child, str) and re.fullmatch(r"secret-ref:[A-Za-z0-9_.:-]{1,240}", child):
+                    sensitive = False
+                if sensitive:
+                    raise ConflictError(f"raw secret in {label}")
+                walk(child)
         elif isinstance(item, (list, tuple)):
             for child in item: walk(child)
         elif item is not None and type(item) not in (str, int, float, bool): raise ConflictError(f"{label} must be JSON")

@@ -22,6 +22,23 @@ class B08GatewayTests(unittest.TestCase):
         self.assertEqual("approval_required", blocked["state"])
         with self.assertRaises(ConflictError): self.app.configure_demo_byok(self.ctx, "openai", "sk-raw-secret-value")
         with self.assertRaises(ConflictError): self.app.submit_demo_tool(self.ctx, actor_type="agent", actor_id="agent-1", tool="update_price", target_type="offer", target_id="offer-1", input_value={"api_key": "raw"}, idempotency_key="tool-2", requested_policy_version=1)
+        baseline = len(self.repo.tool_commands_for(self.ctx.tenant_id))
+        for index, value in enumerate((
+            {"clientSecret": "raw"}, {"nested": {"access-token": "raw"}},
+            {"credential": "raw"}, {"passwordValue": "raw"},
+        )):
+            with self.subTest(value=value), self.assertRaises(ConflictError):
+                self.app.submit_demo_tool(
+                    self.ctx, actor_type="agent", actor_id="agent-1", tool="update_price",
+                    target_type="offer", target_id="offer-1", input_value=value,
+                    idempotency_key=f"secret-variant-{index}", requested_policy_version=1)
+        self.assertEqual(baseline, len(self.repo.tool_commands_for(self.ctx.tenant_id)))
+        opaque = self.app.submit_demo_tool(
+            self.ctx, actor_type="workflow", actor_id="workflow-1", tool="reconcile",
+            target_type="channel", target_id="channel-1",
+            input_value={"secret_ref": "secret-ref:fixture-vault-entry"},
+            idempotency_key="opaque-secret-ref", requested_policy_version=1)
+        self.assertEqual("accepted", opaque["state"])
 
     def test_agent_run_budget_stops_without_charge(self):
         run = self.app.record_demo_agent_run(self.ctx, agent_id="agent-1", goal="inspect", policy_version=1, model="economy", prompt_version="p1", input_value={"sku": "sku-1"}, decision={"state": "proposed"}, confidence="high", tool_calls=1, estimated_cost_minor=6, idempotency_key="run-1")

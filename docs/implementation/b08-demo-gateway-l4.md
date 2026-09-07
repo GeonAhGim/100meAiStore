@@ -24,3 +24,8 @@ current authority. Schema v21 preserves the approval-command/intent linkage and
 allows one accepted command per approval; exact idempotent replay is the only
 reuse. Blocked/unbound requests remain non-executable and emit no tool-command
 outbox event. This is still DEMO authority only and performs no provider effect.
+
+Secret validation normalizes camelCase, hyphens and underscores before checking
+nested keys, so common credential spelling variants cannot bypass durable-input
+guards. Only exact `secret_ref` keys with bounded `secret-ref:` opaque values are
+allowed; the gateway never resolves or returns the underlying secret.
