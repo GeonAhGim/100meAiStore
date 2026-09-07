@@ -34,7 +34,7 @@ infrastructure. No operational database deletion or real PII is permitted.
 | A-002 production PWA/auth/secret integration unfinished | high | P2-09 L4; approval resources use placeholder before/profit/risk | app/security | three-user browser login/revocation/approval, true proposal preview, no client secrets | open |
 | A-003 contract fixtures not wired into operational flow | high | offline_* and channel_*_contracts are no-I/O fixture modules | connector/core | synthetic adapters through services→durable store→approval→worker→readback→settlement E2E | open |
 | A-004 P2-08 coverage incomplete | high | write-contract L4: listing/claims and full split/batch coverage open | connector | bounded official-schema fixture plans and unknown/partial/replay tests | open |
-| A-005 P2-04 source discrepancies unresolved | medium | auth-retry L4: public dummy bcrypt salt invalid; requested-by spelling differs | connector | authoritative resolution or explicit unsupported-case boundary; no guessed live auth | open |
+| A-005 P2-04 source discrepancies unresolved | medium | auth-retry L4: public dummy bcrypt salt invalid; requested-by spelling differs | connector | authoritative resolution or explicit unsupported-case boundary; no guessed live auth | closed locally |
 | A-006 real-account/legal/hosting decisions missing | high | DEC-01/02/04/06/07/08 and G1–G5 | product/legal/ops | dated scope-specific owner decisions plus authorized evidence, never fabricated by fixture tests | approval gate |
 | A-007 delegated users cannot use mobile approval resources | high | reproduced master-only wrapper and rolled-back direct expiry; fixed approvals.py, see P2-09 L4 | app/security | 15 focused tests / 208 full tests, scoped three-user decisions, restart audit, wrong-role/cross-tenant/revocation and expiry | closed locally |
 | A-008 readiness infers missing safety evidence | high | reproduced missing/false-string defaults; corrected readiness.py, P2-09 L4 | core/release | three focused tests / 220 full tests, missing/invalid checks and storage block dependent gates | closed locally |
@@ -75,6 +75,18 @@ a null compatibility value. Duplicate or malformed source keys fail before any
 durable write. Five bridge tests, eleven adapter-ingestion tests and the complete
 238-test suite pass; compileall, diff whitespace and common secret-pattern scans
 pass.
+
+### A-005 bounded correction: explicit unsupported-source boundary
+
+The two official-example discrepancies remain unresolved facts, but no typed
+runtime boundary previously prevented later transport work from guessing past
+them. Severity: medium; owner: connector. `offline_auth_source_boundary()` now
+reports the Naver public bcrypt vector incompatible, leaves the disputed Coupang
+header name absent, lists both stable reasons and always denies live transport.
+Fixture evidence cannot mutate these fields. Acceptance: an offline contract
+test checks every fail-closed field and confirms no guessed header is exposed.
+Authoritative Discovery may replace this boundary later under G1; it does not
+make P2-04 or LIVE complete.
 
 ## A-010 bounded correction: explicit synthetic absence authority
 

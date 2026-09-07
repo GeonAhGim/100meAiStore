@@ -20,6 +20,24 @@ class FixtureSignature:
     usable_for_live_auth: bool = field(default=False, init=False)
 
 
+@dataclass(frozen=True)
+class OfflineAuthSourceBoundary:
+    """Fail-closed record of unresolved official-example discrepancies."""
+
+    naver_public_bcrypt_compatible: bool = field(default=False, init=False)
+    coupang_requested_by_header: str | None = field(default=None, init=False)
+    live_transport_authorized: bool = field(default=False, init=False)
+    unresolved_reasons: tuple[str, ...] = field(default=(
+        "naver_public_fixture_bcrypt_incompatible",
+        "coupang_requested_by_header_unresolved",
+    ), init=False)
+
+
+def offline_auth_source_boundary() -> OfflineAuthSourceBoundary:
+    """Return the static offline boundary; fixture evidence cannot authorize LIVE."""
+    return OfflineAuthSourceBoundary()
+
+
 def naver_public_fixture_signature(hashpw: Callable[[bytes, bytes], bytes]) -> FixtureSignature:
     """Naver's published dummy vector; cannot accept a real client ID/secret."""
     try:

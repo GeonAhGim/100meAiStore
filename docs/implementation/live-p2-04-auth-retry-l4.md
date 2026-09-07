@@ -39,6 +39,15 @@ function; the actual installed bcrypt calculation is a separate local gate.
 P2-04 stays in progress because public-example compatibility and the Coupang
 requested-by spelling need authoritative resolution before transport work.
 
+### Explicit unsupported-source boundary
+
+A-005 acceptance permits authoritative resolution or an explicit unsupported
+boundary. Until real Discovery provides validated evidence, the offline module
+must expose both discrepancies as unresolved, keep the requested-by header name
+absent rather than guessing a spelling, and deny live transport authorization.
+This boundary may change only from dated, source-specific Discovery evidence;
+fixture signatures and local tests cannot turn it on.
+
 Offline subset evidence: seven targeted tests and full suite 151 passed;
 compileall/diff/secret-pattern/forbidden-filename checks passed. The separate
 canonical synthetic vector passed against installed bcrypt 4.3.0. No HTTP

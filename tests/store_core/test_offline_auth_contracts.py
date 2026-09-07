@@ -7,7 +7,7 @@ from packages.store_core.channel_contracts import coupang_day_page_plan
 from packages.store_core.channel_order_contracts import ContractQuarantine
 from packages.store_core.offline_auth_contracts import (
     coupang_fixture_signature, naver_public_fixture_signature, naver_canonical_fixture_signature,
-    plan_naver_fixture_retry,
+    offline_auth_source_boundary, plan_naver_fixture_retry,
 )
 
 
@@ -90,6 +90,16 @@ class OfflineAuthContractTest(unittest.TestCase):
         self.assertNotIn("PRIVATE", repr(result))
         for overrides in ({"attempts_used": True}, {"max_attempts": 100}, {"now": datetime(2026, 9, 6)}):
             with self.assertRaises(ContractQuarantine): plan_naver_fixture_retry(**{**self.args, **overrides})
+
+    def test_unresolved_official_examples_explicitly_block_live_transport(self):
+        boundary = offline_auth_source_boundary()
+        self.assertFalse(boundary.live_transport_authorized)
+        self.assertFalse(boundary.naver_public_bcrypt_compatible)
+        self.assertIsNone(boundary.coupang_requested_by_header)
+        self.assertEqual(
+            ("naver_public_fixture_bcrypt_incompatible", "coupang_requested_by_header_unresolved"),
+            boundary.unresolved_reasons,
+        )
 
 
 if __name__ == "__main__":
