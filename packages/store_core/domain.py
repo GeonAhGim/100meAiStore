@@ -581,6 +581,8 @@ class DemoToolCommand:
     state: str
     blocked_reason: str | None
     created_at: datetime
+    approval_command_id: str | None = None
+    intent_digest: str | None = None
 
 
 @dataclass

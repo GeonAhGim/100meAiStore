@@ -46,7 +46,8 @@ successful push is recorded; unrelated uncommitted launcher changes are excluded
 | 7a49cc0 | A-005 explicit unsupported auth-source boundary | 239 Python tests; unresolved-vector/header fail-closed contract; compileall/diff/pattern checks |
 | 7c0a861 | A-002a safe material approval preview | 240 Python tests; master/delegated/auditor redaction and restart; compileall/diff/pattern checks |
 | 10d8ada | A-002a generic contact/credential redaction hardening | 240 Python tests; naming-variant regression; compileall/diff/pattern checks |
-| Next local commit (pending) | A-002b server sessions and one-use approval confirmation | 247 Python tests; HTTP/raw-ID/session/restart/replay tests; compileall/diff/pattern checks |
+| 70fa067 | A-002b server sessions and one-use approval confirmation | 247 Python tests; HTTP/raw-ID/session/restart/replay tests; compileall/diff/pattern checks |
+| Next local commit (pending) | A-014 exact approval-intent binding at tool gateway | 249 Python tests; mismatch/revocation/single-use/restart/cross-tenant tests; compileall/diff/pattern checks |
 
 Later commits extend this list; only a successful authorized publishing step
 marks them published.

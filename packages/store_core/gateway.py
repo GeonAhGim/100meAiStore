@@ -8,15 +8,24 @@ from datetime import datetime
 from typing import Any, Mapping
 from uuid import uuid4
 
-from .domain import (Capability, DemoAgentRun, DemoBudgetLedgerEntry, DemoBudgetPolicy,
+from .domain import (ApprovalKind, Capability, DemoAgentRun, DemoBudgetLedgerEntry, DemoBudgetPolicy,
                      DemoByokReference, DemoToolCommand, OutboxEvent, OutboxState)
-from .errors import ConflictError
+from .errors import AuthorizationError, ConflictError, NotFoundError, TenantBoundaryError
 
 _OPAQUE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,254}\Z")
 _TOOLS = {"publish_offer", "update_stock", "update_price", "create_purchase_order", "claim_action", "reconcile", "pause_scope", "resume_scope"}
 _TARGETS = {"offer", "order", "supplier", "channel", "tenant", "product"}
 _MUTATING = _TOOLS - {"reconcile"}
 _TIERS = {"economy", "balanced", "quality"}
+_TOOL_APPROVAL_KINDS = {
+    "publish_offer": frozenset({ApprovalKind.PRODUCT}),
+    "update_stock": frozenset({ApprovalKind.PRODUCT}),
+    "update_price": frozenset({ApprovalKind.PRODUCT}),
+    "create_purchase_order": frozenset({ApprovalKind.PURCHASE}),
+    "claim_action": frozenset({ApprovalKind.REFUND}),
+    "pause_scope": frozenset({ApprovalKind.PAUSE}),
+    "resume_scope": frozenset({ApprovalKind.PAUSE}),
+}
 
 
 def _opaque(value: Any, label: str) -> str:
@@ -43,6 +52,28 @@ def _json(value: Any, label: str = "input") -> str:
 
 def _digest(value: Any) -> str:
     return hashlib.sha256(_json(value).encode()).hexdigest()
+
+
+def _validated_tool_approval(service: Any, context: Any, approval_id: str, tool: str,
+                             target_type: str, target_id: str, input_value: Mapping[str, Any],
+                             requested_policy_version: int, idempotency_key: str) -> tuple[str, str]:
+    approval = service.repo.get_approval(context.tenant_id, approval_id)
+    command = service.repo.get_command(context.tenant_id, approval.command_id)
+    intent = service.repo.get_approval_intent(context.tenant_id, command.id)
+    if (intent is None or command.kind not in _TOOL_APPROVAL_KINDS.get(tool, ())
+            or command.target_ref != f"{target_type}:{target_id}"
+            or _json(command.payload) != _json(input_value)
+            or intent.policy_version != requested_policy_version):
+        raise ConflictError("tool approval intent mismatch")
+    if any(row.approval_id == approval_id and row.state == "accepted"
+           and row.idempotency_key != idempotency_key
+           for row in service.repo.tool_commands_for(context.tenant_id)):
+        raise ConflictError("approval_already_used")
+    preparation, _ = service.prepare_execution(
+        context, command.id, requested_policy_version, intent.target_version)
+    if preparation.canonical_digest != intent.canonical_digest:
+        raise ConflictError("tool approval intent mismatch")
+    return command.id, intent.canonical_digest
 
 
 def configure_demo_byok(service: Any, context: Any, provider: str, secret_ref: str, validation_status: str = "UNVERIFIED") -> DemoByokReference:
@@ -117,7 +148,7 @@ def submit_demo_tool(service: Any, context: Any, *, actor_type: str, actor_id: s
     actor_id, target_id, idempotency_key = _opaque(actor_id, "actor_id"), _opaque(target_id, "target_id"), _opaque(idempotency_key, "idempotency_key")
     if approval_id is not None: approval_id = _opaque(approval_id, "approval_id")
     encoded = _json(input_value)
-    state, blocked = "accepted", None
+    state, blocked, approval_command_id, intent_digest = "accepted", None, None, None
     with service.repo.transaction():
         if service.repo.demo_stop_active(context.tenant_id, target_id if target_type == "channel" else None):
             state, blocked = "blocked", "stop_active"
@@ -125,11 +156,18 @@ def submit_demo_tool(service: Any, context: Any, *, actor_type: str, actor_id: s
             if approval_id is None:
                 state, blocked = "approval_required", "approval_required"
             else:
-                approval = service.repo.get_approval(context.tenant_id, approval_id)
-                if approval.state.value != "approved": state, blocked = "blocked", "approval_not_approved"
-        value = DemoToolCommand(str(uuid4()), context.tenant_id, actor_type, actor_id, tool, target_type, target_id, encoded, idempotency_key, requested_policy_version, approval_id, "DEMO", state, blocked, service._clock())
+                try:
+                    approval_command_id, intent_digest = _validated_tool_approval(
+                        service, context, approval_id, tool, target_type, target_id,
+                        input_value, requested_policy_version, idempotency_key)
+                except (AuthorizationError, ConflictError, NotFoundError, TenantBoundaryError) as exc:
+                    state = "blocked"
+                    blocked = "approval_already_used" if str(exc) == "approval_already_used" else "approval_intent_mismatch"
+        persisted_approval_id = approval_id if approval_command_id is not None else None
+        value = DemoToolCommand(str(uuid4()), context.tenant_id, actor_type, actor_id, tool, target_type, target_id, encoded, idempotency_key, requested_policy_version, persisted_approval_id, "DEMO", state, blocked, service._clock(), approval_command_id, intent_digest)
         value, replay = service.repo.save_tool_command(value)
         if not replay:
             service._audit(context.tenant_id, context.user_id, "tool.command_accepted" if state == "accepted" else "tool.command_blocked", value.id, "accepted" if state == "accepted" else "blocked", {"tool": tool, "mode": "DEMO"})
-            service.repo.append_outbox(OutboxEvent(str(uuid4()), context.tenant_id, "tool.command", value.id, {"command_id": value.id, "state": state, "mode": "DEMO"}, f"tool:{value.id}:accepted", OutboxState.PENDING, value.created_at))
+            if state == "accepted":
+                service.repo.append_outbox(OutboxEvent(str(uuid4()), context.tenant_id, "tool.command", value.id, {"command_id": value.id, "state": state, "mode": "DEMO", "intent_digest": intent_digest}, f"tool:{value.id}:accepted", OutboxState.PENDING, value.created_at))
         return {"command_id": value.id, "state": value.state, "external_refs": [], "policy_decision": {"mode": "DEMO"}, "verification": {}, "next_action": blocked}

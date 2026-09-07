@@ -168,7 +168,11 @@ class InMemoryRepository:
     def save_tool_command(self, value: DemoToolCommand) -> tuple[DemoToolCommand, bool]:
         prior = next((row for (tid, _), row in self.tool_commands.items() if tid == value.tenant_id and row.idempotency_key == value.idempotency_key), None)
         if prior:
-            if prior.input_json != value.input_json or prior.tool != value.tool: raise ConflictError("tool idempotency key reused")
+            if (prior.actor_type, prior.actor_id, prior.tool, prior.target_type, prior.target_id,
+                    prior.input_json, prior.requested_policy_version, prior.approval_id) != (
+                    value.actor_type, value.actor_id, value.tool, value.target_type, value.target_id,
+                    value.input_json, value.requested_policy_version, value.approval_id):
+                raise ConflictError("tool idempotency key reused")
             return deepcopy(prior), True
         self.tool_commands[(value.tenant_id, value.id)] = deepcopy(value); return deepcopy(value), False
 

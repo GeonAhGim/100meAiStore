@@ -134,6 +134,31 @@ wrong-session/cross-approval/arbitrary/expired/replayed nonce, restart and
 browser storage. State: closed locally; external email/MFA identity, TLS and
 production PWA deployment remain approval-gated parts of A-002.
 
+### A-014 newly confirmed: tool gateway accepts unrelated approvals
+
+`submit_demo_tool` checks only that a supplied approval is approved. It does not
+bind approval kind, command target, immutable payload, policy version or prior
+tool use. An approved product change could therefore authorize a different
+offer mutation or purchase command. Severity: high; owner: core/gateway. Require
+an exact tool→approval-kind mapping, `target_type:target_id`, canonical payload,
+intent policy and current approval/approver revalidation through execution
+preparation. One approval may back one accepted mutating tool command; exact
+idempotent replay remains allowed. Acceptance: mismatched kind/target/input/
+policy, revoked approver and second-use attempts are blocked with no accepted
+effect; the exact approved command succeeds once and replays durably.
+
+A-014 correction evidence: the unrelated kind/target/input/policy and second-use
+regressions all produced accepted commands before the change. Gateway schema
+v21 now persists the approval command and immutable intent digest and enforces
+one accepted tool command per approval. Exact replay returns the original row;
+altered idempotent replay conflicts. `prepare_execution` revalidates expiry,
+current deciding-member authority and policy/target versions before acceptance.
+Blocked/unbound attempts emit no executable `tool.command` outbox event. Four
+focused gateway tests and the complete 249-test suite pass, including SQLite
+restart and cross-tenant denial; compileall, diff and secret scans pass. State:
+closed locally. A production worker/adapter and P2-08 fixture-specific command
+composition remain open.
+
 ## A-010 bounded correction: explicit synthetic absence authority
 
 Final-review continuation reproduced `authoritative_absence="false"` changing a

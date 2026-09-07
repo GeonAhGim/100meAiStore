@@ -16,3 +16,11 @@ keys are rejected from inputs and never enter the database, audit, or outbox.
 Acceptance is local SQLite/InMemory persistence, idempotent commands, approved
 tool gate, tenant isolation, budget stop, opaque-reference validation, restart
 recovery, and no OpenAI/provider/network invocation.
+
+Final-audit hardening binds every accepted mutating tool to the exact approved
+command kind, `target_type:target_id`, canonical input, immutable intent and
+policy version. `prepare_execution` revalidates expiry and the deciding member's
+current authority. Schema v21 preserves the approval-command/intent linkage and
+allows one accepted command per approval; exact idempotent replay is the only
+reuse. Blocked/unbound requests remain non-executable and emit no tool-command
+outbox event. This is still DEMO authority only and performs no provider effect.

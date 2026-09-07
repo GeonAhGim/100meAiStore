@@ -398,6 +398,11 @@ CREATE TABLE approval_confirmation_nonces(
  FOREIGN KEY(tenant_id,approval_id) REFERENCES approvals(tenant_id,id) ON DELETE RESTRICT,
  FOREIGN KEY(tenant_id,command_id) REFERENCES commands(tenant_id,id) ON DELETE RESTRICT);
 CREATE INDEX approval_nonces_expiry ON approval_confirmation_nonces(expires_at);
+"""), (21, """
+ALTER TABLE demo_tool_commands ADD COLUMN approval_command_id TEXT;
+ALTER TABLE demo_tool_commands ADD COLUMN intent_digest TEXT;
+CREATE UNIQUE INDEX demo_tool_one_accepted_per_approval
+ ON demo_tool_commands(tenant_id,approval_id) WHERE approval_id IS NOT NULL AND state='accepted';
 """))
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -1147,15 +1152,19 @@ class SQLiteRepository:
 
     @staticmethod
     def _tool_command(row: sqlite3.Row) -> DemoToolCommand:
-        return DemoToolCommand(row['id'], row['tenant_id'], row['actor_type'], row['actor_id'], row['tool'], row['target_type'], row['target_id'], row['input_json'], row['idempotency_key'], row['requested_policy_version'], row['approval_id'], row['mode'], row['state'], row['blocked_reason'], _dt(row['created_at']))
+        return DemoToolCommand(row['id'], row['tenant_id'], row['actor_type'], row['actor_id'], row['tool'], row['target_type'], row['target_id'], row['input_json'], row['idempotency_key'], row['requested_policy_version'], row['approval_id'], row['mode'], row['state'], row['blocked_reason'], _dt(row['created_at']), row['approval_command_id'], row['intent_digest'])
 
     def save_tool_command(self, value: DemoToolCommand) -> tuple[DemoToolCommand, bool]:
         row = self.connection.execute("SELECT * FROM demo_tool_commands WHERE tenant_id=? AND idempotency_key=?", (value.tenant_id, value.idempotency_key)).fetchone()
         if row:
             prior = self._tool_command(row)
-            if prior.input_json != value.input_json or prior.tool != value.tool: raise ConflictError('tool idempotency key reused')
+            if (prior.actor_type, prior.actor_id, prior.tool, prior.target_type, prior.target_id,
+                    prior.input_json, prior.requested_policy_version, prior.approval_id) != (
+                    value.actor_type, value.actor_id, value.tool, value.target_type, value.target_id,
+                    value.input_json, value.requested_policy_version, value.approval_id):
+                raise ConflictError('tool idempotency key reused')
             return prior, True
-        try: self.connection.execute("INSERT INTO demo_tool_commands VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (value.id, value.tenant_id, value.actor_type, value.actor_id, value.tool, value.target_type, value.target_id, value.input_json, value.idempotency_key, value.requested_policy_version, value.approval_id, value.mode, value.state, value.blocked_reason, value.created_at.isoformat()))
+        try: self.connection.execute("INSERT INTO demo_tool_commands VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (value.id, value.tenant_id, value.actor_type, value.actor_id, value.tool, value.target_type, value.target_id, value.input_json, value.idempotency_key, value.requested_policy_version, value.approval_id, value.mode, value.state, value.blocked_reason, value.created_at.isoformat(), value.approval_command_id, value.intent_digest))
         except sqlite3.IntegrityError as exc: raise ConflictError('tool command already exists') from exc
         return value, False
 
