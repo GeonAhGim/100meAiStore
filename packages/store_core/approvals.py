@@ -11,7 +11,8 @@ from .errors import AuthorizationError, ConflictError
 
 _OPAQUE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,254}\Z")
 _SENSITIVE_KEY = re.compile(
-    r"(?i)(api[_-]?key|authorization|access[_-]?token|refresh[_-]?token|password|secret|"
+    r"(?i)(api[_-]?key|authorization|access[_-]?token|refresh[_-]?token|password|secret|credential|"
+    r"phone|email|address|contact|"
     r"receiver[_-]?(phone|email|address)|recipient[_-]?(phone|email|address)|customer[_-]?(phone|email|address))"
 )
 

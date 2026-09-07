@@ -104,7 +104,8 @@ class B06ApprovalTests(unittest.TestCase):
         catalog = self.app.add_member(self.ctx, "preview-catalog@example.test", [Role.CATALOG_CS])
         payload = {
             "before": {"price_minor": 1200},
-            "after": {"price_minor": 1000, "api_key": "PRIVATE-API-KEY", "receiver_phone": "010-1111-2222"},
+            "after": {"price_minor": 1000, "api_key": "PRIVATE-API-KEY", "receiver_phone": "010-1111-2222",
+                      "shippingAddress": "PRIVATE-ADDRESS", "credential": "PRIVATE-CREDENTIAL"},
             "profit": {"projected_profit_minor": 200, "margin_ex_ad": "0.20", "margin_with_ad": "0.15", "currency": "KRW"},
             "authorization": "PRIVATE-AUTH",
         }
@@ -119,7 +120,8 @@ class B06ApprovalTests(unittest.TestCase):
         self.assertEqual([], preview["actions"])
         self.assertEqual(["approve", "reject", "ask_question"], catalog_preview["actions"])
         rendered = repr(preview)
-        for private in ("PRIVATE-API-KEY", "010-1111-2222", "PRIVATE-AUTH", "private@example.test"):
+        for private in ("PRIVATE-API-KEY", "010-1111-2222", "PRIVATE-ADDRESS", "PRIVATE-CREDENTIAL",
+                        "PRIVATE-AUTH", "private@example.test"):
             self.assertNotIn(private, rendered)
         self.assertEqual({"price_minor": 1200}, preview["before"])
         self.assertEqual(1000, preview["after"]["price_minor"])
