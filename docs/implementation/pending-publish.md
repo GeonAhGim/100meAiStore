@@ -28,7 +28,8 @@ Root confirmed no retries or alternate publishing paths. Keep local work moving.
 | a5bff2e | A-007 delegated approval resources and durable direct-decision expiry | 208 Python tests; compileall/diff/pattern/filename checks |
 | d111ce0 | Exact listing readback with separate draft/approved fixture observations | 210 Python tests; compileall/diff/pattern/filename checks |
 | ed7be11 | Scoped Naver/Coupang tracking batch composition and correlation | 214 Python tests; compileall/diff/pattern/filename checks |
-| Next local commit | Two-item split fixture with deferred-item and remapped-shipment follow-up | 218 Python tests; compileall/diff/pattern/filename checks |
+| 500acf4 | Two-item split fixture with deferred-item and remapped-shipment follow-up | 218 Python tests; compileall/diff/pattern/filename checks |
+| Next local commit | A-008 explicit Boolean readiness evidence, fail-closed storage/inputs | 220 Python tests; compileall/diff/pattern/filename checks |
 
 No entry here claims remote publication. Later local commits will extend this
 list; only an explicit authorized publishing step may mark them published.

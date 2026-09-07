@@ -31,6 +31,11 @@ the earlier checks, and keeps Bounded false until external-contract review and
 operator-exit evidence are explicitly supplied. Passing a local boolean never
 creates external authority.
 
+2026-09-07 A-008 correction: every check now requires explicitly supplied
+Boolean true; absent, false or non-Boolean evidence blocks dependent stages.
+Storage readiness must also be Boolean true. These inputs report evidence only;
+the evaluator cannot independently authenticate an operator or verify a report.
+
 No stage authorizes channel, supplier, payment, refund, network, cloud, or
 paid-service calls. Promotion requires fresh official-contract review, legal/
 retention decisions, operational volume/cost evidence, and an explicit master

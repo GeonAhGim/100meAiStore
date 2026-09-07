@@ -78,3 +78,18 @@ diff whitespace, common secret-pattern and forbidden filename gates passed.
 SQLite restart preserves each delegated decider and a valid audit hash chain.
 Foreign approval IDs fail without exposing the resource. A-007 is closed for
 the local service boundary; A-002 production identity/UI work stays open.
+
+## Readiness evidence correction
+
+The local readiness evaluator defaults five absent checks to true and coerces
+arbitrary values through bool(), allowing missing evidence or a string such as
+"false" to satisfy stage gates. Require explicit Boolean true for every check
+and exact Boolean storage readiness. Missing/malformed evidence stays false;
+the dependency chain blocks later stages. This remains a synthetic evaluator,
+not a signature verifier or an authority to promote LIVE. Regression tests cover
+each absent/false/invalid gate and explicit complete evidence.
+
+Evidence: the prior implementation failed six regression assertions. Three
+targeted tests and 220 full tests pass after the correction, plus compileall,
+diff whitespace, common secret-pattern and forbidden filename checks. A-008
+is closed locally; submitted booleans still require external evidence review.
