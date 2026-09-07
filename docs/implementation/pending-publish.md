@@ -25,7 +25,8 @@ Root confirmed no retries or alternate publishing paths. Keep local work moving.
 | c9424ae | Separate Coupang claim-feed fixture and dispatch freshness binding | 194 Python tests; compileall/diff/pattern/filename checks |
 | 45f4be3 | Bounded synthetic listing review and warning-aware creation receipt | 200 Python tests; compileall/diff/pattern/filename checks |
 | ecc0129 | Single-receipt synthetic return review and exact-ID completion reconciliation | 205 Python tests; compileall/diff/pattern/filename checks |
-| Next local commit | A-007 delegated approval resources and durable direct-decision expiry | 208 Python tests; compileall/diff/pattern/filename checks |
+| a5bff2e | A-007 delegated approval resources and durable direct-decision expiry | 208 Python tests; compileall/diff/pattern/filename checks |
+| Next local commit | Exact listing readback with separate draft/approved fixture observations | 210 Python tests; compileall/diff/pattern checks |
 
 No entry here claims remote publication. Later local commits will extend this
 list; only an explicit authorized publishing step may mark them published.

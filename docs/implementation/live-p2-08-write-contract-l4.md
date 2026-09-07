@@ -163,3 +163,19 @@ checks passed. Socket-denied roundtrip verifies synthetic review and exact-ID
 completed observation while all real-write/refund/resend flags remain false.
 Batch receipts, raw withdrawal feed normalization and production approval/
 worker integration remain open. Review digest is not an operator signature.
+
+## Listing exact-ID readback
+
+[Official product query](https://developers.coupang.com/en/api/products/querying-product)
+returns sellerProductId, vendorId, statusName, items and vendorItemId; the latter
+is null for a saved draft and assigned after approval. Require the original
+reviewed payload digest, a clean creation ID, fresh readback and exact vendor,
+SKU, count and submitted-field matches. Draft and approved observations are
+distinct; partial/unknown/denied status, automatic pricing, extra options or
+changed payload require reconciliation. Returned IDs remain fixture observations
+and cannot activate LIVE or authorize a price/stock write.
+
+Readback evidence: eight listing tests and 210 full tests passed; compileall,
+diff whitespace and common secret-pattern checks passed. Both draft and approved
+synthetic states are exercised without sockets; vendor-generated ID values are
+preserved exactly, while mismatched field/type/option/status/time requires review.
