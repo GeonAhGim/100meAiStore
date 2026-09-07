@@ -1171,6 +1171,17 @@ class SQLiteRepository:
     def tool_commands_for(self, tenant_id: str) -> tuple[DemoToolCommand, ...]:
         return tuple(self._tool_command(row) for row in self.connection.execute("SELECT * FROM demo_tool_commands WHERE tenant_id=? ORDER BY created_at,id", (tenant_id,)))
 
+    def get_tool_command(self, tenant_id: str, command_id: str) -> DemoToolCommand:
+        row = self.connection.execute(
+            "SELECT * FROM demo_tool_commands WHERE tenant_id=? AND id=?",
+            (tenant_id, command_id),
+        ).fetchone()
+        if row:
+            return self._tool_command(row)
+        if self.connection.execute("SELECT 1 FROM demo_tool_commands WHERE id=?", (command_id,)).fetchone():
+            raise TenantBoundaryError("cross-tenant tool command access denied")
+        raise NotFoundError("tool command not found")
+
     @staticmethod
     def _agent_run(row: sqlite3.Row) -> DemoAgentRun:
         return DemoAgentRun(row['id'], row['tenant_id'], row['agent_id'], row['goal'], row['policy_version'], row['model'], row['prompt_version'], row['input_digest'], row['decision_json'], row['confidence'], row['tool_calls'], row['reviewer'], row['estimated_cost_minor'], row['charged_cost_minor'], row['outcome'], _dt(row['created_at']))

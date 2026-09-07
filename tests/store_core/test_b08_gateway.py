@@ -39,6 +39,7 @@ class B08GatewayTests(unittest.TestCase):
             input_value={"secret_ref": "secret-ref:fixture-vault-entry"},
             idempotency_key="opaque-secret-ref", requested_policy_version=1)
         self.assertEqual("accepted", opaque["state"])
+        self.assertFalse(any(row.topic == "tool.command" for row in self.repo.outbox_for(self.ctx.tenant_id)))
 
     def test_agent_run_budget_stops_without_charge(self):
         run = self.app.record_demo_agent_run(self.ctx, agent_id="agent-1", goal="inspect", policy_version=1, model="economy", prompt_version="p1", input_value={"sku": "sku-1"}, decision={"state": "proposed"}, confidence="high", tool_calls=1, estimated_cost_minor=6, idempotency_key="run-1")

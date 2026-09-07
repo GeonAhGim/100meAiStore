@@ -181,6 +181,8 @@ def submit_demo_tool(service: Any, context: Any, *, actor_type: str, actor_id: s
         value, replay = service.repo.save_tool_command(value)
         if not replay:
             service._audit(context.tenant_id, context.user_id, "tool.command_accepted" if state == "accepted" else "tool.command_blocked", value.id, "accepted" if state == "accepted" else "blocked", {"tool": tool, "mode": "DEMO"})
-            if state == "accepted":
+            # Only an exact user-approved mutating command is executable. Read-only
+            # bookkeeping commands have no provider execution contract here.
+            if state == "accepted" and approval_command_id is not None:
                 service.repo.append_outbox(OutboxEvent(str(uuid4()), context.tenant_id, "tool.command", value.id, {"command_id": value.id, "state": state, "mode": "DEMO", "intent_digest": intent_digest}, f"tool:{value.id}:accepted", OutboxState.PENDING, value.created_at))
         return {"command_id": value.id, "state": value.state, "external_refs": [], "policy_decision": {"mode": "DEMO"}, "verification": {}, "next_action": blocked}

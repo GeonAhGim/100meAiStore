@@ -179,6 +179,14 @@ class InMemoryRepository:
     def tool_commands_for(self, tenant_id: str) -> tuple[DemoToolCommand, ...]:
         return tuple(deepcopy(row) for (tid, _), row in self.tool_commands.items() if tid == tenant_id)
 
+    def get_tool_command(self, tenant_id: str, command_id: str) -> DemoToolCommand:
+        try:
+            return deepcopy(self.tool_commands[(tenant_id, command_id)])
+        except KeyError as exc:
+            if any(cid == command_id for _, cid in self.tool_commands):
+                raise TenantBoundaryError("cross-tenant tool command access denied") from exc
+            raise NotFoundError("tool command not found") from exc
+
     def save_agent_run(self, value: DemoAgentRun) -> DemoAgentRun:
         self.agent_runs[(value.tenant_id, value.id)] = deepcopy(value); return deepcopy(value)
 

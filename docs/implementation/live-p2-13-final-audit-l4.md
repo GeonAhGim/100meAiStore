@@ -177,6 +177,31 @@ any durable write. Exact `secret_ref` accepts only a bounded `secret-ref:` value
 The four focused gateway tests and full 249-test suite pass; compileall, diff and
 common secret scans pass. State: closed locally.
 
+### A-016 newly confirmed: accepted tool events had no durable consumer
+
+The typed gateway persisted an accepted `tool.command` outbox item, but no
+consumer loaded that exact command, revalidated its approved immutable intent,
+or drove the crash-safe execution state machine. A dashboard could therefore
+show an accepted command that never produced even a local DEMO readback.
+Severity: high; owner: core/worker. Add a bounded DEMO-only worker that requires
+tenant-admin authority, claims the exact tenant outbox event with a fenced
+lease, verifies event/command/approval-intent digests, and delegates solely to
+the existing exact-type durable synthetic provider. Complete the event only on
+a verified terminal observation. An UNKNOWN result must survive restart and be
+looked up with the same operation key; it must never be blindly resent.
+Read-only gateway bookkeeping without an approval-bound execution contract must
+not emit an executable event.
+
+A-016 correction evidence: an approval-to-gateway-to-outbox-to-provider
+regression failed before the consumer existed. The new worker executes an exact
+approved price intent once, completes its durable event, rejects replay after
+restart, and retains the source approval-command binding. A second regression
+simulates timeout after provider effect, process/repository restart, lookup and
+verified completion with an unchanged effect count of one. This is a local
+synthetic executor only: it cannot accept a production provider type, open a
+socket, or activate a marketplace connection. State: closed locally; fixture-
+specific P2-08 command composition and production deployment remain open.
+
 ## A-010 bounded correction: explicit synthetic absence authority
 
 Final-review continuation reproduced `authoritative_absence="false"` changing a
