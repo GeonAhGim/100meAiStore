@@ -30,6 +30,7 @@ from .gateway import configure_demo_byok, set_demo_budget_policy, record_demo_ag
 from .notifications import set_demo_notification_preference, notify_demo, acknowledge_demo_incident
 from .safety import set_demo_stop, backup_demo_sqlite
 from .readiness import evaluate_demo_readiness
+from .contract_demo_bridge import ContractFixtureReadAdapter
 
 __all__ = [
     "ApprovalKind",
@@ -49,6 +50,7 @@ __all__ = [
     "DemoPollResult",
     "DemoReadAdapter",
     "FixtureDemoReadAdapter",
+    "ContractFixtureReadAdapter",
     "RetryableReadError",
     "Page",
     "AdapterCapability",

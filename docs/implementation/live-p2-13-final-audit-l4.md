@@ -48,6 +48,11 @@ This ledger is a seed for the exhaustive matrix, not a claim that there are only
 six gaps. Approval-gated high risks remain visible; they must not be relabelled
 low severity or treated as passed to manufacture a zero-gap report.
 
+A-003 partial progress: `contract-demo-bridge-l4.md` now records Naver/Coupang
+fixture parsing through durable DEMO ingestion, routing, delegated purchase
+approval, supplier readback, settlement and restart. The 236-test suite passes.
+This does not close production channel-line/write-adapter/worker wiring gaps.
+
 ## A-010 bounded correction: explicit synthetic absence authority
 
 Final-review continuation reproduced `authoritative_absence="false"` changing a
