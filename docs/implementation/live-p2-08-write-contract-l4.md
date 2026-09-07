@@ -1,8 +1,9 @@
 # P2-08 L4: non-executable channel change contracts
 
-Status: partial implementation; offer/stock/price/claims remain open. P2-04
-source ambiguities still prevent a transport. This first
-pure fixture slice depends only on P2-03 snapshots and never uses signing.
+Status: partial implementation; bounded offer/stock/price/tracking/return and
+batch/two-item split fixtures exist. Broader variants and operational connector
+wiring remain open. P2-04 source ambiguities still prevent a transport. These
+pure fixtures depend on P2-03 snapshots and never use signing.
 
 ## 2026-09-07 official sources and scope
 
@@ -195,3 +196,24 @@ reconciliation; no batch or sub-item receives automatic resend authority.
 Batch evidence: four focused tests and 214 full tests passed; compileall, diff
 whitespace, common secret-pattern and forbidden filename gates passed. The
 30-item Naver and two-shipment Coupang fixture results run without sockets.
+
+## Two-item split shipment fixture
+
+[Official split example](https://developers.coupang.com/en/faq/i-want-split-a-shipment)
+first sends both vendor items: one invoice and one estimated date, with
+splitShipping true and preSplitShipped false. The shipped item's shipment ID
+changes; the deferred item retains its original ID. Later submission uses the
+deferred item's invoice with preSplitShipped true. Bound this fixture to exactly
+two items with no partial quantity, claims or direct delivery; require complete,
+fresh order/claim observations and post-preparation evidence. Follow-up needs
+fresh exact-order/item/quantity observations proving the first item moved to a
+different shipment and dispatch state while the deferred item remains prepared.
+No aggregate OK response substitutes for this mapping. Every step remains
+non-executable; real invoice tracking, delivery and legal authority are unproven.
+
+Split evidence: four focused tests and 218 full tests passed; compileall, diff
+whitespace, common secret-pattern and forbidden filename gates passed. The
+socket-denied two-step roundtrip includes identity remapping, deferred date,
+claim/freshness denial, wrong/missing mapping, altered review and expiry checks.
+More-than-two item splits and vendor response-to-invoice readback remain
+unsupported and must not be inferred from this bounded fixture.
