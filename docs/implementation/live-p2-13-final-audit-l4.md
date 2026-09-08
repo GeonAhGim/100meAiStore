@@ -343,6 +343,20 @@ acceptance test passes as part of the full regression; no channel request or
 credential is used. State: closed locally for the bounded listing fixture;
 vendor API readback, approval and production transport remain gated.
 
+### A-022 bounded correction: installed-package bootstrap evidence
+
+A-020 proved `python -m` bootstrap with the source tree injected into
+`PYTHONPATH`, but the README still prescribed copying a repository template and
+did not prove the installed console script path. The README now makes
+`store-aios init` the installation path and documents a package-local,
+non-secret fallback template policy. A wheel is built locally, installed into
+a fresh venv with `--no-index`, and exercised from an empty working directory
+with a space and nested config path through `init`, `status`, and `economics`.
+The test removes `PYTHONPATH`, keeps `dry_run: true`, creates only local SQLite
+state, and makes no network or external-channel calls. State: closed for
+offline package bootstrap; clean-machine production deployment and its
+PostgreSQL/identity/operations gates remain open.
+
 Answer fail closed: would adding only a real account/API key/business/channel
 approval make this usable? If missing code, wiring, bootstrap, recovery or tests
 remain, answer **no**, link the gaps and continue safe implementation. If only

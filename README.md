@@ -35,15 +35,28 @@ SQLite 큐는 작업 임대(lease), 재시도, dead 상태, 감사 로그를 제
 
 ## 기존 prototype 실행
 
+`smart_store_aios`는 초기 정책·큐 실험용 prototype입니다. 설치 후에는
+패키지가 제공하는 `store-aios` 명령을 사용합니다. `init`은 지정한 config
+경로의 상위 폴더와 SQLite DB를 만들고, `dry_run: true` 및 비밀값이 없는
+안전한 기본 설정을 생성합니다. 기본 템플릿은 패키지에 복사하지 않고
+CLI의 fallback으로 유지하므로 source checkout이나 현재 작업 디렉터리에
+`config.example.json`이 없어도 동작합니다.
+
 ```powershell
-Copy-Item config.example.json config.json
-python -m smart_store_aios.cli init
-python -m smart_store_aios.cli economics --price 50000 --cost 25000 --shipping 3000
-python -m smart_store_aios.cli enqueue catalog.scan '{"source":"demo"}'
-python -m smart_store_aios.cli worker --once
-python -m smart_store_aios.cli status
+python -m pip install .
+store-aios --config .\config.json init
+store-aios --config .\config.json economics --price 50000 --cost 25000 --shipping 3000
+store-aios --config .\config.json enqueue catalog.scan '{"source":"demo"}'
+store-aios --config .\config.json worker --once
+store-aios --config .\config.json status
 python -m unittest discover -v
 ```
+
+개발 중 source checkout에서는 `python -m smart_store_aios.cli`도 사용할 수
+있습니다. 설치된 wheel은 네트워크 없이 새 venv에 설치한 뒤 공백·중첩
+경로에서 `init/status/economics`를 실행하는 회귀 테스트로 검증합니다.
+이 절차는 로컬 SQLite와 DEMO 작업만 다루며 실제 채널·주문·결제·발주를
+호출하지 않습니다.
 
 Codex 작업은 `config.json`의 `codex.enabled`를 명시적으로 `true`로 바꾼 뒤에만 실행됩니다. 워커는 `codex exec`를 비대화형으로 호출하고 마지막 메시지를 파일로 보존합니다. 무인 실행에서 `--dangerously-bypass-approvals-and-sandbox`는 사용하지 않습니다.
 
