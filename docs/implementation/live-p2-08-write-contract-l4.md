@@ -213,6 +213,22 @@ grant resend authority.  Result correlation remains the pure offline contract;
 real transport, credential use and vendor readback remain gated.  Focused
 gateway tests and the 265-test local Python suite passed on 2026-09-08.
 
+## Return batch composition to durable DEMO execution wiring
+
+The single-receipt return review now composes into a bounded (1–30),
+same-tenant/channel/vendor batch.  Each receipt and order/item identity is
+unique; the immutable batch digest includes every review and amount.  Local
+result correlation requires exact receipt coverage and a completed result for
+every item—missing, foreign, duplicate, partial or unknown results require
+reconciliation and never prove a bank refund.
+
+One REFUND approval binds the batch/component digests and an opaque synthetic
+order target.  The exact projection can produce one fenced DEMO `claim_action`
+command and one synthetic effect.  Pending, changed and cross-tenant attempts
+fail closed.  A response-lost restart reconciles the durable synthetic effect
+instead of creating another one.  No batch refund API, payment instruction,
+channel credential or network transport exists in this implementation.
+
 ## Two-item split shipment fixture
 
 [Official split example](https://developers.coupang.com/en/faq/i-want-split-a-shipment)
