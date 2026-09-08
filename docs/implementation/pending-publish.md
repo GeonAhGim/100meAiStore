@@ -50,10 +50,10 @@ successful push is recorded; unrelated uncommitted launcher changes are excluded
 | fba6258 | A-014 exact approval-intent binding at tool gateway | 249 Python tests; mismatch/revocation/single-use/restart/cross-tenant tests; compileall/diff/pattern checks |
 | e47cd3b | A-015 normalized nested secret-key rejection | 249 Python tests; spelling variants/no-write/opaque-ref regression; compileall/diff/pattern checks |
 | f0cb0a5 | A-016 durable approved-tool synthetic consumer | 251 Python tests; success/restart/timeout-after-effect reconciliation; compileall/diff/pattern checks |
-| Next local commit (pending) | A-004a exact listing review-to-DEMO execution bridge | 252 Python tests; pre-approval/change denial and one synthetic verified effect; compileall/diff/pattern checks |
-| Next local commit (pending) | A-017 single-receipt return review-to-DEMO execution bridge | 254 Python tests; refund approval binding, changed/cross-tenant denial and one synthetic verified effect; compileall/diff/pattern checks |
-| Next local commit (pending) | A-018 single-item tracking review-to-DEMO execution bridge | 257 Python tests; Coupang/Naver typed shipment target, approval binding, changed/cross-tenant denial and one synthetic verified effect; compileall/diff/pattern checks |
-| Next local commit (pending) | A-019 split tracking review-to-DEMO execution bridge | 258 Python tests; two-item identity/remap review, PO-transition isolation and one synthetic verified effect; compileall/diff/pattern checks |
+| 78fefa6 | A-004a exact listing review-to-DEMO execution bridge | 252 Python tests; pre-approval/change denial and one synthetic verified effect; compileall/diff/pattern checks |
+| 439819d | A-017 single-receipt return review-to-DEMO execution bridge | 254 Python tests; refund approval binding, changed/cross-tenant denial and one synthetic verified effect; compileall/diff/pattern checks |
+| ffef791 | A-018 single-item tracking review-to-DEMO execution bridge | 257 Python tests; Coupang/Naver typed shipment target, approval binding, changed/cross-tenant denial and one synthetic verified effect; compileall/diff/pattern checks |
+| c57feb9 | A-019 split tracking review-to-DEMO execution bridge | 258 Python tests; two-item identity/remap review, PO-transition isolation and one synthetic verified effect; compileall/diff/pattern checks |
 
 Later commits extend this list; only a successful authorized publishing step
 marks them published.
