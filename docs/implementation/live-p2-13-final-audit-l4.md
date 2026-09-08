@@ -319,6 +319,18 @@ synthetic worker exactly once; no channel invoice, credential or real shipment
 state is produced. State: closed locally for the bounded initial split
 fixture; follow-up/batch vendor readback and production transport remain open.
 
+### A-020 bounded correction: clean-machine CLI bootstrap
+
+The local CLI `init` command previously copied `config.example.json` relative
+to the current working directory, so a clean install launched from an empty cwd
+failed before creating safe state. It now resolves the source-tree template
+relative to its package and includes a non-secret fallback for installed
+distributions, creating parent directories as needed. A subprocess acceptance
+test starts from an empty temporary cwd and proves dry-run config plus a local
+SQLite database are created; no credentials or external calls are involved.
+State: closed for local prototype bootstrap; production deployment/bootstrap
+remains gated by PostgreSQL, identity, legal, cost and operations decisions.
+
 Answer fail closed: would adding only a real account/API key/business/channel
 approval make this usable? If missing code, wiring, bootstrap, recovery or tests
 remain, answer **no**, link the gaps and continue safe implementation. If only
