@@ -17,6 +17,20 @@ def record(path: Path, payload: dict, stamp: str = "2026-09-05T03:50:00+00:00", 
 
 
 class DevDashboardCollectorTest(unittest.TestCase):
+    def test_current_team_keeps_live_and_recent_workers_above_history(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); sessions = root / "sessions"; sessions.mkdir(parents=True)
+            live = sessions / "live.jsonl"
+            record(live, {"session_id": "live", "id": "live", "cwd": str(root), "timestamp": "2026-09-05T03:58:00+00:00", "originator": "Codex Desktop", "source": {"subagent": {"thread_spawn": {"agent_path": "/root/pm/worker-one", "parent_thread_id": "pm"}}}}, "2026-09-05T03:58:00+00:00", "session_meta")
+            record(live, {"type": "task_started"}, "2026-09-05T03:58:01+00:00")
+            record(live, {"type": "agent_message", "message": "배선 회귀 테스트 작성 중"}, "2026-09-05T03:59:00+00:00")
+            old = sessions / "old.jsonl"
+            record(old, {"session_id": "old", "id": "old", "cwd": str(root), "timestamp": "2026-09-04T03:00:00+00:00", "originator": "Codex Desktop", "source": {"subagent": {"thread_spawn": {"agent_path": "/root/old-worker"}}}}, "2026-09-04T03:00:00+00:00", "session_meta")
+            record(old, {"type": "task_complete"}, "2026-09-04T03:01:00+00:00")
+            data = DevDashboardCollector(root, root, now=datetime(2026, 9, 5, 4, 0, tzinfo=timezone.utc)).collect()
+            self.assertEqual(["/root/pm/worker-one"], [x["agent_path"] for x in data["current_team"]])
+            self.assertEqual("배선 회귀 테스트 작성 중", data["current_team"][0]["current_task"])
+
     def test_phase_totals_keep_demo_completion_separate_from_product(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -108,6 +122,8 @@ class DevDashboardCollectorTest(unittest.TestCase):
 
     def test_read_only_api_and_static_polling_contract(self):
         self.assertIn("setInterval(load,15000)", INDEX_HTML)
+        self.assertIn('id="currentTeam"', INDEX_HTML)
+        self.assertIn("d.current_team||[]", INDEX_HTML)
         self.assertNotIn("if(busy||document.hidden)", INDEX_HTML)
         self.assertNotIn("tenant_id", INDEX_HTML)
         with tempfile.TemporaryDirectory() as temp:

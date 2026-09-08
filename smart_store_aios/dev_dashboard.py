@@ -114,12 +114,50 @@ class DevDashboardCollector:
             "source": {"codex_sessions": str(self.codex_home / "sessions"), "cwd_exact_match": str(self.project_root),
                         "llm_calls": 0, "raw_prompts_exposed": False, "tool_arguments_exposed": False},
             "agents": sessions,
+            "current_team": self._current_team(sessions),
             "cli_worker": cli_status,
             "repository": self._repository_state(),
             "progress": self._development_progress(),
             "status_contract": {"running": "active recent session", "signal_lost": f"non-terminal session older than {STALE_AFTER_SECONDS}s",
                                 "execution_not_observed": "no matching CLI session", "usage_limited": "session terminal error/rate limit evidence"},
         }
+
+    def _current_team(self, sessions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Project the live team plus its latest terminal hand-offs.
+
+        The full session history remains available below the fold.  This view is
+        deliberately bounded so an operator can see the workers involved in the
+        current run without searching through historical sessions.
+        """
+        terminal_window = 2 * 60 * 60
+        candidates: list[dict[str, Any]] = []
+        for item in sessions:
+            last = _timestamp(item.get("last_event_at"))
+            age = (self.now - last).total_seconds() if last else None
+            is_live = item.get("state") in {"running", "waiting"}
+            is_recent_handoff = (
+                item.get("state") in {"completed", "failed", "usage_limited"}
+                and age is not None and 0 <= age <= terminal_window
+            )
+            if is_live or is_recent_handoff:
+                candidates.append(copy.deepcopy(item))
+
+        # A resumed task can have several session files.  Keep the freshest
+        # record for the same visible worker identity.
+        newest: dict[str, dict[str, Any]] = {}
+        for item in candidates:
+            identity = str(item.get("agent_path") or item.get("session_id"))
+            previous = newest.get(identity)
+            if previous is None or str(item.get("last_event_at") or "") > str(previous.get("last_event_at") or ""):
+                newest[identity] = item
+        return sorted(
+            newest.values(),
+            key=lambda item: (
+                item.get("state") != "running",
+                item.get("kind") != "app_subagent_pm",
+                str(item.get("agent_path") or item.get("session_id")),
+            ),
+        )
 
     def _development_progress(self) -> dict[str, Any]:
         """Read explicit evidence-backed work state; do not infer it from activity."""
