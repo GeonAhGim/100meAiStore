@@ -23,9 +23,11 @@ from .domain import DemoToolCommand, DemoAgentRun, DemoByokReference, DemoBudget
 from .domain import DemoNotificationPreference, DemoNotificationDelivery, DemoIncidentAcknowledgement
 from .domain import DemoStopControl, DemoBackupManifest
 from .domain import DemoInventorySnapshot, DemoPriceProjection
+from .domain import DemoBudgetRequest
+from .budget import BudgetRepositoryMixin, validate_request_digest
 
 
-class InMemoryRepository:
+class InMemoryRepository(BudgetRepositoryMixin):
     """DEMO adapter. Every tenant-owned lookup requires an explicit tenant id.
 
     The service layer groups writes using the snapshot-backed transaction. A
@@ -75,6 +77,7 @@ class InMemoryRepository:
         self.byok_references: dict[tuple[str, str], DemoByokReference] = {}
         self.budget_policies: dict[str, DemoBudgetPolicy] = {}
         self.budget_ledger: dict[tuple[str, str], DemoBudgetLedgerEntry] = {}
+        self.budget_requests: dict[tuple[str, str], DemoBudgetRequest] = {}
         self.notification_preferences: dict[tuple[str, str], DemoNotificationPreference] = {}
         self.notification_deliveries: dict[tuple[str, str], DemoNotificationDelivery] = {}
         self.incident_acknowledgements: dict[tuple[str, str], DemoIncidentAcknowledgement] = {}
@@ -214,12 +217,31 @@ class InMemoryRepository:
     def save_budget_entry(self, value: DemoBudgetLedgerEntry) -> DemoBudgetLedgerEntry:
         prior = next((row for (tid, _), row in self.budget_ledger.items() if tid == value.tenant_id and row.idempotency_key == value.idempotency_key), None)
         if prior:
-            if prior.amount_minor != value.amount_minor: raise ConflictError("budget idempotency key reused")
+            if (prior.run_id, prior.amount_minor, prior.occurred_at) != (value.run_id, value.amount_minor, value.occurred_at):
+                raise ConflictError("budget idempotency key reused")
             return deepcopy(prior)
         self.budget_ledger[(value.tenant_id, value.id)] = deepcopy(value); return deepcopy(value)
 
     def budget_entries_for(self, tenant_id: str) -> tuple[DemoBudgetLedgerEntry, ...]:
         return tuple(deepcopy(row) for (tid, _), row in self.budget_ledger.items() if tid == tenant_id)
+
+    def _all_budget_entries(self):
+        return tuple(deepcopy(row) for row in self.budget_ledger.values())
+
+    def _get_budget_request(self, tenant_id, idempotency_key):
+        return deepcopy(self.budget_requests.get((tenant_id, idempotency_key)))
+
+    def save_budget_request(self, value: DemoBudgetRequest) -> DemoBudgetRequest:
+        validate_request_digest(value.request_digest)
+        with self.transaction():
+            prior = self._get_budget_request(value.tenant_id, value.idempotency_key)
+            if prior is not None:
+                if prior != value:
+                    raise ConflictError('budget idempotency key reused')
+                return prior
+            self.get_agent_run(value.tenant_id, value.run_id)
+            self.budget_requests[(value.tenant_id, value.idempotency_key)] = deepcopy(value)
+            return deepcopy(value)
 
     def save_catalog_import(self, value: DemoCatalogImport) -> tuple[DemoCatalogImport, bool]:
         prior = next((row for (tid, _), row in self.catalog_imports.items()

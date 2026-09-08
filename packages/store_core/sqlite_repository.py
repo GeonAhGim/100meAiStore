@@ -27,6 +27,8 @@ from .domain import (
     DemoInventorySnapshot, DemoPriceProjection, BrowserSession, ApprovalConfirmationNonce,
 )
 from .errors import ConflictError, NotFoundError, TenantBoundaryError
+from .domain import DemoBudgetRequest
+from .budget import BudgetRepositoryMixin, validate_request_digest
 
 
 MIGRATIONS = ((1, """
@@ -403,6 +405,21 @@ ALTER TABLE demo_tool_commands ADD COLUMN approval_command_id TEXT;
 ALTER TABLE demo_tool_commands ADD COLUMN intent_digest TEXT;
 CREATE UNIQUE INDEX demo_tool_one_accepted_per_approval
  ON demo_tool_commands(tenant_id,approval_id) WHERE approval_id IS NOT NULL AND state='accepted';
+"""), (22, """
+CREATE TABLE demo_budget_requests(
+ tenant_id TEXT NOT NULL, idempotency_key TEXT NOT NULL,
+ request_digest TEXT NOT NULL CHECK(length(request_digest)=64 AND request_digest NOT GLOB '*[^0-9a-f]*'),
+ run_id TEXT NOT NULL, outcome TEXT NOT NULL, created_at TEXT NOT NULL,
+ PRIMARY KEY(tenant_id,idempotency_key),
+ FOREIGN KEY(tenant_id,run_id) REFERENCES demo_agent_runs(tenant_id,id) ON DELETE RESTRICT);
+CREATE TRIGGER demo_budget_requests_no_update BEFORE UPDATE ON demo_budget_requests
+ BEGIN SELECT RAISE(ABORT,'budget requests are immutable'); END;
+CREATE TRIGGER demo_budget_requests_no_delete BEFORE DELETE ON demo_budget_requests
+ BEGIN SELECT RAISE(ABORT,'budget requests are immutable'); END;
+CREATE TRIGGER demo_budget_ledger_no_update BEFORE UPDATE ON demo_budget_ledger
+ BEGIN SELECT RAISE(ABORT,'budget ledger is immutable'); END;
+CREATE TRIGGER demo_budget_ledger_no_delete BEFORE DELETE ON demo_budget_ledger
+ BEGIN SELECT RAISE(ABORT,'budget ledger is immutable'); END;
 """))
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -447,7 +464,7 @@ def _dt(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value) if value else None
 
 
-class SQLiteRepository:
+class SQLiteRepository(BudgetRepositoryMixin):
     """Durable DEMO adapter. Every aggregate query includes a tenant predicate.
 
     One instance/connection is owned by one thread. Concurrency uses independent
@@ -1226,7 +1243,8 @@ class SQLiteRepository:
     def save_budget_entry(self, value: DemoBudgetLedgerEntry) -> DemoBudgetLedgerEntry:
         row = self.connection.execute("SELECT * FROM demo_budget_ledger WHERE tenant_id=? AND idempotency_key=?", (value.tenant_id, value.idempotency_key)).fetchone()
         if row:
-            if row['amount_minor'] != value.amount_minor: raise ConflictError('budget idempotency key reused')
+            if (row['run_id'], row['amount_minor'], _dt(row['occurred_at'])) != (value.run_id, value.amount_minor, value.occurred_at):
+                raise ConflictError('budget idempotency key reused')
             return DemoBudgetLedgerEntry(row['id'], row['tenant_id'], row['run_id'], row['amount_minor'], _dt(row['occurred_at']), row['idempotency_key'])
         try: self.connection.execute("INSERT INTO demo_budget_ledger VALUES (?,?,?,?,?,?)", (value.id, value.tenant_id, value.run_id, value.amount_minor, value.occurred_at.isoformat(), value.idempotency_key))
         except sqlite3.IntegrityError as exc: raise ConflictError('budget ledger entry already exists') from exc
@@ -1234,6 +1252,29 @@ class SQLiteRepository:
 
     def budget_entries_for(self, tenant_id: str) -> tuple[DemoBudgetLedgerEntry, ...]:
         return tuple(DemoBudgetLedgerEntry(row['id'], row['tenant_id'], row['run_id'], row['amount_minor'], _dt(row['occurred_at']), row['idempotency_key']) for row in self.connection.execute("SELECT * FROM demo_budget_ledger WHERE tenant_id=? ORDER BY occurred_at,id", (tenant_id,)))
+
+    def _all_budget_entries(self):
+        return tuple(DemoBudgetLedgerEntry(row['id'], row['tenant_id'], row['run_id'], row['amount_minor'], _dt(row['occurred_at']), row['idempotency_key'])
+                     for row in self.connection.execute('SELECT * FROM demo_budget_ledger'))
+
+    def _get_budget_request(self, tenant_id, idempotency_key):
+        row = self.connection.execute('SELECT * FROM demo_budget_requests WHERE tenant_id=? AND idempotency_key=?', (tenant_id, idempotency_key)).fetchone()
+        return DemoBudgetRequest(row['tenant_id'], row['idempotency_key'], row['request_digest'], row['run_id'], row['outcome'], _dt(row['created_at'])) if row else None
+
+    def save_budget_request(self, value: DemoBudgetRequest) -> DemoBudgetRequest:
+        validate_request_digest(value.request_digest)
+        with self.transaction():
+            prior = self._get_budget_request(value.tenant_id, value.idempotency_key)
+            if prior is not None:
+                if prior != value:
+                    raise ConflictError('budget idempotency key reused')
+                return prior
+            try:
+                self.connection.execute('INSERT INTO demo_budget_requests VALUES (?,?,?,?,?,?)',
+                                        (value.tenant_id, value.idempotency_key, value.request_digest, value.run_id, value.outcome, value.created_at.isoformat()))
+            except sqlite3.IntegrityError as exc:
+                raise ConflictError('invalid budget request') from exc
+            return value
 
     def save_agent_status(self, status: AgentStatusSnapshot) -> None:
         """Persist the latest worker/PM heartbeat as a tenant-owned checkpoint."""

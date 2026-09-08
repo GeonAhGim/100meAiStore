@@ -630,6 +630,16 @@ class DemoBudgetPolicy:
 
 
 @dataclass(frozen=True)
+class DemoBudgetRequest:
+    tenant_id: str
+    idempotency_key: str
+    request_digest: str
+    run_id: str
+    outcome: str
+    created_at: datetime
+
+
+@dataclass(frozen=True)
 class DemoBudgetLedgerEntry:
     id: str
     tenant_id: str
