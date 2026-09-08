@@ -52,6 +52,7 @@ successful push is recorded; unrelated uncommitted launcher changes are excluded
 | f0cb0a5 | A-016 durable approved-tool synthetic consumer | 251 Python tests; success/restart/timeout-after-effect reconciliation; compileall/diff/pattern checks |
 | Next local commit (pending) | A-004a exact listing review-to-DEMO execution bridge | 252 Python tests; pre-approval/change denial and one synthetic verified effect; compileall/diff/pattern checks |
 | Next local commit (pending) | A-017 single-receipt return review-to-DEMO execution bridge | 254 Python tests; refund approval binding, changed/cross-tenant denial and one synthetic verified effect; compileall/diff/pattern checks |
+| Next local commit (pending) | A-018 single-item tracking review-to-DEMO execution bridge | 257 Python tests; Coupang/Naver typed shipment target, approval binding, changed/cross-tenant denial and one synthetic verified effect; compileall/diff/pattern checks |
 
 Later commits extend this list; only a successful authorized publishing step
 marks them published.

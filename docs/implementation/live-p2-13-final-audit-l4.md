@@ -290,6 +290,24 @@ pass; compileall, diff whitespace and common-secret scans pass. State: closed
 locally for the single-receipt fixture only. Batch returns, real refund
 transport/readback and production identity remain approval-gated.
 
+### A-018 bounded correction: tracking review to durable DEMO command
+
+The single-item Coupang/Naver tracking fixtures previously ended at pure
+review and result interpreters. No application bridge converted the immutable
+review into a typed approval/outbox command consumed by the DEMO worker.
+Severity: high for local end-to-end traceability; owner: core/orders. The new
+bridge supports the two existing single-item review types, binds exact
+shipment/product-order identity and carrier/invoice evidence to a PURCHASE
+approval, and submits only the matching `dispatch_shipment` payload. Pending
+approval, changed review evidence and cross-tenant context emit no executable
+command; the exact approved Coupang command completes once in the fenced
+synthetic worker. This remains fixture-only: no invoice transport, channel
+write, credential or real shipment confirmation exists. Three focused bridge
+tests and the full regression suite pass; compileall, diff whitespace and
+common-secret scans pass. State: closed locally for the two single-item
+fixture types; batch/split tracking, production adapters and LIVE authority
+remain open.
+
 Answer fail closed: would adding only a real account/API key/business/channel
 approval make this usable? If missing code, wiring, bootstrap, recovery or tests
 remain, answer **no**, link the gaps and continue safe implementation. If only

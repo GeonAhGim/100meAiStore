@@ -35,6 +35,7 @@ from .browser_auth import (authenticate_browser_session, browser_session_cookie,
                            issue_approval_confirmation_nonce, issue_browser_session)
 from .listing_gateway import request_listing_approval, submit_approved_listing
 from .return_gateway import request_return_approval, submit_approved_return
+from .tracking_gateway import request_tracking_approval, submit_approved_tracking
 
 __all__ = [
     "ApprovalKind",
@@ -102,4 +103,6 @@ __all__ = [
     "submit_approved_listing",
     "request_return_approval",
     "submit_approved_return",
+    "request_tracking_approval",
+    "submit_approved_tracking",
 ]

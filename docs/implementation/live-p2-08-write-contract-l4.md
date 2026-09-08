@@ -232,3 +232,13 @@ provider type and no listing HTTP request, credential, marketplace ID or sale
 state is produced. The focused acceptance test denies implicit pre-approval,
 rejects a changed quantity/review digest and proves the exact reviewed command
 finishes locally. Other P2-08 change types and real transport remain open.
+
+## Tracking review to durable DEMO execution wiring
+
+The two existing single-item tracking review contracts now have an explicit
+application bridge. Coupang shipment and Naver product-order identities are
+projected into a typed `dispatch_shipment` PURCHASE approval and the exact
+review payload is consumed by the fenced local synthetic worker. Pending,
+changed and cross-tenant reviews fail closed with no executable outbox item.
+The bridge does not send an invoice or prove shipment confirmation; batch and
+split tracking, vendor readback and all real transport remain unverified.

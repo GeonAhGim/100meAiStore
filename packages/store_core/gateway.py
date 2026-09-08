@@ -13,8 +13,8 @@ from .domain import (ApprovalKind, Capability, DemoAgentRun, DemoBudgetLedgerEnt
 from .errors import AuthorizationError, ConflictError, NotFoundError, TenantBoundaryError
 
 _OPAQUE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,254}\Z")
-_TOOLS = {"publish_offer", "update_stock", "update_price", "create_purchase_order", "claim_action", "reconcile", "pause_scope", "resume_scope"}
-_TARGETS = {"offer", "order", "supplier", "channel", "tenant", "product"}
+_TOOLS = {"publish_offer", "update_stock", "update_price", "create_purchase_order", "claim_action", "dispatch_shipment", "reconcile", "pause_scope", "resume_scope"}
+_TARGETS = {"offer", "order", "supplier", "channel", "tenant", "product", "shipment"}
 _MUTATING = _TOOLS - {"reconcile"}
 _TIERS = {"economy", "balanced", "quality"}
 _TOOL_APPROVAL_KINDS = {
@@ -23,6 +23,7 @@ _TOOL_APPROVAL_KINDS = {
     "update_price": frozenset({ApprovalKind.PRODUCT}),
     "create_purchase_order": frozenset({ApprovalKind.PURCHASE}),
     "claim_action": frozenset({ApprovalKind.REFUND}),
+    "dispatch_shipment": frozenset({ApprovalKind.PURCHASE}),
     "pause_scope": frozenset({ApprovalKind.PAUSE}),
     "resume_scope": frozenset({ApprovalKind.PAUSE}),
 }
