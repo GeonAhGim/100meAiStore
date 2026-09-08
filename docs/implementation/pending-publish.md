@@ -54,9 +54,9 @@ successful push is recorded; unrelated uncommitted launcher changes are excluded
 | 439819d | A-017 single-receipt return review-to-DEMO execution bridge | 254 Python tests; refund approval binding, changed/cross-tenant denial and one synthetic verified effect; compileall/diff/pattern checks |
 | ffef791 | A-018 single-item tracking review-to-DEMO execution bridge | 257 Python tests; Coupang/Naver typed shipment target, approval binding, changed/cross-tenant denial and one synthetic verified effect; compileall/diff/pattern checks |
 | c57feb9 | A-019 split tracking review-to-DEMO execution bridge | 258 Python tests; two-item identity/remap review, PO-transition isolation and one synthetic verified effect; compileall/diff/pattern checks |
-| Next local commit (pending) | A-020 clean-machine CLI bootstrap from empty cwd | 260 Python tests; subprocess init creates dry-run config and local SQLite state without secrets or external calls; compileall/diff/pattern checks |
-| Next local commit (pending) | A-021 scoped listing exact-ID readback wrapper | 261 Python tests; tenant/connection/expiry scope plus draft/approved fixture readback with no resend authority; compileall/diff/pattern checks |
-| Next local commit (pending) | A-022 installed-wheel bootstrap from empty cwd | 262 Python tests; local wheel→fresh venv with `--no-index`, no `PYTHONPATH`, space/nested path `init/status/economics`, dry-run config and SQLite state; compileall/diff/pattern checks |
+| d706ad2 | A-020 clean-machine CLI bootstrap from empty cwd | 260 Python tests; subprocess init creates dry-run config and local SQLite state without secrets or external calls; compileall/diff/pattern checks |
+| 4a10129 | A-021 scoped listing exact-ID readback wrapper | 261 Python tests; tenant/connection/expiry scope plus draft/approved fixture readback with no resend authority; compileall/diff/pattern checks |
+| b049f1d | A-022 installed-wheel bootstrap from empty cwd | 262 Python tests; local wheel→fresh venv with `--no-index`, no `PYTHONPATH`, space/nested path `init/status/economics`, dry-run config and SQLite state; compileall/diff/pattern checks |
 
 Later commits extend this list; only a successful authorized publishing step
 marks them published.
