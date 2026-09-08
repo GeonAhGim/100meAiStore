@@ -308,6 +308,17 @@ common-secret scans pass. State: closed locally for the two single-item
 fixture types; batch/split tracking, production adapters and LIVE authority
 remain open.
 
+### A-019 bounded correction: split tracking review to durable DEMO command
+
+The two-item split tracking fixture previously stopped at pure identity and
+remapping review helpers. Its initial review now has an explicit bridge to a
+PURCHASE approval and the typed `dispatch_shipment` DEMO command. The payload
+uses a shipment-specific `order_ref` so it cannot accidentally enter the
+linked-PO transition path. One approved initial split review reaches the fenced
+synthetic worker exactly once; no channel invoice, credential or real shipment
+state is produced. State: closed locally for the bounded initial split
+fixture; follow-up/batch vendor readback and production transport remain open.
+
 Answer fail closed: would adding only a real account/API key/business/channel
 approval make this usable? If missing code, wiring, bootstrap, recovery or tests
 remain, answer **no**, link the gaps and continue safe implementation. If only

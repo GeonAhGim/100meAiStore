@@ -242,3 +242,9 @@ review payload is consumed by the fenced local synthetic worker. Pending,
 changed and cross-tenant reviews fail closed with no executable outbox item.
 The bridge does not send an invoice or prove shipment confirmation; batch and
 split tracking, vendor readback and all real transport remain unverified.
+
+The bounded initial two-item split review also composes into the same
+`dispatch_shipment` DEMO command path. Its exact item/shipment/invoice mapping
+is approval-bound and reaches one fenced synthetic effect; the shipment
+`order_ref` is intentionally distinct from the linked-PO payload field. This
+does not authorize a real split submission or vendor readback.

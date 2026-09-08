@@ -53,6 +53,7 @@ successful push is recorded; unrelated uncommitted launcher changes are excluded
 | Next local commit (pending) | A-004a exact listing review-to-DEMO execution bridge | 252 Python tests; pre-approval/change denial and one synthetic verified effect; compileall/diff/pattern checks |
 | Next local commit (pending) | A-017 single-receipt return review-to-DEMO execution bridge | 254 Python tests; refund approval binding, changed/cross-tenant denial and one synthetic verified effect; compileall/diff/pattern checks |
 | Next local commit (pending) | A-018 single-item tracking review-to-DEMO execution bridge | 257 Python tests; Coupang/Naver typed shipment target, approval binding, changed/cross-tenant denial and one synthetic verified effect; compileall/diff/pattern checks |
+| Next local commit (pending) | A-019 split tracking review-to-DEMO execution bridge | 258 Python tests; two-item identity/remap review, PO-transition isolation and one synthetic verified effect; compileall/diff/pattern checks |
 
 Later commits extend this list; only a successful authorized publishing step
 marks them published.
