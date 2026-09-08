@@ -197,6 +197,22 @@ Batch evidence: four focused tests and 214 full tests passed; compileall, diff
 whitespace, common secret-pattern and forbidden filename gates passed. The
 30-item Naver and two-shipment Coupang fixture results run without sockets.
 
+## Tracking batch to durable DEMO execution wiring
+
+The bounded, same-provider tracking batch now composes into one immutable
+`dispatch_shipment` PURCHASE approval.  Its payload binds the batch digest,
+component review digests and exact opaque tracking identities; the synthetic
+target is derived from the provider and batch digest.  After an authorized
+decision, exactly that projection enters the existing fenced local outbox and
+durable synthetic worker as one DEMO effect.  A pending approval, changed
+component/batch, or cross-tenant submit is blocked and emits no executable
+outbox item.
+
+This does not submit a batch to Coupang or Naver, confirm any shipment, or
+grant resend authority.  Result correlation remains the pure offline contract;
+real transport, credential use and vendor readback remain gated.  Focused
+gateway tests and the 265-test local Python suite passed on 2026-09-08.
+
 ## Two-item split shipment fixture
 
 [Official split example](https://developers.coupang.com/en/faq/i-want-split-a-shipment)
