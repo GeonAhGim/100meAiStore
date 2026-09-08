@@ -51,6 +51,7 @@ successful push is recorded; unrelated uncommitted launcher changes are excluded
 | e47cd3b | A-015 normalized nested secret-key rejection | 249 Python tests; spelling variants/no-write/opaque-ref regression; compileall/diff/pattern checks |
 | f0cb0a5 | A-016 durable approved-tool synthetic consumer | 251 Python tests; success/restart/timeout-after-effect reconciliation; compileall/diff/pattern checks |
 | Next local commit (pending) | A-004a exact listing review-to-DEMO execution bridge | 252 Python tests; pre-approval/change denial and one synthetic verified effect; compileall/diff/pattern checks |
+| Next local commit (pending) | A-017 single-receipt return review-to-DEMO execution bridge | 254 Python tests; refund approval binding, changed/cross-tenant denial and one synthetic verified effect; compileall/diff/pattern checks |
 
 Later commits extend this list; only a successful authorized publishing step
 marks them published.

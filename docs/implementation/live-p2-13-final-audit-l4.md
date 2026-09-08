@@ -274,6 +274,22 @@ compileall, diff whitespace and common secret-pattern checks passed.
 
 ## Required final verdict
 
+### A-017 bounded correction: return review to durable DEMO command
+
+The single-receipt return fixture previously stopped at pure review/readback
+helpers. No application bridge converted its immutable evidence into the
+REFUND approval and typed `claim_action` command consumed by the bounded DEMO
+worker. Severity: high for local end-to-end traceability; owner: core/orders.
+The new bridge binds tenant/connection, receipt/order/item identities, quantity,
+synthetic amount cap and withdrawal evidence digest to one approval payload.
+Pending approval, changed review evidence and cross-tenant context are denied;
+the exact approved command reaches one fenced synthetic effect after a funds
+approval. The result remains fixture-only: no refund, bank, channel or network
+authority is created. Two focused bridge tests and the full regression suite
+pass; compileall, diff whitespace and common-secret scans pass. State: closed
+locally for the single-receipt fixture only. Batch returns, real refund
+transport/readback and production identity remain approval-gated.
+
 Answer fail closed: would adding only a real account/API key/business/channel
 approval make this usable? If missing code, wiring, bootstrap, recovery or tests
 remain, answer **no**, link the gaps and continue safe implementation. If only
