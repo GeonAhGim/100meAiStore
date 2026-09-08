@@ -33,7 +33,7 @@ from .readiness import evaluate_demo_readiness
 from .contract_demo_bridge import ContractFixtureReadAdapter
 from .browser_auth import (authenticate_browser_session, browser_session_cookie, decide_approval_authenticated,
                            issue_approval_confirmation_nonce, issue_browser_session)
-from .listing_gateway import request_listing_approval, submit_approved_listing
+from .listing_gateway import request_listing_approval, submit_approved_listing, reconcile_approved_listing
 from .return_gateway import request_return_approval, submit_approved_return
 from .tracking_gateway import request_tracking_approval, submit_approved_tracking
 from .split_tracking_gateway import request_split_tracking_approval, submit_approved_split_tracking
@@ -102,6 +102,7 @@ __all__ = [
     "issue_browser_session",
     "request_listing_approval",
     "submit_approved_listing",
+    "reconcile_approved_listing",
     "request_return_approval",
     "submit_approved_return",
     "request_tracking_approval",

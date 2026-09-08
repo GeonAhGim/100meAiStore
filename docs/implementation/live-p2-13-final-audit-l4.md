@@ -331,6 +331,18 @@ SQLite database are created; no credentials or external calls are involved.
 State: closed for local prototype bootstrap; production deployment/bootstrap
 remains gated by PostgreSQL, identity, legal, cost and operations decisions.
 
+### A-021 bounded correction: listing vendor-readback service boundary
+
+Exact listing creation/readback validation previously existed only as an
+offline helper. The listing application surface now exposes a scoped wrapper
+that rechecks tenant, connection and review expiry before delegating to the
+exact-ID fixture reconciliation. Matching draft/approved observations remain
+fixture statuses with no sale-availability or resend authority; malformed,
+foreign or changed readbacks require reconciliation. One focused service
+acceptance test passes as part of the full regression; no channel request or
+credential is used. State: closed locally for the bounded listing fixture;
+vendor API readback, approval and production transport remain gated.
+
 Answer fail closed: would adding only a real account/API key/business/channel
 approval make this usable? If missing code, wiring, bootstrap, recovery or tests
 remain, answer **no**, link the gaps and continue safe implementation. If only

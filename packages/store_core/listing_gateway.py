@@ -4,7 +4,9 @@ from __future__ import annotations
 from typing import Any
 
 from .domain import ApprovalKind
-from .offline_listing_contracts import FixtureListingReview, verify_listing_fixture_review
+from .offline_listing_contracts import (
+    FixtureListingReview, reconcile_listing_fixture, verify_listing_fixture_review,
+)
 
 
 def _payload(review: FixtureListingReview) -> dict[str, Any]:
@@ -45,3 +47,19 @@ def submit_approved_listing(service: Any, context: Any, review: FixtureListingRe
         tool="publish_offer", target_type="offer", target_id=offer_id,
         input_value=_payload(review), idempotency_key=idempotency_key,
         requested_policy_version=policy_version, approval_id=approval_id)
+
+
+def reconcile_approved_listing(
+    service: Any, context: Any, review: FixtureListingReview, *,
+    connection_ref: str, creation_response: Any, original_payload: Any,
+    readback: Any, observed_at,
+):
+    """Validate exact fixture creation/readback under the reviewed scope.
+
+    A matching fixture observation remains a readback result only; it never
+    grants listing availability or resend authority.
+    """
+    _verify(service, context, review, connection_ref)
+    return reconcile_listing_fixture(
+        review, creation_response, original_payload=original_payload,
+        readback=readback, observed_at=observed_at, now=service._clock())

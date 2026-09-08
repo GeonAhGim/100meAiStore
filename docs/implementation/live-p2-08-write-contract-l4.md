@@ -248,3 +248,8 @@ The bounded initial two-item split review also composes into the same
 is approval-bound and reaches one fenced synthetic effect; the shipment
 `order_ref` is intentionally distinct from the linked-PO payload field. This
 does not authorize a real split submission or vendor readback.
+
+The listing application bridge also exposes the existing exact-ID creation
+readback contract under the authenticated tenant/connection scope. It returns
+only fixture reconciliation status and never turns a vendor ID into listing
+availability or resend authority; real vendor readback remains unverified.
