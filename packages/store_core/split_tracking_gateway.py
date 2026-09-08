@@ -30,6 +30,16 @@ def _payload(review: FixtureSplitReview) -> dict[str, Any]:
     }
 
 
+def _target_id(review: FixtureSplitReview) -> str:
+    """Use the reviewed shipment identity, including after split remapping."""
+    if not review.items:
+        raise ValueError("split review requires at least one item")
+    shipment_ids = {item.shipment_id for item in review.items}
+    if len(shipment_ids) != 1:
+        raise ValueError("split review must bind one shipment target")
+    return next(iter(shipment_ids))
+
+
 def _verify(service: Any, context: Any, review: FixtureSplitReview,
             connection_ref: str) -> None:
     verify_split_review(
@@ -45,7 +55,7 @@ def request_split_tracking_approval(
 ):
     _verify(service, context, review, connection_ref)
     return service.request_approval(
-        context, ApprovalKind.PURCHASE, f"order:{review.order_id}", _payload(review),
+        context, ApprovalKind.PURCHASE, f"shipment:{_target_id(review)}", _payload(review),
         idempotency_key, policy_version, target_version,
         evidence=({"risk": "OFFLINE_FIXTURE_ONLY", "connection_ref": connection_ref,
                    "real_shipment_confirmed": False},))
@@ -59,6 +69,6 @@ def submit_approved_split_tracking(
     _verify(service, context, review, connection_ref)
     return service.submit_demo_tool(
         context, actor_type="workflow", actor_id="split-tracking-fixture-v1",
-        tool="dispatch_shipment", target_type="order", target_id=review.order_id,
+        tool="dispatch_shipment", target_type="shipment", target_id=_target_id(review),
         input_value=_payload(review), idempotency_key=idempotency_key,
         requested_policy_version=policy_version, approval_id=approval_id)

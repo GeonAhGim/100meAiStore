@@ -357,6 +357,18 @@ state, and makes no network or external-channel calls. State: closed for
 offline package bootstrap; clean-machine production deployment and its
 PostgreSQL/identity/operations gates remain open.
 
+### A-023 bounded correction: split follow-up shipment target wiring
+
+The split bridge initially emitted a `dispatch_shipment` command with an
+`order` target, even though the typed gateway contract defines shipment as the
+target and the follow-up review may bind a different remaining shipment after
+remapping. The bridge now derives one shipment target from the reviewed items
+for both initial and follow-up phases. Acceptance covers approval, exact target
+and one fenced synthetic effect for the initial review and the follow-up
+review; no channel invoice or real shipment state is produced. State: closed
+locally for the bounded split fixture; batch transport, vendor readback and
+production authority remain open.
+
 Answer fail closed: would adding only a real account/API key/business/channel
 approval make this usable? If missing code, wiring, bootstrap, recovery or tests
 remain, answer **no**, link the gaps and continue safe implementation. If only

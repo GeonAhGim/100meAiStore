@@ -57,6 +57,7 @@ successful push is recorded; unrelated uncommitted launcher changes are excluded
 | d706ad2 | A-020 clean-machine CLI bootstrap from empty cwd | 260 Python tests; subprocess init creates dry-run config and local SQLite state without secrets or external calls; compileall/diff/pattern checks |
 | 4a10129 | A-021 scoped listing exact-ID readback wrapper | 261 Python tests; tenant/connection/expiry scope plus draft/approved fixture readback with no resend authority; compileall/diff/pattern checks |
 | b049f1d | A-022 installed-wheel bootstrap from empty cwd | 262 Python tests; local wheel→fresh venv with `--no-index`, no `PYTHONPATH`, space/nested path `init/status/economics`, dry-run config and SQLite state; compileall/diff/pattern checks |
+| Next local commit (pending) | A-023 split follow-up shipment target wiring | 263 Python tests; initial/follow-up split approval and exact shipment target through fenced synthetic worker; compileall/diff/pattern checks |
 
 Later commits extend this list; only a successful authorized publishing step
 marks them published.
