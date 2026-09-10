@@ -22,3 +22,20 @@ Tests precede implementation: boundary and repository parity, strict replay,
 restart, v21 upgrade and migration failure rollback, and two-connection race.
 Run, request, reservation and audit writes share one transaction; SQLite uses
 BEGIN IMMEDIATE and in-memory uses an RLock and rollback snapshots.
+
+The public agent-run gateway now applies that contract before accepting an
+optional run. A canonical digest covers every request field, including the work
+class, so both accepted and blocked outcomes replay exactly and changed input
+fails closed. The shared projection includes every tenant in the database:
+ordinary optional work may reach WARNING, growth work stops at WARNING, and all
+optional agent work stops before HARD_CAP. Missing, malformed, future-dated, or
+older-than-60-second ledger telemetry records a durable blocked result without a
+reservation. Essential deterministic order, inventory, approval, safety, alert,
+outbox, and reconciliation paths do not use this optional agent-run entry point.
+
+Local acceptance evidence: `test_d09_budget_gateway.py` covers 23,999/24,000/
+29,999/30,000/30,001 boundaries, cross-tenant aggregation, growth suspension,
+strict accepted/blocked restart replay, telemetry failure, fault rollback, and
+two independent SQLite connections racing for the cap. The full local suite is
+281 pytest tests at this checkpoint. This remains DEMO/local evidence, not cloud
+billing telemetry or a distributed multi-database cap.
