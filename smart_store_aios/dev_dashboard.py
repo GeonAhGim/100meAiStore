@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import os
 import re
 import subprocess
 import threading
@@ -23,6 +24,11 @@ DEFAULT_CODEX_HOME = Path.home() / ".codex"
 STALE_AFTER_SECONDS = 180
 SESSION_TAIL_BYTES = 2 * 1024 * 1024
 PROJECT = r"C:\smart_store"
+
+
+def _path_key(value: str | Path) -> str:
+    """Return a platform-canonical key for exact working-directory matching."""
+    return os.path.normcase(os.path.realpath(os.path.abspath(os.fspath(value))))
 _EMAIL = re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b")
 _SECRET = re.compile(r"(?i)(api[_-]?key|authorization|bearer|password|secret|token)(\s*[:=]\s*)[^\s,;]+")
 _WINDOWS_PATH = re.compile(r"(?i)(?:[A-Za-z]:\\|\\\\)[^\s\"']+")
@@ -220,9 +226,9 @@ class DevDashboardCollector:
                 meta, records = cached[2], cached[3]
             else:
                 meta = self._read_meta(path)
-                records = self._read_records(path) if meta and str(meta.get("cwd", "")) == str(self.project_root) else []
+                records = self._read_records(path) if meta and _path_key(str(meta.get("cwd", ""))) == _path_key(self.project_root) else []
                 self._file_cache[str(path)] = (stat.st_mtime_ns, stat.st_size, meta, records)
-            if not meta or str(meta.get("cwd", "")) != str(self.project_root):
+            if not meta or _path_key(str(meta.get("cwd", ""))) != _path_key(self.project_root):
                 continue
             session_id = str(meta.get("id") or meta.get("session_id") or path.name)
             grouped.setdefault(session_id, self._new_session(meta, session_id))
