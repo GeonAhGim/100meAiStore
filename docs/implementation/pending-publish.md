@@ -60,6 +60,7 @@ successful push is recorded; unrelated uncommitted launcher changes are excluded
 | 65d7caf | A-023 split follow-up shipment target wiring | 263 Python tests; initial/follow-up split approval and exact shipment target through fenced synthetic worker; compileall/diff/pattern checks |
 | 3427dc9 | D-09 durable canonical budget requests and atomic platform reservations | repository parity, v21 upgrade/rollback and two-connection race tests |
 | 9ec3f88 | D-09 public agent-run platform warning/hard-cap integration | 281 pytest and 281 unittest tests; strict accepted/blocked replay, telemetry/fault/concurrency tests; compileall/diff/common-secret checks |
+| 838eb2d | D-09 repository amount and policy integer parity hardening | 283 pytest and 283 unittest tests; adapter boundary tests; compileall/diff/common-secret checks |
 
 Later commits extend this list; only a successful authorized publishing step
 marks them published.
