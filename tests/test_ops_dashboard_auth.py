@@ -77,6 +77,31 @@ class OpsDashboardAuthTests(unittest.TestCase):
         status, _, _ = self.request("POST", path + "/nonce", {}, origin=False)
         self.assertEqual(403, status)
 
+    def test_authenticated_approval_gets_are_no_store_and_safe(self):
+        _, approval = self.app.request_approval(
+            self.context, ApprovalKind.PRODUCT, "browser-read",
+            {"sku": "fixture", "customer_email": "private@example.test",
+             "recipient_name": "Private Person",
+             "download_url": "https://example.test/file?token=private-token"},
+            "browser-read", 1, 1)
+        status, headers, payload = self.request("GET", "/api/approvals")
+        self.assertEqual(200, status)
+        self.assertEqual("no-store", headers["Cache-Control"])
+        self.assertEqual(approval.id, json.loads(payload)["items"][0]["approval_id"])
+        self.assertNotIn("private@example.test", payload.decode())
+        self.assertNotIn("Private Person", payload.decode())
+        self.assertNotIn("private-token", payload.decode())
+        status, headers, payload = self.request("GET", f"/api/approvals/{approval.id}")
+        self.assertEqual(200, status)
+        self.assertEqual("no-store", headers["Cache-Control"])
+        self.assertEqual("[REDACTED]", json.loads(payload)["after"]["customer_email"])
+        status, _, _ = self.request("GET", "/api/approvals?tenant_id=other")
+        self.assertEqual(400, status)
+        status, _, _ = self.request("GET", "/api/approvals", cookie=False)
+        self.assertEqual(401, status)
+        status, _, _ = self.request("GET", f"/api/approvals/{self.other.tenant_id}")
+        self.assertEqual(404, status)
+
     def test_browser_shell_contains_no_raw_identity_or_token_storage(self):
         self.assertNotIn("localStorage", INDEX_HTML)
         self.assertNotIn("tenant_id", INDEX_HTML)

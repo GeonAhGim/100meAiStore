@@ -285,6 +285,10 @@ class StoreControlPlane:
         from .approvals import approval_detail
         return approval_detail(self, context, approval_id)
 
+    def expire_due_approvals(self, tenant_id: str, limit: int = 100) -> dict[str, Any]:
+        from .approvals import expire_due_approvals
+        return expire_due_approvals(self, tenant_id, limit)
+
     def decide_approval(self, context: TenantContext, approval_id: str, approve: bool,
                         reason: str, confirmation_nonce: str) -> Approval:
         from .approvals import decide_approval

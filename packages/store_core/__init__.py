@@ -25,7 +25,8 @@ from .claim01 import open_demo_claim, record_demo_claim_status
 from .finance01 import import_demo_settlement
 from .inventory import DemoInventoryObservation, DemoPriceCalculation, calculate_demo_price, observe_demo_inventory, record_demo_inventory, record_demo_price_projection
 from .catalog import ingest_demo_catalog, project_demo_offer
-from .approvals import approval_inbox, approval_detail, decide_approval
+from .approvals import (ApprovalExpiryWorker, approval_detail, approval_inbox,
+                        decide_approval)
 from .gateway import configure_demo_byok, set_demo_budget_policy, record_demo_agent_run, submit_demo_tool
 from .notifications import set_demo_notification_preference, notify_demo, acknowledge_demo_incident
 from .safety import set_demo_stop, backup_demo_sqlite
@@ -82,6 +83,7 @@ __all__ = [
     "project_demo_offer",
     "approval_inbox",
     "approval_detail",
+    "ApprovalExpiryWorker",
     "decide_approval",
     "configure_demo_byok",
     "set_demo_budget_policy",

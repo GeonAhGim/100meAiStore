@@ -7,8 +7,8 @@ from contextlib import contextmanager
 from datetime import datetime
 from typing import Iterable
 
-from .domain import (AgentStatusSnapshot, Approval, ApprovalConfirmationNonce, AuditEvent, BrowserSession,
-                     Command, Membership, OutboxEvent, OutboxState, Tenant, User)
+from .domain import (AgentStatusSnapshot, Approval, ApprovalConfirmationNonce, ApprovalState, AuditEvent, BrowserSession,
+                     Command, CommandState, Membership, OutboxEvent, OutboxState, Tenant, User)
 from .errors import ConflictError, NotFoundError, TenantBoundaryError
 from .domain import (AdapterCapabilityManifest, InboxMessage, InboxState, ApprovalIntent,
                      ExecutionPreparation, NormalizedInboundPayload, AdapterPollCheckpoint)
@@ -751,9 +751,28 @@ class InMemoryRepository(BudgetRepositoryMixin):
     def approvals_for(self, tenant_id: str) -> tuple[Approval, ...]:
         return tuple(deepcopy(value) for (tid, _), value in self.approvals.items() if tid == tenant_id)
 
+    def due_approvals(self, tenant_id: str, now: datetime, limit: int) -> tuple[Approval, ...]:
+        values = (value for (tid, _), value in self.approvals.items()
+                  if tid == tenant_id and value.state.value == "pending" and value.expires_at <= now)
+        return tuple(deepcopy(value) for value in sorted(values, key=lambda row: (row.expires_at, row.id))[:limit])
+
+    def mark_approval_expired(self, tenant_id: str, approval_id: str,
+                              command_id: str, now: datetime) -> bool:
+        approval = self.approvals.get((tenant_id, command_id))
+        command = self.commands.get((tenant_id, command_id))
+        if (approval is None or command is None or approval.command_id != command_id
+                or approval.state != ApprovalState.PENDING or approval.expires_at > now):
+            return False
+        if command.state != CommandState.AWAITING_APPROVAL:
+            raise ConflictError("linked command is not awaiting approval")
+        approval.state = ApprovalState.EXPIRED
+        command.state = CommandState.EXPIRED
+        return True
+
     def get_approval(self, tenant_id: str, approval_id: str) -> Approval:
         try:
-            return deepcopy(next(value for (tid, aid), value in self.approvals.items() if tid == tenant_id and aid == approval_id))
+            return deepcopy(next(value for (tid, _), value in self.approvals.items()
+                                 if tid == tenant_id and value.id == approval_id))
         except StopIteration as exc:
             raise NotFoundError("approval not found") from exc
 

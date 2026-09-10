@@ -11,7 +11,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from packages.store_core import SQLiteRepository, StoreControlPlane
-from packages.store_core.errors import AuthorizationError, ConflictError, NotFoundError
+from packages.store_core.errors import (AuthorizationError, ConflictError,
+                                        NotFoundError, TenantBoundaryError)
 
 
 INDEX_HTML = r"""<!doctype html>
@@ -58,7 +59,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if parsed.path == "/":
             self._send(200, "text/html; charset=utf-8", INDEX_HTML.encode())
             return
-        if parsed.path != "/api/dashboard":
+        approval_match = re.fullmatch(r"/api/approvals/([A-Za-z0-9_.:-]{1,255})", parsed.path)
+        if parsed.path not in {"/api/dashboard", "/api/approvals"} and not approval_match:
             self._send(404, "application/json", b'{"error":"not_found"}')
             return
         if parsed.query:
@@ -73,9 +75,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
             repo = SQLiteRepository(database)
             service = StoreControlPlane(repo)
             context = service.authenticate_browser_session(self._session_token())
-            self._send_json(200, service.dashboard_snapshot(context, project_root=str(self.server.project_root)))  # type: ignore[attr-defined]
-        except (AuthorizationError, NotFoundError, ConflictError) as exc:
+            if parsed.path == "/api/dashboard":
+                value = service.dashboard_snapshot(context, project_root=str(self.server.project_root))  # type: ignore[attr-defined]
+            elif parsed.path == "/api/approvals":
+                value = service.approval_inbox(context)
+            else:
+                value = service.approval_detail(context, approval_match.group(1))  # type: ignore[union-attr]
+            self._send_json(200, value)
+        except AuthorizationError as exc:
             self._send_json(401, {"error": str(exc)})
+        except (NotFoundError, TenantBoundaryError) as exc:
+            self._send_json(404, {"error": str(exc)})
+        except ConflictError as exc:
+            self._send_json(409, {"error": str(exc)})
         finally:
             if repo is not None:
                 repo.close()

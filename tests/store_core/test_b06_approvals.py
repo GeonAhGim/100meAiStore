@@ -39,6 +39,8 @@ class B06ApprovalTests(unittest.TestCase):
         self.now += timedelta(hours=24)
         inbox = self.app.approval_inbox(self.ctx)
         self.assertEqual([], inbox["items"])
+        self.assertEqual(ApprovalState.PENDING, self.repo.get_approval(self.ctx.tenant_id, approval.id).state)
+        self.app.expire_due_approvals(self.ctx.tenant_id)
         self.assertEqual(ApprovalState.EXPIRED, self.repo.get_approval(self.ctx.tenant_id, approval.id).state)
         with self.assertRaises(AuthorizationError): self.app.decide_approval(self.ctx, approval.id, True, "late", "nonce")
         with self.assertRaises(AuthorizationError): self.app.decide_approval(self.ctx, approval.id, True, "late", "bad nonce!")

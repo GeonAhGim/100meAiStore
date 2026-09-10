@@ -1405,6 +1405,31 @@ class SQLiteRepository(BudgetRepositoryMixin):
     def approvals_for(self, tenant_id: str) -> tuple[Approval, ...]:
         return tuple(Approval(r["id"],r["tenant_id"],r["command_id"],ApprovalKind(r["kind"]),ApprovalState(r["state"]),_dt(r["requested_at"]),_dt(r["expires_at"]),tuple(json.loads(r["evidence_json"])),r["decided_by"],r["decision_reason"]) for r in self.connection.execute("SELECT * FROM approvals WHERE tenant_id=? ORDER BY requested_at,id", (tenant_id,)))  # type: ignore[arg-type]
 
+    def due_approvals(self, tenant_id: str, now: datetime, limit: int) -> tuple[Approval, ...]:
+        rows = self.connection.execute(
+            "SELECT * FROM approvals WHERE tenant_id=? AND state=? AND expires_at<=? ORDER BY expires_at,id LIMIT ?",
+            (tenant_id, ApprovalState.PENDING.value, now.isoformat(), limit),
+        ).fetchall()
+        return tuple(Approval(r["id"],r["tenant_id"],r["command_id"],ApprovalKind(r["kind"]),ApprovalState(r["state"]),_dt(r["requested_at"]),_dt(r["expires_at"]),tuple(json.loads(r["evidence_json"])),r["decided_by"],r["decision_reason"]) for r in rows)  # type: ignore[arg-type]
+
+    def mark_approval_expired(self, tenant_id: str, approval_id: str,
+                              command_id: str, now: datetime) -> bool:
+        cursor = self.connection.execute(
+            "UPDATE approvals SET state=? WHERE tenant_id=? AND id=? AND command_id=? AND state=? AND expires_at<=?",
+            (ApprovalState.EXPIRED.value, tenant_id, approval_id, command_id,
+             ApprovalState.PENDING.value, now.isoformat()),
+        )
+        if cursor.rowcount != 1:
+            return False
+        command = self.connection.execute(
+            "UPDATE commands SET state=? WHERE tenant_id=? AND id=? AND state=?",
+            (CommandState.EXPIRED.value, tenant_id, command_id,
+             CommandState.AWAITING_APPROVAL.value),
+        )
+        if command.rowcount != 1:
+            raise ConflictError("linked command is not awaiting approval")
+        return True
+
     def get_approval(self, tenant_id: str, approval_id: str) -> Approval:
         r = self.connection.execute("SELECT * FROM approvals WHERE tenant_id=? AND id=?", (tenant_id, approval_id)).fetchone()
         if not r: raise NotFoundError("approval not found")
