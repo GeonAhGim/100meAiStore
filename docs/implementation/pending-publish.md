@@ -58,6 +58,8 @@ successful push is recorded; unrelated uncommitted launcher changes are excluded
 | 4a10129 | A-021 scoped listing exact-ID readback wrapper | 261 Python tests; tenant/connection/expiry scope plus draft/approved fixture readback with no resend authority; compileall/diff/pattern checks |
 | b049f1d | A-022 installed-wheel bootstrap from empty cwd | 262 Python tests; local wheel→fresh venv with `--no-index`, no `PYTHONPATH`, space/nested path `init/status/economics`, dry-run config and SQLite state; compileall/diff/pattern checks |
 | 65d7caf | A-023 split follow-up shipment target wiring | 263 Python tests; initial/follow-up split approval and exact shipment target through fenced synthetic worker; compileall/diff/pattern checks |
+| 3427dc9 | D-09 durable canonical budget requests and atomic platform reservations | repository parity, v21 upgrade/rollback and two-connection race tests |
+| 9ec3f88 | D-09 public agent-run platform warning/hard-cap integration | 281 pytest and 281 unittest tests; strict accepted/blocked replay, telemetry/fault/concurrency tests; compileall/diff/common-secret checks |
 
 Later commits extend this list; only a successful authorized publishing step
 marks them published.
