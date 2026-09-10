@@ -24,7 +24,7 @@ from .domain import DemoNotificationPreference, DemoNotificationDelivery, DemoIn
 from .domain import DemoStopControl, DemoBackupManifest
 from .domain import DemoInventorySnapshot, DemoPriceProjection
 from .domain import DemoBudgetRequest
-from .budget import BudgetRepositoryMixin, validate_request_digest
+from .budget import BudgetRepositoryMixin, validate_ledger_amount, validate_request_digest
 
 
 class InMemoryRepository(BudgetRepositoryMixin):
@@ -215,6 +215,7 @@ class InMemoryRepository(BudgetRepositoryMixin):
         return deepcopy(self.budget_policies.get(tenant_id))
 
     def save_budget_entry(self, value: DemoBudgetLedgerEntry) -> DemoBudgetLedgerEntry:
+        validate_ledger_amount(value.amount_minor)
         prior = next((row for (tid, _), row in self.budget_ledger.items() if tid == value.tenant_id and row.idempotency_key == value.idempotency_key), None)
         if prior:
             if (prior.run_id, prior.amount_minor, prior.occurred_at) != (value.run_id, value.amount_minor, value.occurred_at):

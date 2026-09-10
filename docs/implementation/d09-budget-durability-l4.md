@@ -37,5 +37,7 @@ Local acceptance evidence: `test_d09_budget_gateway.py` covers 23,999/24,000/
 29,999/30,000/30,001 boundaries, cross-tenant aggregation, growth suspension,
 strict accepted/blocked restart replay, telemetry failure, fault rollback, and
 two independent SQLite connections racing for the cap. The full local suite is
-281 pytest tests at this checkpoint. This remains DEMO/local evidence, not cloud
+283 pytest and unittest tests at this checkpoint. Direct ledger writes and all
+persisted policy integers also have identical bounded validation across the
+memory and SQLite adapters. This remains DEMO/local evidence, not cloud
 billing telemetry or a distributed multi-database cap.

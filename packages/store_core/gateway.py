@@ -11,7 +11,7 @@ from uuid import uuid4
 from .domain import (ApprovalKind, Capability, DemoAgentRun, DemoBudgetLedgerEntry, DemoBudgetPolicy, DemoBudgetRequest,
                      DemoByokReference, DemoToolCommand, OutboxEvent, OutboxState)
 from .errors import AuthorizationError, ConflictError, NotFoundError, TenantBoundaryError
-from .budget import PLATFORM_WARNING_MINOR, PLATFORM_HARD_CAP_MINOR, budget_time
+from .budget import PLATFORM_WARNING_MINOR, PLATFORM_HARD_CAP_MINOR, SQLITE_INTEGER_MAX, budget_time
 
 _OPAQUE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,254}\Z")
 _TOOLS = {"publish_offer", "update_stock", "update_price", "create_purchase_order", "claim_action", "dispatch_shipment", "reconcile", "pause_scope", "resume_scope"}
@@ -107,7 +107,10 @@ def set_demo_budget_policy(service: Any, context: Any, *, daily_limit_minor: int
                            model_tier: str) -> DemoBudgetPolicy:
     service.require(context, Capability.TENANT_ADMIN)
     values = (daily_limit_minor, monthly_limit_minor, generation_limit, agent_run_limit)
-    if any(type(v) is not int or v < 0 for v in values) or type(max_tokens) is not int or max_tokens < 1 or type(max_tool_calls) is not int or max_tool_calls < 1 or model_tier not in _TIERS:
+    if (any(type(v) is not int or not 0 <= v <= SQLITE_INTEGER_MAX for v in values)
+            or type(max_tokens) is not int or not 1 <= max_tokens <= SQLITE_INTEGER_MAX
+            or type(max_tool_calls) is not int or not 1 <= max_tool_calls <= SQLITE_INTEGER_MAX
+            or model_tier not in _TIERS):
         raise ConflictError("invalid budget policy")
     with service.repo.transaction():
         prior = service.repo.get_budget_policy(context.tenant_id)

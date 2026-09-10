@@ -28,7 +28,7 @@ from .domain import (
 )
 from .errors import ConflictError, NotFoundError, TenantBoundaryError
 from .domain import DemoBudgetRequest
-from .budget import BudgetRepositoryMixin, validate_request_digest
+from .budget import BudgetRepositoryMixin, validate_ledger_amount, validate_request_digest
 
 
 MIGRATIONS = ((1, """
@@ -1241,6 +1241,7 @@ class SQLiteRepository(BudgetRepositoryMixin):
         return DemoBudgetPolicy(row['tenant_id'], row['daily_limit_minor'], row['monthly_limit_minor'], row['generation_limit'], row['agent_run_limit'], row['max_tokens'], row['max_tool_calls'], row['model_tier'], row['version']) if row else None
 
     def save_budget_entry(self, value: DemoBudgetLedgerEntry) -> DemoBudgetLedgerEntry:
+        validate_ledger_amount(value.amount_minor)
         row = self.connection.execute("SELECT * FROM demo_budget_ledger WHERE tenant_id=? AND idempotency_key=?", (value.tenant_id, value.idempotency_key)).fetchone()
         if row:
             if (row['run_id'], row['amount_minor'], _dt(row['occurred_at'])) != (value.run_id, value.amount_minor, value.occurred_at):

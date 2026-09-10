@@ -6,6 +6,7 @@ from .errors import ConflictError
 
 PLATFORM_WARNING_MINOR = 24_000
 PLATFORM_HARD_CAP_MINOR = 30_000
+SQLITE_INTEGER_MAX = 2**63 - 1
 
 
 def budget_time(value: datetime) -> datetime:
@@ -17,6 +18,11 @@ def budget_time(value: datetime) -> datetime:
 def validate_request_digest(value: str) -> None:
     if not isinstance(value, str) or not re.fullmatch('[0-9a-f]{64}', value):
         raise ConflictError('invalid budget request digest')
+
+
+def validate_ledger_amount(value: int) -> None:
+    if type(value) is not int or not 0 <= value < PLATFORM_HARD_CAP_MINOR:
+        raise ConflictError('platform budget hard cap')
 
 
 class BudgetRepositoryMixin:
@@ -43,8 +49,7 @@ class BudgetRepositoryMixin:
         return {'reserved_minor': self.platform_monthly_budget_total(now), 'computed_at': now}
 
     def reserve_budget_entry(self, value):
-        if type(value.amount_minor) is not int or not 0 <= value.amount_minor < PLATFORM_HARD_CAP_MINOR:
-            raise ConflictError('platform budget hard cap')
+        validate_ledger_amount(value.amount_minor)
         with self.transaction():
             prior = next((e for e in self.budget_entries_for(value.tenant_id)
                           if e.idempotency_key == value.idempotency_key), None)

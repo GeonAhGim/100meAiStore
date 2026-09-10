@@ -16,6 +16,24 @@ NOW = datetime(2026, 9, 8, tzinfo=timezone.utc)
 
 
 class BudgetRepositoryTests(unittest.TestCase):
+    def test_direct_ledger_amount_validation_has_repository_parity(self):
+        with tempfile.TemporaryDirectory() as folder:
+            for repo in (InMemoryRepository(), SQLiteRepository(Path(folder) / 'amount.db')):
+                try:
+                    app = StoreControlPlane(repo, lambda: NOW)
+                    ctx = app.bootstrap_tenant('Amount', 'amount@example.test')
+                    run = DemoAgentRun('run', ctx.tenant_id, 'agent', 'inspect', 1, 'economy', 'p1',
+                                       'a' * 64, '{}', 'high', 0, None, 0, 0, 'RECORDED', NOW)
+                    repo.save_agent_run(run)
+                    for index, amount in enumerate((-1, True, 30_000, 2**63)):
+                        with self.subTest(repository=type(repo).__name__, amount=amount), self.assertRaises(ConflictError):
+                            repo.save_budget_entry(DemoBudgetLedgerEntry(str(index), ctx.tenant_id, run.id,
+                                                                         amount, NOW, str(index)))
+                    self.assertEqual(0, repo.platform_monthly_budget_total(NOW))
+                finally:
+                    if isinstance(repo, SQLiteRepository):
+                        repo.close()
+
     def test_request_replay_monthly_sum_reservation_and_rollback_parity(self):
         with tempfile.TemporaryDirectory() as folder:
             for repo in (InMemoryRepository(), SQLiteRepository(Path(folder) / 'budget.db')):

@@ -29,6 +29,23 @@ def request(app, ctx, key='key', amount=1, **changes):
 
 
 class BudgetGatewayTests(unittest.TestCase):
+    def test_policy_integer_bounds_have_repository_parity(self):
+        with tempfile.TemporaryDirectory() as folder:
+            for repo in (InMemoryRepository(), SQLiteRepository(Path(folder) / 'policy.db')):
+                try:
+                    app = StoreControlPlane(repo, lambda: NOW)
+                    ctx = app.bootstrap_tenant('Policy', 'policy@example.test')
+                    for field in ('daily_limit_minor', 'monthly_limit_minor', 'generation_limit',
+                                  'agent_run_limit', 'max_tokens', 'max_tool_calls'):
+                        values = dict(daily_limit_minor=1, monthly_limit_minor=1, generation_limit=1,
+                                      agent_run_limit=1, max_tokens=1, max_tool_calls=1, model_tier='economy')
+                        values[field] = 2**63
+                        with self.subTest(repository=type(repo).__name__, field=field), self.assertRaises(ConflictError):
+                            app.set_demo_budget_policy(ctx, **values)
+                finally:
+                    if isinstance(repo, SQLiteRepository):
+                        repo.close()
+
     def test_boundaries_parity_and_tenant_cannot_raise_platform_cap(self):
         for amount, outcome in ((23999, 'RECORDED'), (24000, 'RECORDED_WARNING'),
                                 (29999, 'RECORDED_WARNING'), (30000, 'BLOCKED_GLOBAL_HARD_CAP'),
