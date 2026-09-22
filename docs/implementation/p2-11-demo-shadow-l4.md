@@ -40,3 +40,9 @@ no write to any channel, supplier, or database. LIVE remains unapproved.
 | P2-11-DEMO-SHADOW-01 | A shadow run compares existing-operation and channel snapshots per external line ID and classifies discrepancies |
 | P2-11-DEMO-SHADOW-02 | Freshness is measured against the bounded polling window and a stale page is reported, never silently accepted |
 | P2-11-DEMO-SHADOW-03 | Operator exceptions and exit or rollback evidence are produced and the run is fail-closed without DEMO approval records for G1, G3 and G5 |
+
+## Evidence
+
+| Commit | Tests | Fix rounds | Verified by |
+|---|---|---|---|
+| `0cd3257` | 317 ran, OK | 0 | worker `a6a0696f-658f-41c8-a695-cbc77c960f5d` |
