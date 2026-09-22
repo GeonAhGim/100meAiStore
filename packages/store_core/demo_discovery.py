@@ -72,15 +72,14 @@ class DiscoveryReport:
 def approval_modes(approvals_dir: Path) -> dict[str, str]:
     """Gate -> mode from ``<gate>.md`` records. Unreadable or mode-less records are omitted."""
     modes: dict[str, str] = {}
-    for gate in REQUIRED_GATES:
-        path = Path(approvals_dir) / f"{gate}.md"
+    for path in sorted(Path(approvals_dir).glob("G[0-9].md")):
         try:
             text = path.read_text(encoding="utf-8")
         except OSError:
             continue
         match = _MODE.search(text)
         if match:
-            modes[gate] = match.group(1)
+            modes[path.stem] = match.group(1)
     return modes
 
 
