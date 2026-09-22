@@ -5,7 +5,8 @@ import tempfile
 import threading
 import unittest
 
-from packages.store_core import ApprovalKind, SQLiteRepository, StoreControlPlane
+from packages.store_core import (ApprovalKind, Role, SQLiteRepository,
+                                 StoreControlPlane)
 from smart_store_aios.dashboard import DashboardServer, INDEX_HTML
 
 
@@ -99,8 +100,52 @@ class OpsDashboardAuthTests(unittest.TestCase):
         self.assertEqual(400, status)
         status, _, _ = self.request("GET", "/api/approvals", cookie=False)
         self.assertEqual(401, status)
-        status, _, _ = self.request("GET", f"/api/approvals/{self.other.tenant_id}")
-        self.assertEqual(404, status)
+        _, foreign_approval = self.app.request_approval(
+            self.other, ApprovalKind.PRODUCT, "foreign-browser-read", {},
+            "foreign-browser-read", 1, 1)
+        own_before = self.repo.get_approval(self.context.tenant_id, approval.id).state
+        foreign_before = self.repo.get_approval(
+            self.other.tenant_id, foreign_approval.id).state
+        missing = self.request("GET", "/api/approvals/does-not-exist")
+        foreign = self.request("GET", f"/api/approvals/{foreign_approval.id}")
+        self.assertEqual((404, 404), (missing[0], foreign[0]))
+        self.assertEqual(missing[2], foreign[2])
+        self.assertEqual(own_before,
+                         self.repo.get_approval(self.context.tenant_id, approval.id).state)
+        self.assertEqual(foreign_before, self.repo.get_approval(
+            self.other.tenant_id, foreign_approval.id).state)
+
+    def test_authentication_authorization_and_detail_oracles_are_distinct(self):
+        _, product = self.app.request_approval(
+            self.context, ApprovalKind.PRODUCT, "product-only", {},
+            "product-only", 1, 1)
+        funds = self.app.add_member(
+            self.context, "funds-dashboard-auth@example.test", [Role.FUNDS])
+        funds_session = self.app.issue_browser_session(
+            funds, identity_assertion_ref="fixture-email-mfa").token
+        original_session = self.session
+        self.session = funds_session
+        try:
+            not_found = self.request("GET", "/api/approvals/does-not-exist")
+            not_readable = self.request("GET", f"/api/approvals/{product.id}")
+            self.assertEqual((404, 404), (not_found[0], not_readable[0]))
+            self.assertEqual(not_found[2], not_readable[2])
+        finally:
+            self.session = original_session
+
+        # A valid, current session without any approval-read capability is
+        # authenticated (not 401) but cannot enumerate the collection.
+        self.repo.connection.execute(
+            "UPDATE memberships SET roles_json='[]' WHERE tenant_id=? AND user_id=?",
+            (funds.tenant_id, funds.user_id))
+        self.repo.connection.commit()
+        self.session = funds_session
+        try:
+            self.assertEqual(403, self.request("GET", "/api/approvals")[0])
+            self.assertEqual(401, self.request(
+                "GET", "/api/approvals", cookie=False)[0])
+        finally:
+            self.session = original_session
 
     def test_browser_shell_contains_no_raw_identity_or_token_storage(self):
         self.assertNotIn("localStorage", INDEX_HTML)

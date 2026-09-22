@@ -4,7 +4,7 @@ from collections import defaultdict
 from copy import deepcopy
 from threading import RLock
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Iterable
 
 from .domain import (AgentStatusSnapshot, Approval, ApprovalConfirmationNonce, ApprovalState, AuditEvent, BrowserSession,
@@ -698,31 +698,6 @@ class InMemoryRepository(BudgetRepositoryMixin):
         event.lease_owner = worker_id
         event.lease_until = lease_until
         event.fencing_token += 1
-        return event
-
-    def claim_next_outbox(self, tenant_id: str, worker_id: str, now: datetime, lease_until: datetime) -> OutboxEvent | None:
-        blocked: set[str] = set()
-        for (tid, _), event in self.outbox.items():
-            if tid != tenant_id:
-                continue
-            ready = ((event.state in {OutboxState.PENDING, OutboxState.RETRY}
-                      and (event.available_at or event.created_at) <= now)
-                     or (event.state == OutboxState.LEASED and event.lease_until is not None and event.lease_until <= now))
-            if ready and event.aggregate_ref not in blocked:
-                return self.claim_outbox(tenant_id, event.id, worker_id, now, lease_until)
-            if event.state not in {OutboxState.COMPLETED, OutboxState.DEAD}:
-                blocked.add(event.aggregate_ref)
-        return None
-
-    def fail_outbox(self, tenant_id: str, event_id: str, worker_id: str, fencing_token: int, error: str, now: datetime, max_attempts: int = 5) -> OutboxEvent:
-        if max_attempts < 1:
-            raise ValueError("max_attempts must be positive")
-        event = self.claimed_outbox(tenant_id, event_id, worker_id, fencing_token, now)
-        event.state = OutboxState.DEAD if event.attempts >= max_attempts else OutboxState.RETRY
-        event.available_at = now if event.state == OutboxState.DEAD else now + timedelta(seconds=min(2 ** event.attempts, 300))
-        event.last_error = str(error)[:500]
-        event.lease_owner = None
-        event.lease_until = None
         return event
 
     def checkpoint_outbox(self, tenant_id: str, event_id: str, worker_id: str, fencing_token: int, checkpoint: dict, now: datetime, completed: bool = False) -> OutboxEvent:

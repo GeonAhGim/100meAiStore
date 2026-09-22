@@ -138,6 +138,21 @@ class D10ApprovalExpiryTests(unittest.TestCase):
         self.assertEqual(ApprovalState.EXPIRED,
                          repo.get_approval(context.tenant_id, approval.id).state)
 
+    def test_in_memory_expiry_cas_binds_the_approval_id(self):
+        repo = InMemoryRepository()
+        app = StoreControlPlane(repo, clock=lambda: self.now)
+        context = app.bootstrap_tenant("Memory CAS", "memory-cas@example.test")
+        command, approval = app.request_approval(
+            context, ApprovalKind.PRODUCT, "memory-cas", {}, "memory-cas", 1, 1)
+        self.now += timedelta(hours=24)
+
+        self.assertFalse(repo.mark_approval_expired(
+            context.tenant_id, "different-approval-id", command.id, self.now))
+        self.assertEqual(ApprovalState.PENDING,
+                         repo.get_approval(context.tenant_id, approval.id).state)
+        self.assertEqual(CommandState.AWAITING_APPROVAL,
+                         repo.get_command(context.tenant_id, command.id).state)
+
     def test_scheduler_neutral_worker_runs_one_tenant_batch(self):
         _, approval = self.due(self.context, "worker")
         self.now += timedelta(hours=24)
