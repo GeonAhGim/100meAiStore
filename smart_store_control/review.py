@@ -48,6 +48,7 @@ def _test_modules(paths: list[str]) -> list[str]:
 
 def run_gate(root: Path, patch_path: Path, task_id: int) -> tuple[bool, str]:
     """Apply the patch at HEAD in a scratch worktree and run the tests. Returns (passed, report)."""
+    patch_path = patch_path.resolve()  # git runs inside the scratch worktree; a relative path would miss
     apply_error = check_patch(root, patch_path)
     if apply_error:
         return False, "patch does not apply at HEAD:\n" + apply_error
@@ -74,7 +75,14 @@ def run_gate(root: Path, patch_path: Path, task_id: int) -> tuple[bool, str]:
                                      errors="replace", timeout=TEST_TIMEOUT)
             except subprocess.TimeoutExpired:
                 return False, f"{label}: timed out after {TEST_TIMEOUT}s"
-            summary = "\n".join(l for l in (run.stdout + run.stderr).splitlines() if l.startswith(("Ran ", "OK", "FAILED", "FAIL:", "ERROR:")))
+            lines = (run.stdout + run.stderr).splitlines()
+            # Some tests run nested unittest subprocesses whose own "Ran 1 test"
+            # and FAIL lines are expected noise; keep the outer summary (the last
+            # "Ran N tests" block) plus real FAIL/ERROR headers outside them.
+            last_ran = max((i for i, l in enumerate(lines) if l.startswith("Ran ")), default=-1)
+            outer = lines[last_ran:last_ran + 3] if last_ran >= 0 else []
+            failures = [l for l in lines if l.startswith(("FAIL:", "ERROR:")) and "tests.test_feature" not in l]
+            summary = "\n".join(failures[:20] + outer)
             report.append(f"{label}: rc={run.returncode}\n{summary[:1500]}")
             if run.returncode:
                 tail = (run.stdout + run.stderr)[-3000:]

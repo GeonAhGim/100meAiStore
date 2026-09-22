@@ -21,6 +21,7 @@ PROJECT_ROOT = CONTROL_DIR.parents[1]
 
 def land_patch(root: Path, task_id: int, patch_path: Path, title: str) -> tuple[str | None, str]:
     """Return (commit_sha, message). sha is None on failure."""
+    patch_path = patch_path.resolve()
     branch = f"control/task-{task_id}"
     scratch = root / "data" / "control" / "scratch" / f"land-{task_id}"
     git(["worktree", "remove", "--force", str(scratch)], root)
