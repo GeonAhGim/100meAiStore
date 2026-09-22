@@ -173,7 +173,12 @@ def claim(worker: str, role: str = "local-impl") -> dict[str, Any] | None:
         if not candidates:
             return None
         task = sorted(candidates, key=lambda t: (-int(t.get("priority", 0)), int(t["id"])))[0]
-        task.update({"status": "in_progress", "worker": worker, "phase": "claimed", "heartbeat_at": now(), "started_at": now(), "updated_at": now(), "last_error": None})
+        task.update({"status": "in_progress", "worker": worker, "phase": "claimed", "heartbeat_at": now(),
+                     "started_at": now(), "updated_at": now(), "last_error": None,
+                     # M0.4 evidence: the live AIOS slot and handoff state that justified this claim
+                     "claim_basis": {"lane": role, "engine": cap["engine"], "aios_available": cap["aios_available"],
+                                     "handoff_granted": cap["handoff_granted"], "operator_floor": cap["operator_floor"],
+                                     "effective": cap["effective"], "active_before": active}})
         _save(data)
         return task
 
