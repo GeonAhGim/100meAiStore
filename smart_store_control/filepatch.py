@@ -26,6 +26,13 @@ MAX_FILE_CHARS = 12000
 REWRITE_MIN_LINES = 40
 REWRITE_MAX_RATIO = 0.8
 _BLOCK = re.compile(r"<<<FILE\s+(.+?)>>>\s*\n(.*?)\n?<<<END>>>", re.DOTALL)
+# Small models often ignore the requested wrapper and answer with a fenced
+# code block preceded by the path, or a fence whose info string carries the
+# path ("```python path/to/file.py" or "```python:path/to/file.py").
+_FENCE = re.compile(
+    r"(?:^|\n)(?:#+\s*|\*\*|File:\s*|FILE:\s*|`)?(?P<lead>[\w./-]+\.[\w]+)`?\*{0,2}:?\s*\n```[\w+-]*[ :]*(?P<lead_path>[\w./-]*)\s*\n(?P<body>.*?)\n```",
+    re.DOTALL)
+_FENCE_INFO = re.compile(r"(?:^|\n)```[\w+-]*[ :]+(?P<path>[\w./-]+\.[\w]+)\s*\n(?P<body>.*?)\n```", re.DOTALL)
 _JSON = re.compile(r"\[[^\[\]]*\]", re.DOTALL)
 
 
@@ -50,10 +57,21 @@ def parse_plan(text: str, existing: set[str]) -> list[str]:
 def parse_files(text: str) -> dict[str, str]:
     """``<<<FILE path>>> ... <<<END>>>`` blocks to {path: content}."""
     out: dict[str, str] = {}
-    for match in _BLOCK.finditer(text or ""):
-        path = match.group(1).strip().replace("\\", "/").removeprefix("./")
-        if path and ".." not in path.split("/"):
-            out[path] = match.group(2).rstrip("\n") + "\n"
+    text = text or ""
+
+    def _add(raw_path: str, body: str) -> None:
+        path = raw_path.strip().replace("\\", "/").removeprefix("./")
+        if path and "/" in path and ".." not in path.split("/") and path not in out:
+            out[path] = body.rstrip("\n") + "\n"
+
+    for match in _BLOCK.finditer(text):
+        _add(match.group(1), match.group(2))
+    if out:
+        return out
+    for match in _FENCE_INFO.finditer(text):          # ```python path/to/file.py
+        _add(match.group("path"), match.group("body"))
+    for match in _FENCE.finditer(text):               # path line, then a fence
+        _add(match.group("lead_path") or match.group("lead"), match.group("body"))
     return out
 
 

@@ -37,6 +37,20 @@ class FilePatchTests(unittest.TestCase):
         self.assertEqual({"pkg/mod.py": "A = 1\nB = 3\n", "tests/test_new.py": "import unittest\n"}, files)
         self.assertEqual({}, parse_files("<<<FILE ../x>>>\nbad\n<<<END>>>"))
 
+    def test_fenced_styles_small_models_actually_emit_are_accepted(self):
+        info = "Here you go:\n```python packages/x/mod.py\nA = 1\n```\n"
+        self.assertEqual({"packages/x/mod.py": "A = 1\n"}, parse_files(info))
+        colon = "```python:packages/x/mod.py\nA = 2\n```"
+        self.assertEqual({"packages/x/mod.py": "A = 2\n"}, parse_files(colon))
+        heading = "### packages/x/mod.py\n```python\nA = 3\n```\n\n**tests/test_x.py**\n```python\nimport unittest\n```"
+        self.assertEqual({"packages/x/mod.py": "A = 3\n", "tests/test_x.py": "import unittest\n"}, parse_files(heading))
+        file_line = "File: tests/test_y.py\n```\nY = 1\n```"
+        self.assertEqual({"tests/test_y.py": "Y = 1\n"}, parse_files(file_line))
+        # the explicit wrapper wins when present, and a bare fence with no path is ignored
+        both = "<<<FILE pkg/a.py>>>\nA = 9\n<<<END>>>\n```python\nignored = True\n```"
+        self.assertEqual({"pkg/a.py": "A = 9\n"}, parse_files(both))
+        self.assertEqual({}, parse_files("```python\nno_path = True\n```"))
+
     def test_git_builds_an_applicable_patch_and_rejects_out_of_plan_or_rewrites(self):
         out = self.root / "data" / "control" / "artifacts" / "task-1.patch"
         files = {"pkg/mod.py": "A = 1\nB = 3\n", "tests/test_mod.py": "def test_b():\n    assert True\n"}

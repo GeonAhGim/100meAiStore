@@ -46,14 +46,18 @@ def run_once(worker: str, apply_patch: bool = False) -> dict:
         # Two short calls: plan the files, then return whole files. git makes
         # the diff, so it always applies (see filepatch.py for why).
         tree = file_tree(PROJECT_ROOT)
-        planned = parse_plan(complete(plan_prompt(task["prompt"], tree, feedback), endpoint=endpoint,
-                                      model="qwen3.6-35b-a3b"), set(tree))
+        plan_text = complete(plan_prompt(task["prompt"], tree, feedback), endpoint=endpoint, model="qwen3.6-35b-a3b")
+        # Raw model output is kept next to the patch so a format failure can be
+        # diagnosed from evidence instead of guessed at.
+        artifact.with_suffix(".plan.txt").write_text(plan_text, encoding="utf-8")
+        planned = parse_plan(plan_text, set(tree))
         if not planned:
             stop.set()
             return finish(task["id"], "blocked", note="plan named no existing file from the repository list")
         contents = {p: (PROJECT_ROOT / p).read_text(encoding="utf-8", errors="replace") for p in planned}
         touch(task["id"], worker, "llm_request")
         response = complete(write_prompt(task["prompt"], contents, feedback), endpoint=endpoint, model="qwen3.6-35b-a3b")
+        artifact.with_suffix(".response.txt").write_text(response, encoding="utf-8")
         build_error = build_patch(PROJECT_ROOT, parse_files(response), planned, artifact)
         if build_error:
             stop.set()
