@@ -29,6 +29,12 @@ when it returns `None`.
 - `codex exec` is bounded by `workers.lease_seconds - 5` so a hung process
   cannot outlive its lease and be executed twice.
 
+## Autonomous dev tasks
+
+`dev.task` jobs run the spec/implement/verify/publish pipeline described in
+[`dev-pipeline.md`](dev-pipeline.md) on the legacy queue. It is a development
+tool, not business execution.
+
 ## Migration intent
 
 When Phase 3 adds a production API and worker entry point, the legacy queue
