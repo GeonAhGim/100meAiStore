@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 
 
 def complete(prompt: str, *, endpoint: str = "http://127.0.0.1:8081", model: str = "local", timeout: int = 900,
-             max_tokens: int = 6000) -> str:
+             max_tokens: int = 6000, system: str | None = None) -> str:
     """Chat completion against the local llama.cpp server with a hard deadline.
 
     ``timeout`` is a total deadline for the whole call, not a per-recv socket
@@ -26,9 +26,9 @@ def complete(prompt: str, *, endpoint: str = "http://127.0.0.1:8081", model: str
     900s default: a 35B model sharing llama.cpp with AIOS needs minutes for a
     full file; the old 120s produced TimeoutError on every real task.
     """
+    messages = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": prompt}]
     payload = json.dumps(
-        {"model": model, "messages": [{"role": "user", "content": prompt}], "stream": False,
-         "max_tokens": max_tokens, "temperature": 0.2}
+        {"model": model, "messages": messages, "stream": False, "max_tokens": max_tokens, "temperature": 0.2}
     ).encode("utf-8")
     parsed = urlsplit(endpoint)
     if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost"}:

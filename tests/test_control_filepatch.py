@@ -56,6 +56,14 @@ class FilePatchTests(unittest.TestCase):
         self.assertEqual({"pkg/a.py": "A = 9\n"}, parse_files(both))
         self.assertEqual({}, parse_files("```python\nno_path = True\n```"))
 
+    def test_refusals_are_recognised_but_code_answers_are_not(self):
+        from smart_store_control.filepatch import looks_like_refusal
+        self.assertTrue(looks_like_refusal("I cannot implement the requested changes. The design requires..."))
+        self.assertTrue(looks_like_refusal("I'm unable to help with financial transaction code."))
+        self.assertFalse(looks_like_refusal("<<<FILE pkg/a.py>>>\n# I cannot see why this fails\n<<<END>>>"))
+        self.assertFalse(looks_like_refusal("```python pkg/a.py\nraise RuntimeError('I cannot proceed')\n```"))
+        self.assertFalse(looks_like_refusal(""))
+
     def test_git_builds_an_applicable_patch_and_rejects_out_of_plan_or_rewrites(self):
         out = self.root / "data" / "control" / "artifacts" / "task-1.patch"
         files = {"pkg/mod.py": "A = 1\nB = 3\n", "tests/test_mod.py": "def test_b():\n    assert True\n"}

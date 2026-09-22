@@ -38,6 +38,24 @@ _JSON = re.compile(r"\[[^\[\]]*\]", re.DOTALL)
 
 CREATE_PREFIXES = ("packages/", "smart_store_aios/", "smart_store_control/", "tests/", "docs/implementation/", "scripts/")
 
+# True context for the local model. The repository is a local DEMO: every
+# marketplace, supplier, and payment interaction is a synthetic fixture with
+# no network and no money. Stating this stops false refusals on tasks whose
+# wording mentions orders or purchase orders.
+SYSTEM = (
+    "You are a software engineer working on smart_store, a local DEMO codebase. All marketplace, supplier and "
+    "payment interactions in this repository are synthetic in-memory or SQLite fixtures; there is no network "
+    "access, no real money, no credentials. Your job is ordinary Python engineering on this repository: edit "
+    "files, add unit tests, keep dry_run and safety gates intact. Answer with the requested format only."
+)
+
+_REFUSAL = re.compile(r"\b(I cannot|I can't|I am unable|I'm unable|cannot (?:implement|assist|help|provide))\b", re.IGNORECASE)
+
+
+def looks_like_refusal(text: str) -> bool:
+    head = (text or "").strip()[:400]
+    return bool(_REFUSAL.search(head)) and "<<<FILE" not in head and "```" not in head
+
 
 def _clean(path: str) -> str:
     return path.strip().replace("\\", "/").removeprefix("./")

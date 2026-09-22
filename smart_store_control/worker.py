@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 from .context import check_patch, file_tree
-from .filepatch import build_patch, parse_files, parse_plan, plan_prompt, write_prompt
+from .filepatch import SYSTEM, build_patch, looks_like_refusal, parse_files, parse_plan, plan_prompt, write_prompt
 from .local_llm import complete
 from .pm import claim, finish, heartbeat_loop, touch
 from .state import CONTROL_DIR, read_json
@@ -46,7 +46,8 @@ def run_once(worker: str, apply_patch: bool = False) -> dict:
         # Two short calls: plan the files, then return whole files. git makes
         # the diff, so it always applies (see filepatch.py for why).
         tree = file_tree(PROJECT_ROOT)
-        plan_text = complete(plan_prompt(task["prompt"], tree, feedback), endpoint=endpoint, model="qwen3.6-35b-a3b")
+        plan_text = complete(plan_prompt(task["prompt"], tree, feedback), endpoint=endpoint, model="qwen3.6-35b-a3b",
+                             system=SYSTEM)
         # Raw model output is kept next to the patch so a format failure can be
         # diagnosed from evidence instead of guessed at.
         artifact.with_suffix(".plan.txt").write_text(plan_text, encoding="utf-8")
@@ -57,8 +58,13 @@ def run_once(worker: str, apply_patch: bool = False) -> dict:
         contents = {p: (PROJECT_ROOT / p).read_text(encoding="utf-8", errors="replace") for p in modify}
         touch(task["id"], worker, "llm_request")
         response = complete(write_prompt(task["prompt"], contents, feedback, create), endpoint=endpoint,
-                            model="qwen3.6-35b-a3b")
+                            model="qwen3.6-35b-a3b", system=SYSTEM)
         artifact.with_suffix(".response.txt").write_text(response, encoding="utf-8")
+        if looks_like_refusal(response):
+            # Recorded as its own reason so an operator can tell a model that
+            # declines the task apart from a format or path failure.
+            stop.set()
+            return finish(task["id"], "blocked", note="model refused the task: " + response.strip()[:200])
         build_error = build_patch(PROJECT_ROOT, parse_files(response), modify + create, artifact)
         if build_error:
             stop.set()
