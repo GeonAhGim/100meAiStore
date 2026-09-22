@@ -71,6 +71,19 @@ class ReviewGateTests(unittest.TestCase):
             self.assertEqual("needs_decision", pm.finish_review(5, "needs_decision")["status"])
             self.assertEqual("blocked", pm.finish_review(5, "fail")["status"])
 
+    def test_stale_reviewed_patch_goes_back_to_ready_and_leaves_no_branch(self):
+        patch = self._patch("task-8.patch", GOOD_PATCH)
+        (self.root / "pkg" / "mod.py").write_text("A = 100\n", encoding="utf-8")   # HEAD moved under the patch
+        subprocess.run(["git", "-C", str(self.root), "commit", "-q", "-am", "moved"], check=True, capture_output=True)
+        tasks = self.root / "data" / "control" / "tasks.json"
+        tasks.write_text(json.dumps({"tasks": [{"id": 8, "status": "reviewed", "title": "stale", "artifact": str(patch)}]}), encoding="utf-8")
+        with mock.patch.object(pm, "TASKS_PATH", tasks):
+            changed = land.land_reviewed(self.root)
+        self.assertEqual("ready", changed[0]["status"])
+        self.assertEqual("rebase_needed", changed[0]["phase"])
+        branches = subprocess.run(["git", "-C", str(self.root), "branch", "--list", "control/*"], capture_output=True, text=True).stdout
+        self.assertEqual("", branches.strip())
+
     def test_reviewed_patch_lands_on_a_task_branch_and_marks_done(self):
         patch = self._patch("task-9.patch", GOOD_PATCH)
         tasks = self.root / "data" / "control" / "tasks.json"

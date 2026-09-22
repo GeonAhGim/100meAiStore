@@ -34,7 +34,9 @@ def land_patch(root: Path, task_id: int, patch_path: Path, title: str) -> tuple[
     try:
         applied = git(["apply", "--index", str(patch_path)], scratch)
         if applied.returncode:
-            return None, "patch failed to apply: " + (applied.stderr or applied.stdout).strip()[:500]
+            git(["worktree", "remove", "--force", str(scratch)], root)
+            git(["branch", "-D", branch], root)  # leave no empty branch behind
+            return None, "base moved: " + (applied.stderr or applied.stdout).strip()[:500]
         committed = git(["-c", "user.name=smart_store-control", "-c", "user.email=control@smart-store.local",
                          "commit", "-q", "-m", f"control(task-{task_id}): {title}",
                          "-m", "Landed by smart_store_control after objective gate and review."], scratch)
@@ -64,6 +66,13 @@ def land_reviewed(root: Path = PROJECT_ROOT, limit: int = 2) -> list[dict]:
             if sha:
                 task.update({"status": "done", "phase": "landed", "commit": sha, "branch": f"control/task-{task['id']}",
                              "note": message, "updated_at": now()})
+            elif message.startswith("base moved"):
+                # HEAD advanced since the patch was made (a reviewed patch is not
+                # wrong, just stale): send it back for rework on the current HEAD
+                # without spending a retry.
+                task.update({"status": "ready", "worker": "", "reviewer": "", "phase": "rebase_needed",
+                             "last_error": "reviewed patch no longer applies to HEAD; re-implement on the current code",
+                             "note": "landing: " + message[:200], "updated_at": now()})
             else:
                 task.update({"status": "blocked", "phase": "error", "note": "landing failed: " + message, "updated_at": now()})
             changed.append(dict(task))
