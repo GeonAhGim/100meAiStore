@@ -60,7 +60,9 @@ def run_once(worker: str, apply_patch: bool = False) -> dict:
                 stop.set()
                 reason = summary.get("result") or summary.get("stderr") or "agent produced no change"
                 return finish(task["id"], "blocked", note="agent produced no change: " + str(reason)[:220])
-            artifact.write_text(diff, encoding="utf-8")
+            # Bytes, not text: Path.write_text would turn the diff's LF into
+            # CRLF on Windows and git apply would then reject every hunk.
+            artifact.write_bytes(diff.encode("utf-8"))
             rewrite = rewrite_violation(PROJECT_ROOT, artifact)
             if rewrite:
                 stop.set()

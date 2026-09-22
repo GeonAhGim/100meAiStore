@@ -13,14 +13,16 @@ attempt and the retry cap sealed the task. Two fixes:
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 
 TREE_PREFIXES = ("packages/", "smart_store_aios/", "smart_store_control/", "tests/", "scripts/", "docs/implementation/")
 
 
-def git(args: list[str], cwd: Path, *, timeout: int = 120) -> subprocess.CompletedProcess:
+def git(args: list[str], cwd: Path, *, timeout: int = 120, env: dict | None = None) -> subprocess.CompletedProcess:
     """Run git with UTF-8 output decoding.
 
     ``text=True`` alone decodes with the console codepage (cp949 here), which
@@ -28,7 +30,7 @@ def git(args: list[str], cwd: Path, *, timeout: int = 120) -> subprocess.Complet
     a finished agent run. Never let git output go through the locale codec.
     """
     return subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True, encoding="utf-8",
-                          errors="replace", check=False, timeout=timeout)
+                          errors="replace", check=False, timeout=timeout, env=env)
 
 
 MAX_TREE_LINES = 400
@@ -98,7 +100,15 @@ def check_patch(root: Path, patch_path: Path) -> str | None:
     """Return None when the patch applies cleanly, else the git error text."""
     if patch_path.stat().st_size < 20:
         return "patch is empty"
-    completed = git(["apply", "--check", str(patch_path)], root)
+    # Check against HEAD content through a temporary index, so neither the
+    # working tree (CRLF on this Windows checkout, while a git-produced diff
+    # has LF context) nor the live index state can fail a good diff.
+    with tempfile.TemporaryDirectory() as scratch:
+        env = {**os.environ, "GIT_INDEX_FILE": str(Path(scratch) / "index")}
+        read = git(["read-tree", "HEAD"], root, env=env)
+        if read.returncode:
+            return "cannot read HEAD tree: " + (read.stderr or read.stdout).strip()[:300]
+        completed = git(["apply", "--check", "--cached", str(patch_path)], root, env=env)
     if completed.returncode == 0:
         return None
     return (completed.stderr or completed.stdout).strip()[:1500] or "git apply --check failed"

@@ -158,7 +158,7 @@ def build_patch(root: Path, files: dict[str, str], planned: list[str], out_path:
         if not diff.stdout.strip():
             return "response reproduced the existing files unchanged"
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(diff.stdout, encoding="utf-8")
+        out_path.write_bytes(diff.stdout.encode("utf-8"))  # never text mode: CRLF would corrupt the diff
         return None
     finally:
         git(["worktree", "remove", "--force", str(scratch)], root)

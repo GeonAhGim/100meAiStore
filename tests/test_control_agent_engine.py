@@ -63,7 +63,7 @@ class AgentEngineTests(unittest.TestCase):
         self.assertEqual("A = 1\n", (self.root / "pkg" / "mod.py").read_text(encoding="utf-8"))  # main checkout untouched
         patch = self.root / "data" / "control" / "artifacts" / "task-7.patch"
         patch.parent.mkdir(parents=True, exist_ok=True)
-        patch.write_text(diff, encoding="utf-8")
+        patch.write_bytes((diff).encode("utf-8"))
         self.assertIsNone(check_patch(self.root, patch))
         self.assertIsNone(rewrite_violation(self.root, patch))
         self.assertTrue((self.root / "data" / "control" / "artifacts" / "task-7.agent.json").exists())

@@ -38,19 +38,26 @@ class ControlWorkerContextTests(unittest.TestCase):
         self.assertIn("No such file", text)
         self.assertIn("git apply --check", text)
 
+    def test_check_patch_ignores_crlf_working_tree_files(self):
+        # Simulate the Windows checkout: the working file has CRLF while the
+        # index (and any git-produced diff) has LF.
+        target = self.root / "smart_store_control" / "pm.py"
+        target.write_bytes(b"VALUE = 1\r\n")
+        good = self.root / "good.patch"
+        good.write_bytes(("--- a/smart_store_control/pm.py\n+++ b/smart_store_control/pm.py\n@@ -1,1 +1,2 @@\n VALUE = 1\n+OTHER = 2\n").encode("utf-8"))
+        self.assertIsNone(check_patch(self.root, good))
+
     def test_check_patch_rejects_invented_paths_and_accepts_real_ones(self):
         bad = self.root / "bad.patch"
-        bad.write_text("--- a/smart_store/worker.py\n+++ b/smart_store/worker.py\n@@ -1,1 +1,2 @@\n import x\n+import y\n",
-                       encoding="utf-8")
+        bad.write_bytes(("--- a/smart_store/worker.py\n+++ b/smart_store/worker.py\n@@ -1,1 +1,2 @@\n import x\n+import y\n").encode("utf-8"))
         error = check_patch(self.root, bad)
         self.assertIsNotNone(error)
         self.assertIn("smart_store/worker.py", error)
         good = self.root / "good.patch"
-        good.write_text("--- a/smart_store_control/pm.py\n+++ b/smart_store_control/pm.py\n@@ -1,1 +1,2 @@\n VALUE = 1\n+OTHER = 2\n",
-                        encoding="utf-8")
+        good.write_bytes(("--- a/smart_store_control/pm.py\n+++ b/smart_store_control/pm.py\n@@ -1,1 +1,2 @@\n VALUE = 1\n+OTHER = 2\n").encode("utf-8"))
         self.assertIsNone(check_patch(self.root, good))
         empty = self.root / "empty.patch"
-        empty.write_text("\n", encoding="utf-8")
+        empty.write_bytes(("\n").encode("utf-8"))
         self.assertEqual("patch is empty", check_patch(self.root, empty))
 
 
