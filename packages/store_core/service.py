@@ -199,6 +199,10 @@ class StoreControlPlane:
         from .order02 import reconcile_demo_po
         return reconcile_demo_po(self, context, po_id, response)
 
+    def regenerate_demo_po(self, context: TenantContext, po_id: str, reason: str, expected_po_version: int) -> Any:
+        from .order02 import regenerate_demo_po
+        return regenerate_demo_po(self, context, po_id, reason, expected_po_version)
+
     def request_demo_cancel(self, context: TenantContext, order_id: str, reason: str,
                             expected_order_version: int) -> tuple[Any, bool]:
         from .order03 import request_demo_cancel
@@ -345,6 +349,16 @@ class StoreControlPlane:
     def demo_readiness(self, **kwargs: Any) -> dict[str, Any]:
         from .readiness import evaluate_demo_readiness
         return evaluate_demo_readiness(self.repo, **kwargs)
+
+    def request_demo_offer_approval(self, context: TenantContext, offer_id: str, idempotency_key: str,
+                                    max_age_seconds: int = 86400) -> tuple[Any, Any]:
+        from .catalog import request_demo_offer_approval
+        return request_demo_offer_approval(self, context, offer_id, idempotency_key, max_age_seconds)
+
+    def verify_approved_demo_offer(self, context: TenantContext, offer_id: str, command_id: str,
+                                   max_age_seconds: int = 86400) -> dict[str, Any]:
+        from .catalog import verify_approved_demo_offer
+        return verify_approved_demo_offer(self, context, offer_id, command_id, max_age_seconds)
 
     def record_demo_inventory(self, context: TenantContext, sku: str, supplier_id: str,
                               quantity: int, observed_at: datetime | None = None) -> Any:

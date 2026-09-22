@@ -1027,8 +1027,8 @@ class SQLiteRepository(BudgetRepositoryMixin):
 
     def update_purchase_order(self, value: SupplierPurchaseOrder, expected_version: int) -> None:
         if value.version != expected_version + 1: raise ConflictError('purchase order version conflict')
-        changed = self.connection.execute("UPDATE supplier_purchase_orders SET status=?,version=?,provider_reference=?,last_response_digest=?,last_observed_at=? WHERE tenant_id=? AND id=? AND version=?",
-            (value.status.value, value.version, value.provider_reference, value.last_response_digest,
+        changed = self.connection.execute("UPDATE supplier_purchase_orders SET status=?,version=?,approval_command_id=?,provider_reference=?,last_response_digest=?,last_observed_at=? WHERE tenant_id=? AND id=? AND version=?",
+            (value.status.value, value.version, value.approval_command_id, value.provider_reference, value.last_response_digest,
              value.last_observed_at.isoformat() if value.last_observed_at else None,
              value.tenant_id, value.id, expected_version)).rowcount
         if changed != 1: raise ConflictError('purchase order version conflict')
