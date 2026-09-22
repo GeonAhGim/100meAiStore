@@ -205,7 +205,7 @@ ACTIVE_STATES = {"in_progress", "reviewing"}
 HEARTBEAT_SECONDS = 15
 
 
-OPERATOR_ACTIONS = ("retry", "approve", "reject", "rereview", "park")
+OPERATOR_ACTIONS = ("retry", "approve", "reject", "rereview", "park", "supersede")
 MAX_INSTRUCTION_CHARS = 4000
 
 
@@ -295,6 +295,11 @@ def operator_action(task_id: int, action: str, reason: str = "") -> dict[str, An
             elif action == "park":
                 task.update({"status": "planned", "worker": "", "reviewer": "", "phase": "parked",
                              "note": f"{who} parked", "updated_at": stamp})
+            elif action == "supersede":
+                # Terminal without counting as delivered work: an exact duplicate of
+                # another task, or work that landed elsewhere. Never re-queued.
+                task.update({"status": "superseded", "worker": "", "reviewer": "", "phase": "superseded",
+                             "note": f"{who} superseded", "updated_at": stamp})
             _save(data)
             return dict(task)
     raise KeyError(f"unknown task {task_id}")
@@ -431,7 +436,10 @@ def ensure_workflow_tasks(limit: int = 2) -> list[dict[str, Any]]:
             break
         milestone_id = str(item.get("id"))
         history = existing.get(milestone_id, [])
-        if any(task.get("status") in {"ready", "in_progress", "reviewing", "needs_review", "reviewed", "done", "blocked"} for task in history):
+        # Any prior task for the milestone, in whatever state, means it was already
+        # generated; parked or superseded duplicates must not spawn a third copy.
+        if any(task.get("status") in {"ready", "in_progress", "reviewing", "needs_review", "reviewed", "done", "blocked",
+                                      "planned", "superseded", "needs_decision", "escalated"} for task in history):
             continue
         dependencies = [milestone_state.get(str(dep)) for dep in item.get("depends_on", [])]
         if any(dep is None or dep.get("status") != "done" for dep in dependencies):

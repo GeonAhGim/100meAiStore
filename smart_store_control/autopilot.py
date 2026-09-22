@@ -57,8 +57,12 @@ def tick() -> dict:
         reopened = requeue_blocked(limit=2)
         if reopened:
             pm = pm_status()
-    if not any(task.get("status") in {"ready", "needs_review", "in_progress", "reviewing"} for task in pm["tasks"]):
-        queued = ensure_workflow_tasks(limit=2)
+    # Keep enough ready work for every lane: top up when the ready queue is
+    # shorter than the summed lane capacity, not only when it is empty.
+    lane_capacity = sum(int(lane.get("effective", 0)) for lane in pm.get("lanes", [])) or int(pm.get("capacity", {}).get("effective", 0))
+    ready_count = sum(1 for task in pm["tasks"] if task.get("status") == "ready")
+    if ready_count < max(1, lane_capacity):
+        queued = ensure_workflow_tasks(limit=max(1, lane_capacity - ready_count))
         if queued:
             pm = pm_status()
     recovery = recovery_status()

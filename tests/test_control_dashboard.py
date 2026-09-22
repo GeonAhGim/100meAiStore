@@ -47,6 +47,8 @@ class ControlDashboardTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             pm.operator_action(4, "approve")                          # approve only from needs_decision
         self.assertEqual("planned", pm.operator_action(5, "park")["status"])
+        self.assertEqual("superseded", pm.operator_action(5, "supersede", "duplicate of 4")["status"])
+        self.assertIn("duplicate of 4", self._status(5)["note"])
         with self.assertRaises(ValueError):
             pm.operator_action(5, "explode")
 
