@@ -9,9 +9,12 @@ import threading
 import time
 from pathlib import Path
 
+from .context import check_patch, repository_context
 from .local_llm import complete
 from .pm import finish, claim, touch
 from .state import CONTROL_DIR, read_json
+
+PROJECT_ROOT = CONTROL_DIR.parents[1]
 
 
 def extract_patch(text: str) -> str:
@@ -24,10 +27,19 @@ def run_once(worker: str, apply_patch: bool = False) -> dict:
     if not task:
         return {"status": "idle", "reason": "no effective slot or ready task"}
     endpoint = read_json(CONTROL_DIR / "runtime.json", {}).get("local_llm", {}).get("endpoint", "http://127.0.0.1:8081")
+    # Feed back the concrete reason the previous attempt was rejected (apply error
+    # or review verdict) so a retry is not a blind repeat.
+    feedback = None
+    if int(task.get("retry_count", 0)) > 0:
+        feedback = task.get("last_error") or task.get("note")
+        review = task.get("review_artifact")
+        if review and Path(str(review)).is_file():
+            feedback = (feedback or "") + "\n" + Path(str(review)).read_text(encoding="utf-8", errors="replace")[:1500]
     prompt = (
         "You are the smart_store local implementation worker. Work only in the smart_store project. "
         "Do not use Codex, do not modify any other project, preserve dry_run and safety gates. "
         + task["prompt"]
+        + repository_context(PROJECT_ROOT, task["prompt"], feedback)
     )
     try:
         stop = threading.Event()
@@ -40,7 +52,15 @@ def run_once(worker: str, apply_patch: bool = False) -> dict:
         artifact = CONTROL_DIR / "artifacts" / f"task-{task['id']}.patch"
         artifact.parent.mkdir(parents=True, exist_ok=True)
         artifact.write_text(extract_patch(response), encoding="utf-8")
-        
+
+        # A diff that cannot apply must not reach review: it would burn a
+        # review round and a retry on an invented path. Block it with the git
+        # error so the next attempt sees exactly what to fix.
+        apply_error = check_patch(PROJECT_ROOT, artifact)
+        if apply_error:
+            stop.set()
+            return finish(task["id"], "blocked", str(artifact), f"patch does not apply: {apply_error}")
+
         status_name = "needs_review"
         note = "local LLM patch generated; apply only after review"
         
