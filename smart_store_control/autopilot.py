@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from datetime import datetime, timezone
 
@@ -91,8 +92,8 @@ def _loop() -> None:
     while not _STOP.wait(int(status().get("poll_seconds", 20))):
         try:
             tick()
-        except Exception:
-            continue
+        except Exception as exc:  # noqa: BLE001 - the loop must survive, but never silently
+            logging.getLogger(__name__).warning("autopilot tick failed: %s: %s", type(exc).__name__, exc)
 
 
 def start() -> dict:
