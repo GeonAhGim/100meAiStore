@@ -30,9 +30,11 @@ class ControlTriageTests(unittest.TestCase):
         ]}), encoding="utf-8")
         self.p1 = mock.patch.object(pm, "TASKS_PATH", self.tasks); self.p1.start()
         self.p2 = mock.patch.object(triage, "TRIAGE_PATH", self.state); self.p2.start()
+        # no Codex in this test: the ladder's last rung is Claude Code
+        self.p3 = mock.patch.object(triage, "hand_to_codex", lambda task: None); self.p3.start()
 
     def tearDown(self):
-        self.p1.stop(); self.p2.stop(); self.tmp.cleanup()
+        self.p1.stop(); self.p2.stop(); self.p3.stop(); self.tmp.cleanup()
 
     def _rows(self):
         return {t["id"]: t for t in json.loads(self.tasks.read_text(encoding="utf-8"))["tasks"]}
@@ -50,14 +52,14 @@ class ControlTriageTests(unittest.TestCase):
         self.assertEqual("ready", rows[1]["status"])                       # transient
         self.assertEqual(("ready", "rebase_needed"), (rows[2]["status"], rows[2]["phase"]))
         self.assertEqual("ready", rows[3]["status"])                       # refusal from the retired engine
-        self.assertEqual(("blocked", "needs_operator"), (rows[4]["status"], rows[4]["phase"]))
+        self.assertEqual(("blocked", "needs_claude"), (rows[4]["status"], rows[4]["phase"]))
         self.assertEqual("blocked", rows[5]["status"])                     # left to the normal bounded retry
         self.assertEqual(("needs_decision", "needs_operator"), (rows[6]["status"], rows[6]["phase"]))
         self.assertEqual("in_progress", rows[7]["status"])                 # running tasks untouched
         self.assertEqual(1, rows[1]["retry_count"])                        # no retry cost
         self.assertIn("gate failed", rows[4]["note"])
         kinds = {(a["task"], a["action"]) for a in result["actions"]}
-        self.assertEqual({(1, "requeued"), (2, "requeued"), (3, "requeued"), (4, "escalated"), (6, "escalated")}, kinds)
+        self.assertEqual({(1, "requeued"), (2, "requeued"), (3, "requeued"), (4, "claude"), (6, "escalated")}, kinds)
         self.assertEqual(1, len(triage.status()["recent"]))
 
     def test_throttled_to_the_interval_unless_forced(self):

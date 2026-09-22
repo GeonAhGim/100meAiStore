@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .escalation import codex_outcome, hand_to_codex
 from .pm import _CLAIM_LOCK, _load, _save, now
 from .state import CONTROL_DIR, read_json, write_json
 
@@ -68,6 +69,7 @@ def run_triage(force: bool = False) -> dict[str, Any]:
         if age < INTERVAL_SECONDS:
             return {"skipped": True, "next_in_seconds": int(INTERVAL_SECONDS - age)}
     actions: list[dict[str, Any]] = []
+    dirty = False
     with _CLAIM_LOCK:
         data = _load()
         for task in data.get("tasks", []):
@@ -80,9 +82,31 @@ def run_triage(force: bool = False) -> dict[str, Any]:
                                  "last_error": task.get("note"), "note": f"triage: {cause}, requeued without retry cost",
                                  "updated_at": now()})
                     actions.append({"task": task["id"], "cause": cause, "action": "requeued"})
-                elif cause == "retries_exhausted" and task.get("phase") != "needs_operator":
-                    task.update({"phase": "needs_operator", "updated_at": now()})
-                    actions.append({"task": task["id"], "cause": cause, "action": "escalated"})
+                elif cause == "retries_exhausted" and task.get("phase") not in ("needs_operator", "needs_claude"):
+                    # Ladder: local pool spent -> Codex pipeline; no Codex -> Claude Code.
+                    record = hand_to_codex(task)
+                    if record:
+                        task.update({"status": "escalated", "phase": "codex", "escalation": record,
+                                     "note": f"local pool exhausted; handed to Codex job {record['job_id']}", "updated_at": now()})
+                        actions.append({"task": task["id"], "cause": cause, "action": "codex"})
+                    else:
+                        task.update({"phase": "needs_claude", "updated_at": now()})
+                        actions.append({"task": task["id"], "cause": cause, "action": "claude"})
+            elif status == "escalated":
+                record = task.get("escalation") or {}
+                outcome, details = codex_outcome(record) if record.get("engine") == "codex" else ("dead", {"reason": "no record"})
+                if outcome == "done":
+                    task.update({"status": "done", "phase": "landed", "commit": details.get("commit"), "branch": details.get("branch"),
+                                 "note": f"Codex pipeline landed {details.get('branch')} at {details.get('commit')}", "updated_at": now()})
+                    actions.append({"task": task["id"], "cause": "codex_done", "action": "done"})
+                elif outcome in ("dead", "timeout"):
+                    task.update({"status": "blocked", "phase": "needs_claude",
+                                 "last_error": f"codex: {details.get('reason')}", "note": "Codex could not finish; Claude Code to act",
+                                 "updated_at": now()})
+                    actions.append({"task": task["id"], "cause": f"codex_{outcome}", "action": "claude"})
+                else:
+                    task["escalation"] = {**record, "codex": details}
+                    dirty = True
             elif status == "needs_decision":
                 try:
                     waited = datetime.now(timezone.utc).timestamp() - datetime.fromisoformat(
@@ -92,7 +116,7 @@ def run_triage(force: bool = False) -> dict[str, Any]:
                 if waited > DECISION_STALE_SECONDS and task.get("phase") != "needs_operator":
                     task.update({"phase": "needs_operator", "updated_at": now()})
                     actions.append({"task": task["id"], "cause": "decision_pending", "action": "escalated"})
-        if actions:
+        if actions or dirty:
             _save(data)
     stamp = now()
     log = (state.get("log") or [])[-49:]
