@@ -17,7 +17,7 @@ store-aios-dev-dashboard = "smart_store_aios.dev_dashboard:main"
 testpaths = ["tests"]
 
 [tool.setuptools.packages.find]
-include = ["packages*", "smart_store_aios*"]
+include = ["packages*", "smart_store_aios*", "smart_store_control*"]
 exclude = ["data*", "docs*", "tests*"]
 
 [tool.setuptools.package-data]
