@@ -9,7 +9,8 @@ import threading
 import time
 from pathlib import Path
 
-from .context import check_patch, file_tree
+from .agent_engine import run_agent
+from .context import check_patch, file_tree, rewrite_violation
 from .filepatch import SYSTEM, build_patch, looks_like_refusal, parse_files, parse_plan, plan_prompt, write_prompt
 from .local_llm import complete
 from .pm import claim, finish, heartbeat_loop, touch
@@ -42,6 +43,33 @@ def run_once(worker: str, apply_patch: bool = False) -> dict:
         touch(task["id"], worker, "llm_request")
         artifact = CONTROL_DIR / "artifacts" / f"task-{task['id']}.patch"
         artifact.parent.mkdir(parents=True, exist_ok=True)
+        llm = read_json(CONTROL_DIR / "runtime.json", {}).get("local_llm", {})
+        engine = str(llm.get("engine", "claude-local"))
+        model = str(llm.get("model", "qwen3.6-35b-a3b"))
+
+        if engine == "claude-local":
+            # AIOS lane: the CLI edits real files with tools in a throwaway
+            # worktree; we keep only its diff. See agent_engine.py.
+            diff, summary = run_agent(PROJECT_ROOT, task, model=model, base_url=endpoint,
+                                      max_turns=int(llm.get("max_turns", 45)),
+                                      wall_seconds=int(llm.get("wall_seconds", 1500)),
+                                      artifact_dir=artifact.parent)
+            if not diff.strip():
+                stop.set()
+                reason = summary.get("result") or summary.get("stderr") or "agent produced no change"
+                return finish(task["id"], "blocked", note="agent produced no change: " + str(reason)[:220])
+            artifact.write_text(diff, encoding="utf-8")
+            rewrite = rewrite_violation(PROJECT_ROOT, artifact)
+            if rewrite:
+                stop.set()
+                return finish(task["id"], "blocked", str(artifact), rewrite)
+            apply_error = check_patch(PROJECT_ROOT, artifact)
+            if apply_error:
+                stop.set()
+                return finish(task["id"], "blocked", str(artifact), f"patch does not apply: {apply_error}")
+            stop.set()
+            return finish(task["id"], "needs_review", str(artifact),
+                          f"claude-local agent finished in {summary.get('num_turns', '?')} turns; apply only after review")
 
         # Two short calls: plan the files, then return whole files. git makes
         # the diff, so it always applies (see filepatch.py for why).

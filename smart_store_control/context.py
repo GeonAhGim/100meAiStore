@@ -60,6 +60,28 @@ def repository_context(root: Path, prompt: str, feedback: str | None = None) -> 
     return "".join(parts)
 
 
+REWRITE_MIN_LINES = 40
+REWRITE_MAX_RATIO = 0.8
+
+
+def rewrite_violation(root: Path, patch_path: Path) -> str | None:
+    """Name the first pre-existing file the patch rewrites wholesale, else None (AIOS lesson #6)."""
+    numstat = subprocess.run(["git", "apply", "--numstat", str(patch_path)], cwd=str(root),
+                             capture_output=True, text=True, check=False).stdout
+    for line in numstat.splitlines():
+        parts = line.split("\t", 2)
+        if len(parts) != 3 or parts[1] == "-":
+            continue
+        deleted, path = int(parts[1]), parts[2].strip()
+        shown = subprocess.run(["git", "show", f"HEAD:{path}"], cwd=str(root), capture_output=True, text=True, check=False)
+        if shown.returncode:
+            continue  # new file
+        lines = shown.stdout.count("\n")
+        if lines >= REWRITE_MIN_LINES and deleted / max(lines, 1) > REWRITE_MAX_RATIO:
+            return f"wholesale rewrite of existing file rejected: {path}"
+    return None
+
+
 def check_patch(root: Path, patch_path: Path) -> str | None:
     """Return None when the patch applies cleanly, else the git error text."""
     if patch_path.stat().st_size < 20:
