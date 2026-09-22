@@ -95,10 +95,46 @@ def worktree_diff(path: Path) -> str:
     return diff.stdout
 
 
+def main_checkout_state(root: Path) -> set[str]:
+    out = git(["status", "--porcelain", "--", ".", ":!data", ":!build"], root).stdout
+    return {line[3:].strip() for line in out.splitlines() if line.strip()}
+
+
+def quarantine_stray_edits(root: Path, before: set[str], task_id: int, artifact_dir: Path | None) -> list[str]:
+    """Paths the agent changed in the live checkout: saved as evidence, then restored.
+
+    AIOS lesson #15: a worker that writes to the human's checkout corrupts it
+    and blocks every fast-forward. Only paths that were clean before the run
+    are touched, so the operator's own uncommitted work is never reverted.
+    """
+    stray = sorted(main_checkout_state(root) - before)
+    if not stray:
+        return []
+    keep = artifact_dir or (root / "data" / "control" / "artifacts")
+    folder = keep / "stray"
+    folder.mkdir(parents=True, exist_ok=True)
+    tracked = [p for p in stray if git(["ls-files", "--error-unmatch", p], root).returncode == 0]
+    untracked = [p for p in stray if p not in tracked]
+    if tracked:
+        diff = git(["diff", "--binary", "--", *tracked], root).stdout
+        (folder / f"task-{task_id}.patch").write_bytes(diff.encode("utf-8"))
+        git(["checkout", "--", *tracked], root)
+    for rel in untracked:
+        src = root / rel
+        if src.is_file():
+            dst = folder / f"task-{task_id}-untracked" / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dst))
+        elif src.is_dir():
+            shutil.rmtree(src, ignore_errors=True)
+    return stray
+
+
 def run_agent(root: Path, task: dict, *, model: str, base_url: str, max_turns: int = DEFAULT_MAX_TURNS,
               wall_seconds: int = DEFAULT_WALL_SECONDS, spawn: Spawn = subprocess.run,
               artifact_dir: Path | None = None) -> tuple[str, dict]:
     """Run the CLI in a fresh worktree; return (diff, summary). The worktree is removed afterwards."""
+    before = main_checkout_state(root)
     worktree = prepare_worktree(root, int(task["id"]))
     summary: dict = {"engine": "claude-local", "model": model, "max_turns": max_turns}
     try:
@@ -113,6 +149,9 @@ def run_agent(root: Path, task: dict, *, model: str, base_url: str, max_turns: i
         summary.update({k: result.get(k) for k in ("num_turns", "is_error", "subtype", "duration_ms") if k in result})
         summary["result"] = str(result.get("result") or result.get("raw") or "")[:1500]
         summary["stderr"] = (completed.stderr or "")[-800:]
+        stray = quarantine_stray_edits(root, before, int(task["id"]), artifact_dir)
+        if stray:
+            summary["stray_edits"] = stray
         diff = worktree_diff(worktree)
         if artifact_dir is not None:
             artifact_dir.mkdir(parents=True, exist_ok=True)

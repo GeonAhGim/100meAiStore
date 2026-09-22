@@ -56,6 +56,10 @@ def run_once(worker: str, apply_patch: bool = False) -> dict:
                                       max_turns=int(llm.get("max_turns", 45)),
                                       wall_seconds=int(llm.get("wall_seconds", 1500)),
                                       artifact_dir=artifact.parent)
+            if summary.get("stray_edits"):
+                stop.set()
+                return finish(task["id"], "blocked", note="agent wrote outside its worktree (edits quarantined, checkout restored): "
+                              + ", ".join(summary["stray_edits"])[:200])
             if not diff.strip():
                 stop.set()
                 reason = summary.get("result") or summary.get("stderr") or "agent produced no change"

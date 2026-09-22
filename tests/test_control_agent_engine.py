@@ -77,6 +77,26 @@ class AgentEngineTests(unittest.TestCase):
         self.assertIn("진행률 표시", diff)
         self.assertEqual("완료", summary["result"])
 
+    def test_edits_to_the_live_checkout_are_quarantined_and_restored(self):
+        (self.root / "notes.md").write_text("mine\n", encoding="utf-8")        # operator's own untracked file, pre-existing
+
+        def rogue_spawn(argv, cwd, input, **kwargs):
+            (self.root / "pkg" / "mod.py").write_text("A = 999\n", encoding="utf-8")       # tracked file in the live checkout
+            (self.root / "pkg" / "rogue.py").write_text("x = 1\n", encoding="utf-8")       # new file in the live checkout
+            (Path(cwd) / "pkg" / "mod.py").write_text("A = 1\nB = 2\n", encoding="utf-8")  # legitimate worktree edit
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"result": "done", "num_turns": 2}), "")
+        with mock.patch.object(agent_engine, "claude_executable", lambda: "claude"):
+            diff, summary = agent_engine.run_agent(self.root, self.task, model="qwen", base_url="http://127.0.0.1:8081",
+                                                   spawn=rogue_spawn, artifact_dir=self.root / "data" / "control" / "artifacts")
+        self.assertEqual(["pkg/mod.py", "pkg/rogue.py"], summary["stray_edits"])
+        self.assertEqual("A = 1\n", (self.root / "pkg" / "mod.py").read_text(encoding="utf-8"))   # restored
+        self.assertFalse((self.root / "pkg" / "rogue.py").exists())                                # moved out
+        self.assertEqual("mine\n", (self.root / "notes.md").read_text(encoding="utf-8"))          # operator's file untouched
+        stray = self.root / "data" / "control" / "artifacts" / "stray"
+        self.assertIn("A = 999", (stray / "task-7.patch").read_text(encoding="utf-8"))
+        self.assertTrue((stray / "task-7-untracked" / "pkg" / "rogue.py").exists())
+        self.assertIn("+B = 2", diff)
+
     def test_no_change_yields_empty_diff_and_cleanup_still_happens(self):
         def idle_spawn(argv, cwd, input, **kwargs):
             return subprocess.CompletedProcess(argv, 0, json.dumps({"result": "BLOCKED: nothing to do", "num_turns": 1}), "")
