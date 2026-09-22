@@ -43,6 +43,19 @@ class AgentEngineTests(unittest.TestCase):
         self.assertIn("로컬 DEMO", agent_engine.task_prompt(self.task))
         self.assertIn('"id": 7', agent_engine.task_prompt(self.task))
 
+    def test_live_checkout_is_write_denied_but_the_worktree_is_not(self):
+        self.assertEqual("//c/smart_store/packages", agent_engine.rule_path(Path("C:/smart_store/packages")))
+        settings = json.loads(agent_engine.checkout_guard_settings(self.root).read_text(encoding="utf-8"))
+        deny = settings["permissions"]["deny"]
+        pkg = agent_engine.rule_path(self.root / "pkg")
+        self.assertIn(f"Edit({pkg}/**)", deny)
+        self.assertIn(f"Write({pkg}/**)", deny)
+        self.assertIn(f"Edit({agent_engine.rule_path(self.root / '.gitignore')})", deny)
+        self.assertFalse(any("/data" in rule for rule in deny))   # the task worktree lives under data/
+        self.assertIn("Bash(git push*)", deny)                     # the static rules are kept
+        note = agent_engine.worktree_note(self.root, self.root / "data" / "control" / "worktrees" / "task-7")
+        self.assertIn("task-7", note)
+
     def test_agent_edits_in_a_worktree_and_only_the_diff_survives(self):
         calls = {}
 

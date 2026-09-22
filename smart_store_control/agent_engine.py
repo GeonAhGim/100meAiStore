@@ -61,9 +61,42 @@ def local_env(model: str, base_url: str) -> dict[str, str]:
     return env
 
 
-def build_argv(exe: str, model: str, max_turns: int) -> list[str]:
+def build_argv(exe: str, model: str, max_turns: int, settings: Path = SETTINGS_PATH) -> list[str]:
     return [exe, "-p", "--model", model, "--max-turns", str(max_turns), "--dangerously-skip-permissions",
-            "--output-format", "json", "--settings", str(SETTINGS_PATH), "--strict-mcp-config"]
+            "--output-format", "json", "--settings", str(settings), "--strict-mcp-config"]
+
+
+def rule_path(path: Path) -> str:
+    """C:/smart_store/packages -> //c/smart_store/packages (Claude Code's absolute-path rule form)."""
+    posix = path.resolve().as_posix()
+    if len(posix) > 1 and posix[1] == ":":
+        posix = "/" + posix[0].lower() + posix[2:]
+    return "/" + posix
+
+
+def checkout_guard_settings(root: Path) -> Path:
+    """Worker settings plus Edit/Write denials on every tracked top-level entry of the live checkout.
+
+    The worktree sits under ``data/control/worktrees`` inside the checkout, and
+    the local model kept resolving task files against the checkout root
+    (``C:/smart_store/packages/...``), which ``--dangerously-skip-permissions``
+    allowed; the edits were only quarantined after the run was wasted. Deny
+    rules still apply in that mode, so the write now fails at the tool call and
+    the model is told to use the worktree path. ``data/`` stays writable
+    because the worktree itself lives there.
+    """
+    settings = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+    entries = git(["ls-tree", "--name-only", "HEAD"], root).stdout.split()
+    deny = settings.setdefault("permissions", {}).setdefault("deny", [])
+    for entry in entries:
+        if entry in ("data", "build"):
+            continue
+        target = rule_path(root / entry) + ("/**" if (root / entry).is_dir() else "")
+        deny += [f"Edit({target})", f"Write({target})", f"NotebookEdit({target})"]
+    path = root / "data" / "control" / "worker_settings.generated.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
 
 
 # Spare-capacity lanes that do not consume the shared local llama.cpp slots.
@@ -103,6 +136,12 @@ def task_prompt(task: dict) -> str:
         extra = "\n\n## 운영자 추가 지시 (가장 우선한다)\n" + "\n".join(
             f"- ({i.get('at', '')}) {i.get('text', '')}" for i in instructions[-5:])
     return template + "\n\n## task\n```json\n" + json.dumps(body, ensure_ascii=False, indent=2) + "\n```\n" + extra
+
+
+def worktree_note(root: Path, worktree: Path) -> str:
+    return (f"\n\n## 작업 위치\n- 너의 작업 디렉터리(저장소 루트)는 `{worktree}` 이다. 파일은 이 디렉터리 기준 상대 경로"
+            f"(예: `packages/store_core/x.py`)로 읽고 써라.\n- `{root}` 바로 아래의 packages·tests 등은 사람의 체크아웃이라 "
+            "쓰기가 거부된다. 거부되면 경로를 작업 디렉터리 기준으로 고쳐서 다시 써라.\n")
 
 
 def prepare_worktree(root: Path, task_id: int) -> Path:
@@ -194,11 +233,13 @@ def run_agent(root: Path, task: dict, *, model: str, base_url: str, max_turns: i
     summary: dict = {"engine": engine, "model": model, "max_turns": max_turns}
     try:
         if engine == "claude-local":
-            argv, env, kind = build_argv(claude_executable(), model, max_turns), local_env(model, base_url), "json"
+            argv = build_argv(claude_executable(), model, max_turns, checkout_guard_settings(root))
+            env, kind = local_env(model, base_url), "json"
         else:
             argv, env, kind = engine_command(engine, model, max_turns)
         try:
-            completed = spawn(argv, cwd=str(worktree), input=task_prompt(task), capture_output=True, text=True,
+            completed = spawn(argv, cwd=str(worktree), input=task_prompt(task) + worktree_note(root, worktree),
+                              capture_output=True, text=True,
                               timeout=wall_seconds, env=env, encoding="utf-8", errors="replace")
         except subprocess.TimeoutExpired as exc:
             # The wall clock is a fact about throughput, not a crash: record it as
