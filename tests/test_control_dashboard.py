@@ -9,7 +9,7 @@ from unittest import mock
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 
-from smart_store_control import pm, server
+from smart_store_control import pm, recovery, server
 
 
 LEDGER = {"version": 1, "next_id": 6, "tasks": [
