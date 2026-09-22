@@ -52,11 +52,17 @@ def effective_capacity(role: str = "local-impl") -> dict[str, Any]:
     handoff = bool(runtime.get("handoff_granted"))
     configured = min(int(pool.get("size", 0)), int(pool.get("max_size", pool.get("size", 0))))
     available = int(live.get("available_slots", 0))
+    # Explicit operator decision: keep at least this many smart_store slots
+    # running even when AIOS holds every probed slot (llama.cpp queues the
+    # extra request). 0 by default, so AIOS priority is unchanged unless set.
+    floor = max(0, int(runtime.get("slots", {}).get("operator_floor", 0)))
+    effective = max(min(configured, available), min(configured, floor)) if handoff else 0
     return {
         "role": role,
         "configured": configured,
         "aios_available": available,
-        "effective": min(configured, available) if handoff else 0,
+        "operator_floor": floor,
+        "effective": effective,
         "handoff_granted": handoff,
         "aios_priority": True,
         "live": live,
