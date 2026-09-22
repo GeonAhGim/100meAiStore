@@ -126,6 +126,27 @@ def worktree_diff(path: Path) -> str:
     return diff.stdout
 
 
+def kill_agent_tree(argv: list[str]) -> None:
+    """Kill every process started for this agent run.
+
+    On Windows the CLI is launched through a .cmd shim; killing only the shim
+    leaves the real process (claude.exe, node) running, holding the local LLM
+    slot and still able to write files. Match by the run's own settings path or
+    binary so nothing outside this run is touched.
+    """
+    marker = next((a for a in argv if a.endswith("worker_settings_local.json") and "smart_store_control" in a), None) or argv[0]
+    try:
+        listing = subprocess.run(["powershell", "-NoProfile", "-Command",
+                                  "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }"],
+                                 capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        return
+    for line in listing.splitlines():
+        pid, _, cmdline = line.partition("\t")
+        if marker in cmdline and "Win32_Process" not in cmdline and pid.strip().isdigit():
+            subprocess.run(["taskkill", "/PID", pid.strip(), "/T", "/F"], capture_output=True, timeout=30)
+
+
 def main_checkout_state(root: Path) -> set[str]:
     out = git(["status", "--porcelain", "--", ".", ":!data", ":!build"], root).stdout
     return {line[3:].strip() for line in out.splitlines() if line.strip()}
@@ -173,8 +194,22 @@ def run_agent(root: Path, task: dict, *, model: str, base_url: str, max_turns: i
             argv, env, kind = build_argv(claude_executable(), model, max_turns), local_env(model, base_url), "json"
         else:
             argv, env, kind = engine_command(engine, model, max_turns)
-        completed = spawn(argv, cwd=str(worktree), input=task_prompt(task), capture_output=True, text=True,
-                          timeout=wall_seconds, env=env, encoding="utf-8", errors="replace")
+        try:
+            completed = spawn(argv, cwd=str(worktree), input=task_prompt(task), capture_output=True, text=True,
+                              timeout=wall_seconds, env=env, encoding="utf-8", errors="replace")
+        except subprocess.TimeoutExpired as exc:
+            # The wall clock is a fact about throughput, not a crash: record it as
+            # a summary the worker can act on, and make sure the whole process
+            # tree is gone (subprocess only kills the .cmd shim on Windows).
+            kill_agent_tree(argv)
+            summary.update({"returncode": None, "timeout": True, "wall_seconds": wall_seconds,
+                            "result": f"wall clock of {wall_seconds}s exceeded",
+                            "stderr": (exc.stderr.decode("utf-8", "replace") if isinstance(exc.stderr, bytes) else str(exc.stderr or ""))[-800:]})
+            diff = worktree_diff(worktree)
+            if artifact_dir is not None:
+                artifact_dir.mkdir(parents=True, exist_ok=True)
+                (artifact_dir / f"task-{task['id']}.agent.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+            return "", summary  # partial edits are never taken as a patch
         summary["returncode"] = completed.returncode
         if kind == "json":
             try:

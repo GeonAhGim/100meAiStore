@@ -66,6 +66,13 @@ def run_once(worker: str, apply_patch: bool = False) -> dict:
                 stop.set()
                 return finish(task["id"], "blocked", note="agent wrote outside its worktree (edits quarantined, checkout restored): "
                               + ", ".join(summary["stray_edits"])[:200])
+            if summary.get("timeout"):
+                # Throughput, not the task: the shared model could not finish 45
+                # turns inside the wall clock. Rest the lane briefly so the same
+                # 25 minutes are not burned again immediately; no retry is charged.
+                until = pause_lane(lane, f"{engine}: wall clock {summary.get('wall_seconds')}s exceeded (congested)", seconds=10 * 60)
+                stop.set()
+                return finish(task["id"], "blocked", note=f"lane paused until {until}: {engine} wall clock exceeded, model congested")
             if engine in EXTERNAL_ENGINES and not diff.strip():
                 fault = lane_fault(str(summary.get("result", "")) + " " + str(summary.get("stderr", "")))
                 if fault:

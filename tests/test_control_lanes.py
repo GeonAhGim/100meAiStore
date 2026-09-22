@@ -67,6 +67,34 @@ class LaneTests(unittest.TestCase):
         self.assertEqual(1, pm.effective_capacity("gemini-impl")["effective"])   # other lanes unaffected
         self.assertIsNone(pm.claim("cursor-impl-1", "cursor-impl"))
 
+    def test_provider_overload_counts_as_a_lane_fault(self):
+        self.assertEqual("503", pm.lane_fault("cause: { code: 503, message: 'high demand' }"))
+        self.assertEqual("high demand", pm.lane_fault("This model is currently experiencing high demand."))
+
+    def test_wall_clock_timeout_kills_the_tree_and_returns_no_patch(self):
+        repo = Path(self.tmp.name) / "repo2"
+        repo.mkdir()
+        for args in (["init", "-q"], ["config", "user.email", "t@example.test"], ["config", "user.name", "t"]):
+            subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+        (repo / "a.py").write_text("A = 1\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "base"], check=True, capture_output=True)
+        killed = []
+
+        def slow_spawn(argv, cwd, input, **kwargs):
+            (Path(cwd) / "a.py").write_text("A = 2  # half done\n", encoding="utf-8")
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"], output=b"", stderr=b"still thinking")
+        with mock.patch.object(agent_engine, "claude_executable", lambda: "claude"), \
+             mock.patch.object(agent_engine, "kill_agent_tree", lambda argv: killed.append(argv[0])):
+            diff, summary = agent_engine.run_agent(repo, {"id": 12, "title": "t", "prompt": "p"}, model="m", base_url="http://127.0.0.1:8081",
+                                                   spawn=slow_spawn, wall_seconds=5, artifact_dir=repo / "art")
+        self.assertEqual("", diff)                                   # partial edits never become a patch
+        self.assertTrue(summary["timeout"])
+        self.assertEqual(["claude"], killed)                         # the process tree was killed
+        self.assertTrue((repo / "art" / "task-12.agent.json").exists())
+        self.assertFalse((repo / "data" / "control" / "worktrees" / "task-12").exists())
+        subprocess.run(["git", "-C", str(repo), "worktree", "prune"], capture_output=True)
+
     def test_external_engine_commands_read_the_prompt_from_stdin(self):
         with mock.patch.object(agent_engine.shutil, "which", lambda name: f"/bin/{name}"):
             argv, env, kind = agent_engine.engine_command("gemini", "", 45)
