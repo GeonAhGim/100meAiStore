@@ -82,7 +82,8 @@ def run_triage(force: bool = False) -> dict[str, Any]:
                                  "last_error": task.get("note"), "note": f"triage: {cause}, requeued without retry cost",
                                  "updated_at": now()})
                     actions.append({"task": task["id"], "cause": cause, "action": "requeued"})
-                elif cause == "retries_exhausted" and task.get("phase") not in ("needs_operator", "needs_claude"):
+                elif cause == "retries_exhausted" and task.get("phase") != "needs_claude" and not task.get("escalation"):
+                    # includes tasks parked as needs_operator before the ladder existed
                     # Ladder: local pool spent -> Codex pipeline; no Codex -> Claude Code.
                     record = hand_to_codex(task)
                     if record:
