@@ -45,3 +45,9 @@ LIVE remains unapproved.
 | P2-12-DEMO-BOUNDED-01 | A proposed DEMO write is admitted only when a scope-specific operator approval exists, the payload digest matches and every money, SKU, count and time cap holds |
 | P2-12-DEMO-BOUNDED-02 | Every admit or reject decision produces one audit record and a halted policy rejects everything until restored |
 | P2-12-DEMO-BOUNDED-03 | Stop and restore evidence is produced and the check is fail-closed without DEMO approval records for G4 and G5 |
+
+## Evidence
+
+| Commit | Tests | Fix rounds | Verified by |
+|---|---|---|---|
+| `ea2a694` | 320 ran, OK | 0 | worker `2d33643e-66d8-4e93-b099-468c14ed830f` |
