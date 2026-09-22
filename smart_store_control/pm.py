@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 from datetime import datetime, timezone
 import threading
 from pathlib import Path
@@ -14,7 +15,7 @@ from .state import CONTROL_DIR, read_json, snapshot, write_json
 
 TASKS_PATH = CONTROL_DIR / "tasks.json"
 POOLS_PATH = CONTROL_DIR / "pools.json"
-_CLAIM_LOCK = threading.Lock()
+_CLAIM_LOCK = threading.RLock()  # guards every read-modify-write of tasks.json in this process
 
 
 def now() -> str:
@@ -118,19 +119,52 @@ def claim(worker: str, role: str = "local-impl") -> dict[str, Any] | None:
 
 
 def finish(task_id: int, status_name: str, artifact: str = "", note: str = "") -> dict[str, Any]:
-    data = _load()
-    for task in data.get("tasks", []):
-        if int(task["id"]) == task_id:
-            task.update({"status": status_name, "artifact": artifact, "note": note, "phase": "finished" if status_name != "blocked" else "error", "heartbeat_at": now(), "updated_at": now()})
-            _save(data)
-            return task
+    # Every read-modify-write of the ledger shares _CLAIM_LOCK. Without it a
+    # heartbeat from the worker thread could overwrite a concurrent claim or
+    # finish made by the autopilot or review thread (lost update), which is how
+    # tasks were left "in_progress" with a frozen heartbeat.
+    with _CLAIM_LOCK:
+        data = _load()
+        for task in data.get("tasks", []):
+            if str(task["id"]) == str(task_id):
+                task.update({"status": status_name, "artifact": artifact, "note": note,
+                             "phase": "finished" if status_name != "blocked" else "error",
+                             "heartbeat_at": now(), "updated_at": now()})
+                _save(data)
+                return task
     raise KeyError(f"unknown task {task_id}")
 
 
+ACTIVE_STATES = {"in_progress", "reviewing"}
+HEARTBEAT_SECONDS = 15
+
+
+def heartbeat_loop(stop: threading.Event, task_id: int, holder: str, phase: str,
+                   interval: float = HEARTBEAT_SECONDS) -> None:
+    """Refresh a task's heartbeat until ``stop`` is set.
+
+    A transient failure (a concurrent reader holding the ledger, a momentary
+    disk error) is logged and retried on the next tick. The loop never dies
+    silently: a silent death is exactly what made live tasks look stale.
+    """
+    while not stop.wait(interval):
+        try:
+            if not touch(task_id, holder, phase):
+                return  # the task is no longer ours; stop touching it
+        except Exception as exc:  # noqa: BLE001 - keep beating
+            logging.getLogger(__name__).warning("heartbeat for task %s failed: %s", task_id, exc)
+
+
 def touch(task_id: int, worker: str, phase: str) -> bool:
-    data = _load()
-    for task in data.get("tasks", []):
-        if int(task["id"]) == task_id and task.get("status") == "in_progress" and task.get("worker") == worker:
+    """Refresh the heartbeat of a task this worker or reviewer currently holds."""
+    with _CLAIM_LOCK:
+        data = _load()
+        for task in data.get("tasks", []):
+            if str(task["id"]) != str(task_id) or task.get("status") not in ACTIVE_STATES:
+                continue
+            holder = task.get("worker") if task.get("status") == "in_progress" else task.get("reviewer")
+            if holder != worker:
+                continue
             task.update({"phase": phase, "heartbeat_at": now(), "updated_at": now()})
             _save(data)
             return True
@@ -155,13 +189,15 @@ def claim_review(worker: str = "local-review-1") -> dict[str, Any] | None:
 
 
 def finish_review(task_id: int, decision: str, artifact: str = "", note: str = "") -> dict[str, Any]:
-    data = _load()
-    for task in data.get("tasks", []):
-        if int(task["id"]) == task_id:
-            final = "reviewed" if decision == "pass" else "blocked"
-            task.update({"status": final, "review_decision": decision, "review_artifact": artifact, "note": note, "phase": "review_finished", "heartbeat_at": now(), "updated_at": now()})
-            _save(data)
-            return task
+    with _CLAIM_LOCK:
+        data = _load()
+        for task in data.get("tasks", []):
+            if str(task["id"]) == str(task_id):
+                final = "reviewed" if decision == "pass" else "blocked"
+                task.update({"status": final, "review_decision": decision, "review_artifact": artifact, "note": note,
+                             "phase": "review_finished", "heartbeat_at": now(), "updated_at": now()})
+                _save(data)
+                return task
     raise KeyError(f"unknown task {task_id}")
 
 

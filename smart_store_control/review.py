@@ -6,7 +6,7 @@ import re
 import threading
 
 from .local_llm import complete
-from .pm import claim_review, finish_review, touch
+from .pm import claim_review, finish_review, heartbeat_loop, touch
 from .state import CONTROL_DIR, read_json
 
 
@@ -24,10 +24,7 @@ def run_once(worker: str = "local-review-1") -> dict:
             "followed by concise reasons.\n\nPATCH:\n" + patch_text
         )
         stop = threading.Event()
-        def heartbeat() -> None:
-            while not stop.wait(15):
-                touch(task["id"], worker, "review_llm")
-        threading.Thread(target=heartbeat, daemon=True).start()
+        threading.Thread(target=heartbeat_loop, args=(stop, task["id"], worker, "review_llm"), daemon=True).start()
         response = complete(prompt, endpoint=read_json(CONTROL_DIR / "runtime.json", {}).get("local_llm", {}).get("endpoint", "http://127.0.0.1:8081"), model="qwen3.6-35b-a3b")
         stop.set()
         review_dir = CONTROL_DIR / "artifacts" / "reviews"

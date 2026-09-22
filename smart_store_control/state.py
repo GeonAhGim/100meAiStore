@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -41,7 +42,17 @@ def write_json(path: Path, value: Any) -> None:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
             json.dump(value, handle, ensure_ascii=False, indent=2)
             handle.write("\n")
-        os.replace(tmp_name, path)
+        # Windows refuses to replace a file another process is reading at
+        # that instant (the dashboard polls this ledger). A short bounded
+        # retry keeps the write atomic instead of letting a heartbeat die.
+        for attempt in range(20):
+            try:
+                os.replace(tmp_name, path)
+                break
+            except PermissionError:
+                if attempt == 19:
+                    raise
+                time.sleep(0.05)
     finally:
         if os.path.exists(tmp_name):
             os.unlink(tmp_name)

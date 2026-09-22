@@ -12,7 +12,7 @@ from pathlib import Path
 from .context import check_patch, file_tree
 from .filepatch import build_patch, parse_files, parse_plan, plan_prompt, write_prompt
 from .local_llm import complete
-from .pm import finish, claim, touch
+from .pm import claim, finish, heartbeat_loop, touch
 from .state import CONTROL_DIR, read_json
 
 PROJECT_ROOT = CONTROL_DIR.parents[1]
@@ -38,10 +38,7 @@ def run_once(worker: str, apply_patch: bool = False) -> dict:
             feedback = (feedback or "") + "\n" + Path(str(review)).read_text(encoding="utf-8", errors="replace")[:1500]
     try:
         stop = threading.Event()
-        def heartbeat() -> None:
-            while not stop.wait(15):
-                touch(task["id"], worker, "llm_request")
-        threading.Thread(target=heartbeat, daemon=True).start()
+        threading.Thread(target=heartbeat_loop, args=(stop, task["id"], worker, "llm_request"), daemon=True).start()
         touch(task["id"], worker, "llm_request")
         artifact = CONTROL_DIR / "artifacts" / f"task-{task['id']}.patch"
         artifact.parent.mkdir(parents=True, exist_ok=True)
