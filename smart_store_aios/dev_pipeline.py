@@ -372,7 +372,13 @@ class DevPipeline:
         output.parent.mkdir(parents=True, exist_ok=True)
         if self.settings.dev_model == "manual":
             # An operator (or another agent) prepares the worktree by hand; the
-            # worker still enforces every guard, verifies and publishes.
+            # worker still enforces every guard, verifies and publishes. An
+            # unprepared worktree is a wait, not a failure: defer without
+            # consuming an attempt so the job stays visible as waiting.
+            spec_ready = (self.worktree / self.spec_path).exists()
+            dirty = bool(self._git("status", "--porcelain").stdout.strip())
+            if (label == "spec" and not spec_ready) or (label != "spec" and not dirty):
+                raise UsageLimited(f"manual mode: worktree not prepared for {label} at {self.worktree}")
             self._save(**{f"manual_{label}": True})
             return output.read_text(encoding="utf-8", errors="replace") if output.exists() else ""
         command = ["codex", "exec", "-C", str(self.worktree), "--sandbox", self.settings.codex_sandbox,
