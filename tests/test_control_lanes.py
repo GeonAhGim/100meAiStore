@@ -56,6 +56,17 @@ class LaneTests(unittest.TestCase):
         self.assertEqual("gemini-impl-1", claimed["worker"])
         self.assertIsNone(pm.claim("gemini-impl-1", "gemini-impl"))            # gemini lane now full
 
+    def test_a_lane_that_hit_its_quota_is_paused_out_of_capacity(self):
+        self.assertEqual("usage limit", pm.lane_fault("ActionRequiredError: You've hit your usage limit Get Cursor Pro"))
+        self.assertEqual("not trusted", pm.lane_fault('Approval mode overridden because the current folder is not trusted'))
+        self.assertIsNone(pm.lane_fault("edited a.py"))
+        until = pm.pause_lane("cursor-impl", "cursor: usage limit", seconds=600)
+        cap = pm.effective_capacity("cursor-impl")
+        self.assertEqual(0, cap["effective"])
+        self.assertEqual(until, cap["paused_until"])
+        self.assertEqual(1, pm.effective_capacity("gemini-impl")["effective"])   # other lanes unaffected
+        self.assertIsNone(pm.claim("cursor-impl-1", "cursor-impl"))
+
     def test_external_engine_commands_read_the_prompt_from_stdin(self):
         with mock.patch.object(agent_engine.shutil, "which", lambda name: f"/bin/{name}"):
             argv, env, kind = agent_engine.engine_command("gemini", "", 45)

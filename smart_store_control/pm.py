@@ -57,10 +57,13 @@ def effective_capacity(role: str = "local-impl") -> dict[str, Any]:
     # running even when AIOS holds every probed slot (llama.cpp queues the
     # extra request). 0 by default, so AIOS priority is unchanged unless set.
     floor = max(0, int(runtime.get("slots", {}).get("operator_floor", 0)))
+    paused_until = str((runtime.get("lanes") or {}).get(role, {}).get("paused_until") or "")
+    paused = paused_until > now()
     if str(pool.get("engine", "")) in EXTERNAL_ENGINES:
         # Spare-capacity lanes (cursor, gemini) do not use the shared local
         # llama.cpp, so AIOS priority and the handoff do not apply to them.
-        effective = configured
+        # A lane that hit its provider quota is paused until paused_until.
+        effective = 0 if paused else configured
     else:
         effective = max(min(configured, available), min(configured, floor)) if handoff else 0
     return {
@@ -69,6 +72,7 @@ def effective_capacity(role: str = "local-impl") -> dict[str, Any]:
         "configured": configured,
         "aios_available": available,
         "operator_floor": floor,
+        "paused_until": paused_until if paused else None,
         "effective": effective,
         "handoff_granted": handoff,
         "aios_priority": True,
@@ -116,6 +120,30 @@ IMPL_ROLE = "local-impl"  # every implementation task carries this role; any imp
 def lane_of(worker: str) -> str:
     """'cursor-impl-1' -> 'cursor-impl'; 'local-impl-2' -> 'local-impl'."""
     return worker.rsplit("-", 1)[0] if worker.rsplit("-", 1)[-1].isdigit() else worker
+
+
+LANE_PAUSE_SECONDS = 30 * 60
+LANE_FAULT_MARKERS = ("usage limit", "quota", "rate limit", "not trusted", "not logged in", "unauthorized",
+                      "authentication", "429", "actionrequirederror")
+
+
+def lane_fault(text: str) -> str | None:
+    """The provider-side reason an external lane cannot work right now, or None."""
+    lowered = (text or "").lower()
+    for marker in LANE_FAULT_MARKERS:
+        if marker in lowered:
+            return marker
+    return None
+
+
+def pause_lane(lane: str, reason: str, seconds: int = LANE_PAUSE_SECONDS) -> str:
+    """Take a lane out of capacity for a while; the task it held is not charged a retry."""
+    from datetime import timedelta
+    until = (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat().replace("+00:00", "Z")
+    runtime = read_json(CONTROL_DIR / "runtime.json", {})
+    runtime.setdefault("lanes", {})[lane] = {"paused_until": until, "reason": reason[:200], "paused_at": now()}
+    write_json(CONTROL_DIR / "runtime.json", runtime)
+    return until
 
 
 def implementer_lanes() -> list[str]:

@@ -36,7 +36,7 @@ INTERVAL_SECONDS = 600
 DECISION_STALE_SECONDS = 6 * 3600
 MAX_RETRIES = 3
 TRIAGE_PATH = CONTROL_DIR / "triage.json"
-TRANSIENT = ("local llm error", "review error", "timeouterror", "deadline", "throttled", "connection")
+TRANSIENT = ("local llm error", "review error", "timeouterror", "deadline", "throttled", "connection", "lane paused")
 
 
 def classify(task: dict[str, Any]) -> tuple[str, str | None]:

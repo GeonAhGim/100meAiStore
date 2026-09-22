@@ -13,7 +13,7 @@ from .agent_engine import run_agent
 from .context import check_patch, file_tree, rewrite_violation
 from .filepatch import SYSTEM, build_patch, looks_like_refusal, parse_files, parse_plan, plan_prompt, write_prompt
 from .local_llm import complete
-from .pm import EXTERNAL_ENGINES, POOLS_PATH, claim, finish, heartbeat_loop, lane_of, touch
+from .pm import EXTERNAL_ENGINES, POOLS_PATH, claim, finish, heartbeat_loop, lane_fault, lane_of, pause_lane, touch
 from .state import CONTROL_DIR, read_json
 
 PROJECT_ROOT = CONTROL_DIR.parents[1]
@@ -66,6 +66,13 @@ def run_once(worker: str, apply_patch: bool = False) -> dict:
                 stop.set()
                 return finish(task["id"], "blocked", note="agent wrote outside its worktree (edits quarantined, checkout restored): "
                               + ", ".join(summary["stray_edits"])[:200])
+            if engine in EXTERNAL_ENGINES and not diff.strip():
+                fault = lane_fault(str(summary.get("result", "")) + " " + str(summary.get("stderr", "")))
+                if fault:
+                    # Provider quota, login or trust problem: the lane, not the task.
+                    until = pause_lane(lane, f"{engine}: {fault}")
+                    stop.set()
+                    return finish(task["id"], "blocked", note=f"lane paused until {until}: {engine} {fault}")
             if not diff.strip():
                 stop.set()
                 reason = summary.get("result") or summary.get("stderr") or "agent produced no change"
