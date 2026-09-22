@@ -83,6 +83,7 @@ class LaneTests(unittest.TestCase):
 
         def slow_spawn(argv, cwd, input, **kwargs):
             (Path(cwd) / "a.py").write_text("A = 2  # half done\n", encoding="utf-8")
+            (repo / "a.py").write_text("A = 3  # strayed into the live checkout\n", encoding="utf-8")
             raise subprocess.TimeoutExpired(argv, kwargs["timeout"], output=b"", stderr=b"still thinking")
         with mock.patch.object(agent_engine, "claude_executable", lambda: "claude"), \
              mock.patch.object(agent_engine, "kill_agent_tree", lambda argv: killed.append(argv[0])):
@@ -91,6 +92,8 @@ class LaneTests(unittest.TestCase):
         self.assertEqual("", diff)                                   # partial edits never become a patch
         self.assertTrue(summary["timeout"])
         self.assertEqual(["claude"], killed)                         # the process tree was killed
+        self.assertEqual(["a.py"], summary["stray_edits"])           # live-checkout edit quarantined even on timeout
+        self.assertEqual("A = 1\n", (repo / "a.py").read_text(encoding="utf-8"))
         self.assertTrue((repo / "art" / "task-12.agent.json").exists())
         self.assertFalse((repo / "data" / "control" / "worktrees" / "task-12").exists())
         subprocess.run(["git", "-C", str(repo), "worktree", "prune"], capture_output=True)

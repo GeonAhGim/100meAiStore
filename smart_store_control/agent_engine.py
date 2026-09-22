@@ -202,6 +202,9 @@ def run_agent(root: Path, task: dict, *, model: str, base_url: str, max_turns: i
             # a summary the worker can act on, and make sure the whole process
             # tree is gone (subprocess only kills the .cmd shim on Windows).
             kill_agent_tree(argv)
+            stray = quarantine_stray_edits(root, before, int(task["id"]), artifact_dir)  # a timed-out run can have strayed too
+            if stray:
+                summary["stray_edits"] = stray
             summary.update({"returncode": None, "timeout": True, "wall_seconds": wall_seconds,
                             "result": f"wall clock of {wall_seconds}s exceeded",
                             "stderr": (exc.stderr.decode("utf-8", "replace") if isinstance(exc.stderr, bytes) else str(exc.stderr or ""))[-800:]})
