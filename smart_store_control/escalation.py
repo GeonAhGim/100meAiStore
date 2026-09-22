@@ -131,7 +131,7 @@ def handoff_markdown(tasks: list[dict[str, Any]]) -> str:
             continue
         out += [f"## {titles[owner]} ({len(group)})", ""]
         for t in sorted(group, key=lambda t: (-int(t.get("priority", 0)), int(t["id"]))):
-            note = str(t.get("note") or "")
+            note = " ".join(str(t.get("note") or "").split())  # one bullet line, even for a CLI's multi-line stderr
             guard = t.get("loop_guard") or {}
             cause = guard.get("cause") or loopguard.cause_of(note)
             codex = (t.get("escalation") or {})
@@ -140,8 +140,9 @@ def handoff_markdown(tasks: list[dict[str, Any]]) -> str:
                     f"- 원인: {cause}" + (f" · 루프 가드 {guard.get('stage')}: {guard.get('reason')}" if guard else ""),
                     f"- 시도: {loopguard.summary(t)} · retry {t.get('retry_count', 0)}",
                     f"- 마지막 노트: {note[:400]}"]
-            if t.get("last_error") and t.get("last_error") != note:
-                out.append(f"- 직전 오류: {str(t['last_error'])[:400]}")
+            last_error = " ".join(str(t.get("last_error") or "").split())
+            if last_error and last_error != note:
+                out.append(f"- 직전 오류: {last_error[:400]}")
             if codex.get("job_id"):
                 state = (codex.get("codex") or {}).get("status", "queued")
                 out.append(f"- Codex job {codex['job_id']} ({codex.get('task_id')}) · {state}")
