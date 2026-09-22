@@ -5,7 +5,7 @@
     "weekly_target_krw": 5000000,
     "minimum_contribution_margin_rate": 0.18,
     "return_reserve_rate": 0.05,
-    "ad_cost_rate": 0.10,
+    "ad_cost_rate": 0.1,
     "marketplace_fee_rate": 0.06
   },
   "workers": {
@@ -15,5 +15,23 @@
   "codex": {
     "enabled": false,
     "sandbox": "workspace-write"
+  },
+  "dev": {
+    "max_fix_rounds": 3,
+    "stage_timeout_seconds": 1800,
+    "test_timeout_seconds": 900,
+    "test_command": [
+      "python",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "tests",
+      "-t",
+      "."
+    ],
+    "push": false,
+    "usage_limit_delay_seconds": 1800,
+    "triage_interval_seconds": 0
   }
 }
