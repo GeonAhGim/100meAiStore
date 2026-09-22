@@ -9,12 +9,17 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
+import time
 from pathlib import Path
 from urllib.request import urlopen
 
 
 AIOS_PM = Path(os.environ.get("SMART_STORE_AIOS_PM", r"C:\aios\pm"))
 LLAMA_URL = os.environ.get("SMART_STORE_LLAMA_URL", "http://127.0.0.1:8080")
+PROBE_TTL_SECONDS = 5.0
+_CACHE: dict = {"at": 0.0, "value": None}
+_CACHE_LOCK = threading.Lock()
 METRIC_RE = re.compile(r"^llamacpp:(requests_processing|requests_deferred)\s+([\d.]+)", re.MULTILINE)
 
 
@@ -53,6 +58,22 @@ def _aios_task_count() -> int:
 
 
 def probe() -> dict:
+    """The live probe, reused for ``PROBE_TTL_SECONDS``.
+
+    One dashboard refresh asks for capacity once per lane plus the snapshot,
+    and each probe costs about a second while llama.cpp is busy, so the page
+    took several seconds and sat on its empty skeleton. Claims happen every
+    20 seconds at most, so a five-second-old reading changes no decision.
+    """
+    with _CACHE_LOCK:
+        if _CACHE["value"] is not None and time.monotonic() - _CACHE["at"] < PROBE_TTL_SECONDS:
+            return dict(_CACHE["value"])
+        value = _probe_now()
+        _CACHE.update({"at": time.monotonic(), "value": value})
+        return dict(value)
+
+
+def _probe_now() -> dict:
     props = _json("/props")
     metrics = _metrics()
     total = props.get("total_slots")
