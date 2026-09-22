@@ -36,3 +36,9 @@ external read or write. LIVE remains unapproved.
 | P2-13-FINAL-AUDIT-01 | A traceability check maps every progress item to its evidence document and to tests referencing its acceptance IDs and reports gaps |
 | P2-13-FINAL-AUDIT-02 | Clean DEMO bootstrap and worker restart leave no leased outbox events and the check proves it |
 | P2-13-FINAL-AUDIT-03 | The readiness report is fail-closed and states that LIVE is not approved while any gate record is DEMO or missing |
+
+## Evidence
+
+| Commit | Tests | Fix rounds | Verified by |
+|---|---|---|---|
+| `d479314` | 323 ran, OK | 0 | worker `9df03896-3cc2-40aa-b069-658ca9f9ea8b` |
