@@ -32,6 +32,21 @@ Windows 로그온 시 자동 시작을 설치하려면 관리자 권한 없이 �
 powershell -ExecutionPolicy Bypass -File .\scripts\install-control-dashboard-startup.ps1
 ```
 
-자동 시작 해제는 `-Uninstall` 옵션을 사용한다.
+자동 시작 해제는 `-Uninstall` 옵션을 사용한다. 로그온 항목은 `scripts/run-control-server-watchdog.ps1`을
+창 없이 실행하고, watchdog이 서버가 종료되면 다시 띄운다. 서버 출력은 `data/control/server.log`, 종료 기록은
+`data/control/server.exit`에 남는다.
+
+## 반복 실패 방지(루프 가드)와 인수인계
+
+로컬 풀은 일시 오류, 혼잡, 재베이스, 서버 재시작으로 인한 고아 작업을 재시도 예산 없이 다시 큐에 넣는다.
+이것만으로는 한 작업이 같은 방식으로 끝없이 실패할 수 있으므로, 실패와 고아 발생마다 원인과 정규화된
+실패 서명을 작업의 `attempts`에 기록하고 10분 주기 triage가 `smart_store_control/loopguard.py`로 판정한다.
+
+- 같은 서명 3회 연속 또는 시도 6회: 원인별 진단을 다음 프롬프트의 지시로 붙이고 한 번 더 기회를 준다.
+- 진단 뒤에도 같은 실패 2회 또는 시도 3회, 누적 작업 시간 3시간 초과: 로컬 풀에서 빼서 넘긴다.
+  코드 원인은 Codex `dev.task`로, 고아·인프라·기준선 실패(다른 작업의 게이트에서도 같은 테스트가 실패)는
+  Claude Code(`needs_claude`)로 넘긴다. 풀은 다음 작업을 계속 진행한다.
+- triage는 매번 `data/control/handoff.md`를 다시 써서 Codex·Claude Code가 원장 없이도 원인, 시도 이력,
+  산출물, 원래 지시를 보고 이어받을 수 있게 한다.
 
 대시보드는 상태 조회를 10초마다 갱신한다. 로컬 LLM 사용은 대시보드의 명시적 핸드오프 승인 뒤에만 가능하다.

@@ -18,6 +18,7 @@ from .review import run_once as review_once
 _LOCK = threading.Lock()
 STALE_MINUTES = 30
 REVIEW_STALE_MINUTES = 10
+DIAGNOSIS_EVERY_SECONDS = 30 * 60
 
 
 def _now() -> datetime:
@@ -67,15 +68,22 @@ def _run() -> None:
             "and do not change code, use Codex, or make external marketplace/payment calls. "
             f"Capacity={json.dumps(capacity, ensure_ascii=False)}\nState={json.dumps(state, ensure_ascii=False)}"
         )
-        try:
-            diagnosis = complete(prompt, endpoint=endpoint, model="qwen3.6-35b-a3b", timeout=30)
-        except Exception as exc:
-            # Diagnosis is observability, not a gate. Keep the implementation
-            # stream moving when the local PM endpoint is slow or unavailable.
-            diagnosis = f"diagnosis unavailable: {type(exc).__name__}: {exc}"[:500]
         ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
-        artifact = ARTIFACT_DIR / f"recovery-{_now().strftime('%Y%m%dT%H%M%SZ')}.md"
-        artifact.write_text(diagnosis, encoding="utf-8")
+        previous = max(ARTIFACT_DIR.glob("recovery-*.md"), key=lambda p: p.stat().st_mtime, default=None)
+        fresh = previous is not None and _now().timestamp() - previous.stat().st_mtime < DIAGNOSIS_EVERY_SECONDS
+        artifact = previous
+        if recovered or not fresh:
+            # Every recovery start used to ask the shared model for a diagnosis,
+            # so a queue the workers could not drain paid for one every tick.
+            # Ask only when something actually stalled, or once per interval.
+            try:
+                diagnosis = complete(prompt, endpoint=endpoint, model="qwen3.6-35b-a3b", timeout=30)
+            except Exception as exc:
+                # Diagnosis is observability, not a gate. Keep the implementation
+                # stream moving when the local PM endpoint is slow or unavailable.
+                diagnosis = f"diagnosis unavailable: {type(exc).__name__}: {exc}"[:500]
+            artifact = ARTIFACT_DIR / f"recovery-{_now().strftime('%Y%m%dT%H%M%SZ')}.md"
+            artifact.write_text(diagnosis, encoding="utf-8")
         after = pm_status()
         slots = max(1, int(capacity["effective"]))
         needs_review = any(t.get("status") == "needs_review" for t in after["tasks"])

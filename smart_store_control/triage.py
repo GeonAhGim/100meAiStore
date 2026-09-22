@@ -20,6 +20,12 @@ is the implementer's fault):
 Causes that need the implementer (gate failure, no diff, apply error) are left
 to the normal bounded retry. A task whose retry budget is spent, or that has
 been needs_decision for longer than ``DECISION_STALE_SECONDS``, is escalated.
+
+Before any of that, the loop guard (loopguard.py) looks at each task's attempt
+history, because the remedies above requeue without cost and could otherwise
+run one task forever. A looping task gets its diagnosis as an instruction
+once; if it loops again it is escalated and the pool moves to other work.
+Every run rewrites ``data/control/handoff.md`` for Codex and Claude Code.
 """
 from __future__ import annotations
 
@@ -28,7 +34,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .escalation import codex_outcome, hand_to_codex
+from . import loopguard
+from .escalation import codex_outcome, hand_to_codex, write_handoff
 from .pm import _CLAIM_LOCK, _load, _save, now
 from .state import CONTROL_DIR, read_json, write_json
 
@@ -58,6 +65,45 @@ def classify(task: dict[str, Any]) -> tuple[str, str | None]:
     return "implementer", None
 
 
+def _escalate(task: dict[str, Any], cause: str, actions: list[dict[str, Any]], *, codex: bool = True) -> None:
+    """Ladder: Codex pipeline when it can do the work, otherwise Claude Code."""
+    record = hand_to_codex(task) if codex else None
+    if record:
+        task.update({"status": "escalated", "phase": "codex", "escalation": record, "worker": "", "reviewer": "",
+                     "note": f"{cause}: handed to Codex job {record['job_id']}", "updated_at": now()})
+        actions.append({"task": task["id"], "cause": cause, "action": "codex"})
+    else:
+        task.update({"status": "blocked", "phase": "needs_claude", "worker": "", "reviewer": "", "updated_at": now()})
+        actions.append({"task": task["id"], "cause": cause, "action": "claude"})
+
+
+def _loop_guard(task: dict[str, Any], tasks: list[dict[str, Any]], actions: list[dict[str, Any]]) -> bool:
+    """Apply the loop guard's verdict; True when it acted and the task needs nothing else this run."""
+    if task.get("status") not in ("blocked", "ready", "needs_review") or task.get("phase") == "needs_claude":
+        return False
+    verdict = loopguard.verdict(task, tasks)
+    if not verdict:
+        return False
+    stamp = now()
+    guard = {"cause": verdict["cause"], "reason": verdict["reason"], "at": stamp,
+             "attempts": loopguard.summary(task)}
+    if verdict["action"] == "remediate":
+        task.setdefault("operator_instructions", []).append(
+            {"at": stamp, "source": "loopguard", "text": "[루프 감지] " + verdict["instruction"]})
+        task.update({"status": "ready", "worker": "", "reviewer": "", "phase": "loop_remediated", "retry_count": 0,
+                     "loop_guard": {**guard, "stage": "remediated"},
+                     "last_error": task.get("note") or task.get("last_error"),
+                     "note": f"loop guard: {verdict['reason']}; one more run with the diagnosis", "updated_at": stamp})
+        actions.append({"task": task["id"], "cause": f"loop:{verdict['cause']}", "action": "remediated"})
+        return True
+    task["loop_guard"] = {**guard, "stage": "escalated", "remedy": (task.get("loop_guard") or {}).get("cause")}
+    task["last_error"] = task.get("note") or task.get("last_error")
+    task["note"] = f"loop guard: {verdict['reason']}"
+    # The base or the machine is at fault, not the task: Claude Code fixes that directly.
+    _escalate(task, f"loop:{verdict['cause']}", actions, codex=verdict["cause"] not in loopguard.UNFIXABLE)
+    return True
+
+
 def run_triage(force: bool = False) -> dict[str, Any]:
     state = read_json(TRIAGE_PATH, {"last_run_at": None, "log": []})
     last = state.get("last_run_at")
@@ -73,6 +119,8 @@ def run_triage(force: bool = False) -> dict[str, Any]:
     with _CLAIM_LOCK:
         data = _load()
         for task in data.get("tasks", []):
+            if _loop_guard(task, data.get("tasks", []), actions):
+                continue
             status = task.get("status")
             if status == "blocked":
                 cause, remedy = classify(task)
@@ -85,14 +133,7 @@ def run_triage(force: bool = False) -> dict[str, Any]:
                 elif cause == "retries_exhausted" and task.get("phase") != "needs_claude" and not task.get("escalation"):
                     # includes tasks parked as needs_operator before the ladder existed
                     # Ladder: local pool spent -> Codex pipeline; no Codex -> Claude Code.
-                    record = hand_to_codex(task)
-                    if record:
-                        task.update({"status": "escalated", "phase": "codex", "escalation": record,
-                                     "note": f"local pool exhausted; handed to Codex job {record['job_id']}", "updated_at": now()})
-                        actions.append({"task": task["id"], "cause": cause, "action": "codex"})
-                    else:
-                        task.update({"phase": "needs_claude", "updated_at": now()})
-                        actions.append({"task": task["id"], "cause": cause, "action": "claude"})
+                    _escalate(task, cause, actions)
             elif status == "escalated":
                 record = task.get("escalation") or {}
                 outcome, details = codex_outcome(record) if record.get("engine") == "codex" else ("dead", {"reason": "no record"})
@@ -119,6 +160,8 @@ def run_triage(force: bool = False) -> dict[str, Any]:
                     actions.append({"task": task["id"], "cause": "decision_pending", "action": "escalated"})
         if actions or dirty:
             _save(data)
+        tasks = [dict(task) for task in data.get("tasks", [])]
+    write_handoff(tasks)
     stamp = now()
     log = (state.get("log") or [])[-49:]
     log.append({"at": stamp, "actions": actions})

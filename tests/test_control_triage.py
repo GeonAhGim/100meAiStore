@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
-from smart_store_control import pm, triage
+from smart_store_control import escalation, pm, triage
 
 
 def _stamp(delta=0):
@@ -32,9 +32,10 @@ class ControlTriageTests(unittest.TestCase):
         self.p2 = mock.patch.object(triage, "TRIAGE_PATH", self.state); self.p2.start()
         # no Codex in this test: the ladder's last rung is Claude Code
         self.p3 = mock.patch.object(triage, "hand_to_codex", lambda task: None); self.p3.start()
+        self.p4 = mock.patch.object(escalation, "HANDOFF_PATH", root / "handoff.md"); self.p4.start()
 
     def tearDown(self):
-        self.p1.stop(); self.p2.stop(); self.p3.stop(); self.tmp.cleanup()
+        self.p1.stop(); self.p2.stop(); self.p3.stop(); self.p4.stop(); self.tmp.cleanup()
 
     def _rows(self):
         return {t["id"]: t for t in json.loads(self.tasks.read_text(encoding="utf-8"))["tasks"]}

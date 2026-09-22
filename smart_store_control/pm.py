@@ -10,6 +10,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from . import loopguard
 from .state import CONTROL_DIR, read_json, snapshot, write_json
 
 
@@ -194,6 +195,8 @@ def finish(task_id: int, status_name: str, artifact: str = "", note: str = "") -
         data = _load()
         for task in data.get("tasks", []):
             if str(task["id"]) == str(task_id):
+                if status_name == "blocked":
+                    loopguard.record(task, note, "implement")
                 task.update({"status": status_name, "artifact": artifact, "note": note,
                              "phase": "finished" if status_name != "blocked" else "error",
                              "heartbeat_at": now(), "updated_at": now()})
@@ -333,6 +336,9 @@ def requeue_stale(stale_after_seconds: int = STALE_AFTER_SECONDS, note: str = "s
             if beat > cutoff:
                 continue
             next_status = "needs_review" if task.get("status") == "reviewing" else "ready"
+            # A task whose holder keeps dying (it may be what kills the server)
+            # must show up as a loop too, so an orphaning counts as an attempt.
+            loopguard.record(task, note, "orphaned")
             task.update({"status": next_status, "worker": "", "reviewer": "", "phase": "requeued",
                          "note": note, "updated_at": now()})
             recovered.append(int(task["id"]))
@@ -398,6 +404,8 @@ def finish_review(task_id: int, decision: str, artifact: str = "", note: str = "
                 # pass -> reviewed (landed by the autopilot); needs_decision ->
                 # a human reads the model's objection, no retry spent; else blocked.
                 final = {"pass": "reviewed", "needs_decision": "needs_decision"}.get(decision, "blocked")
+                if final == "blocked":
+                    loopguard.record(task, note, "review")
                 task.update({"status": final, "review_decision": decision, "review_artifact": artifact, "note": note,
                              "phase": "review_finished", "heartbeat_at": now(), "updated_at": now()})
                 _save(data)
@@ -474,6 +482,8 @@ def requeue_blocked(limit: int = 2, max_retries: int = 3) -> list[dict[str, Any]
         candidates = [
             task for task in data.get("tasks", [])
             if task.get("status") == "blocked" and int(task.get("retry_count", 0)) < max_retries
+            # A looping task waits for triage's loop guard instead of another blind retry.
+            and not loopguard.verdict(task, data.get("tasks", []))
         ]
         candidates.sort(key=lambda task: (-int(task.get("priority", 0)), int(task["id"])))
         reopened = []

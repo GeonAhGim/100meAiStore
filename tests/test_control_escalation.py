@@ -28,7 +28,7 @@ class EscalationTests(unittest.TestCase):
              "prompt": "Implement milestone M3.2 for smart_store only. Scope: readback. Exit criteria: duplicate ids are rejected; roundtrip preserved. Evidence/files to inspect: packages/store_core/orders.py; packages/store_core/order02.py. Work offline.",
              "note": "gate failed: full suite: rc=1", "last_error": "TypeError: create_command() got an unexpected keyword argument"},
         ]}), encoding="utf-8")
-        self.patches = [mock.patch.object(pm, "TASKS_PATH", self.tasks), mock.patch.object(triage, "TRIAGE_PATH", root / "triage.json"),
+        self.patches = [mock.patch.object(pm, "TASKS_PATH", self.tasks), mock.patch.object(triage, "TRIAGE_PATH", root / "triage.json"), mock.patch.object(escalation, "HANDOFF_PATH", root / "handoff.md"),
                         mock.patch.object(escalation, "read_json", lambda path, default: json.loads(self.runtime.read_text(encoding="utf-8")))]
         for p in self.patches:
             p.start()
