@@ -311,6 +311,9 @@ def requeue_blocked(limit: int = 2, max_retries: int = 3) -> list[dict[str, Any]
                 "status": "ready", "worker": "", "reviewer": "",
                 "phase": "retry_queued", "retry_count": retries,
                 "review_decision": None,
+                # Keep why it was blocked: the next attempt gets it as feedback
+                # and an operator can still read it after the note changes.
+                "last_error": task.get("note") or task.get("last_error"),
                 "note": f"local worker-pool retry {retries}/{max_retries}",
                 "updated_at": now(),
             })

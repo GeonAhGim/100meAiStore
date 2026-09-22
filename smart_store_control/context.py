@@ -18,6 +18,19 @@ import subprocess
 from pathlib import Path
 
 TREE_PREFIXES = ("packages/", "smart_store_aios/", "smart_store_control/", "tests/", "scripts/", "docs/implementation/")
+
+
+def git(args: list[str], cwd: Path, *, timeout: int = 120) -> subprocess.CompletedProcess:
+    """Run git with UTF-8 output decoding.
+
+    ``text=True`` alone decodes with the console codepage (cp949 here), which
+    raised UnicodeDecodeError on a diff containing Korean text and threw away
+    a finished agent run. Never let git output go through the locale codec.
+    """
+    return subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True, encoding="utf-8",
+                          errors="replace", check=False, timeout=timeout)
+
+
 MAX_TREE_LINES = 400
 MAX_FILES = 4
 MAX_FILE_CHARS = 6000
@@ -33,7 +46,7 @@ def named_files(prompt: str) -> list[str]:
 
 
 def file_tree(root: Path) -> list[str]:
-    completed = subprocess.run(["git", "ls-files"], cwd=str(root), capture_output=True, text=True, check=False)
+    completed = git(["ls-files"], root)
     paths = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
     keep = [p for p in paths if p.startswith(TREE_PREFIXES) and not p.endswith((".png", ".docx"))]
     return keep[:MAX_TREE_LINES]
@@ -66,14 +79,13 @@ REWRITE_MAX_RATIO = 0.8
 
 def rewrite_violation(root: Path, patch_path: Path) -> str | None:
     """Name the first pre-existing file the patch rewrites wholesale, else None (AIOS lesson #6)."""
-    numstat = subprocess.run(["git", "apply", "--numstat", str(patch_path)], cwd=str(root),
-                             capture_output=True, text=True, check=False).stdout
+    numstat = git(["apply", "--numstat", str(patch_path)], root).stdout
     for line in numstat.splitlines():
         parts = line.split("\t", 2)
         if len(parts) != 3 or parts[1] == "-":
             continue
         deleted, path = int(parts[1]), parts[2].strip()
-        shown = subprocess.run(["git", "show", f"HEAD:{path}"], cwd=str(root), capture_output=True, text=True, check=False)
+        shown = git(["show", f"HEAD:{path}"], root)
         if shown.returncode:
             continue  # new file
         lines = shown.stdout.count("\n")
@@ -86,8 +98,7 @@ def check_patch(root: Path, patch_path: Path) -> str | None:
     """Return None when the patch applies cleanly, else the git error text."""
     if patch_path.stat().st_size < 20:
         return "patch is empty"
-    completed = subprocess.run(["git", "apply", "--check", str(patch_path)], cwd=str(root),
-                               capture_output=True, text=True, check=False)
+    completed = git(["apply", "--check", str(patch_path)], root)
     if completed.returncode == 0:
         return None
     return (completed.stderr or completed.stdout).strip()[:1500] or "git apply --check failed"

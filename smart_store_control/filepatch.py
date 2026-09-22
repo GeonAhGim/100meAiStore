@@ -21,6 +21,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from .context import git
+
 MAX_PLAN_FILES = 4
 MAX_FILE_CHARS = 12000
 REWRITE_MIN_LINES = 40
@@ -133,11 +135,10 @@ def build_patch(root: Path, files: dict[str, str], planned: list[str], out_path:
         return "files outside the plan or tests/: " + ", ".join(bad)
     scratch = root / "data" / "control" / "scratch" / out_path.stem
     if scratch.exists():
-        subprocess.run(["git", "worktree", "remove", "--force", str(scratch)], cwd=str(root), capture_output=True)
+        git(["worktree", "remove", "--force", str(scratch)], root)
         shutil.rmtree(scratch, ignore_errors=True)
-    subprocess.run(["git", "worktree", "prune"], cwd=str(root), capture_output=True)
-    added = subprocess.run(["git", "worktree", "add", "-q", "--detach", str(scratch), "HEAD"], cwd=str(root),
-                           capture_output=True, text=True)
+    git(["worktree", "prune"], root)
+    added = git(["worktree", "add", "-q", "--detach", str(scratch), "HEAD"], root)
     if added.returncode:
         return "scratch worktree failed: " + (added.stderr or added.stdout).strip()[:300]
     try:
@@ -152,15 +153,15 @@ def build_patch(root: Path, files: dict[str, str], planned: list[str], out_path:
                     return f"wholesale rewrite rejected: {rel}"
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content, encoding="utf-8")
-        subprocess.run(["git", "add", "-A"], cwd=str(scratch), capture_output=True)
-        diff = subprocess.run(["git", "diff", "--cached", "--binary"], cwd=str(scratch), capture_output=True, text=True)
+        git(["add", "-A"], scratch)
+        diff = git(["diff", "--cached", "--binary"], scratch)
         if not diff.stdout.strip():
             return "response reproduced the existing files unchanged"
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(diff.stdout, encoding="utf-8")
         return None
     finally:
-        subprocess.run(["git", "worktree", "remove", "--force", str(scratch)], cwd=str(root), capture_output=True)
+        git(["worktree", "remove", "--force", str(scratch)], root)
         shutil.rmtree(scratch, ignore_errors=True)
 
 

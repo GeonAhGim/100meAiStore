@@ -50,6 +50,8 @@ def run_once(worker: str, apply_patch: bool = False) -> dict:
         if engine == "claude-local":
             # AIOS lane: the CLI edits real files with tools in a throwaway
             # worktree; we keep only its diff. See agent_engine.py.
+            for stale in (artifact, artifact.with_suffix(".agent.json")):
+                stale.unlink(missing_ok=True)  # never let an older engine's output be mistaken for this run
             diff, summary = run_agent(PROJECT_ROOT, task, model=model, base_url=endpoint,
                                       max_turns=int(llm.get("max_turns", 45)),
                                       wall_seconds=int(llm.get("wall_seconds", 1500)),

@@ -68,6 +68,15 @@ class AgentEngineTests(unittest.TestCase):
         self.assertIsNone(rewrite_violation(self.root, patch))
         self.assertTrue((self.root / "data" / "control" / "artifacts" / "task-7.agent.json").exists())
 
+    def test_korean_content_in_the_diff_survives_the_console_codepage(self):
+        def korean_spawn(argv, cwd, input, **kwargs):
+            (Path(cwd) / "pkg" / "mod.py").write_text("A = 1\n# 진행률 표시 — 한글 주석\n", encoding="utf-8")
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"result": "완료", "num_turns": 2}), "")
+        with mock.patch.object(agent_engine, "claude_executable", lambda: "claude"):
+            diff, summary = agent_engine.run_agent(self.root, self.task, model="qwen", base_url="http://127.0.0.1:8081", spawn=korean_spawn)
+        self.assertIn("진행률 표시", diff)
+        self.assertEqual("완료", summary["result"])
+
     def test_no_change_yields_empty_diff_and_cleanup_still_happens(self):
         def idle_spawn(argv, cwd, input, **kwargs):
             return subprocess.CompletedProcess(argv, 0, json.dumps({"result": "BLOCKED: nothing to do", "num_turns": 1}), "")

@@ -22,6 +22,8 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+
+from .context import git
 from typing import Callable
 
 BASE_ENV_KEYS = ("PATH", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "SYSTEMROOT", "TEMP", "TMP",
@@ -71,26 +73,25 @@ def task_prompt(task: dict) -> str:
 
 def prepare_worktree(root: Path, task_id: int) -> Path:
     path = root / "data" / "control" / "worktrees" / f"task-{task_id}"
-    subprocess.run(["git", "worktree", "prune"], cwd=str(root), capture_output=True)
+    git(["worktree", "prune"], root)
     if path.exists():
-        subprocess.run(["git", "worktree", "remove", "--force", str(path)], cwd=str(root), capture_output=True)
+        git(["worktree", "remove", "--force", str(path)], root)
         shutil.rmtree(path, ignore_errors=True)
     path.parent.mkdir(parents=True, exist_ok=True)
-    added = subprocess.run(["git", "worktree", "add", "-q", "--detach", str(path), "HEAD"], cwd=str(root),
-                           capture_output=True, text=True)
+    added = git(["worktree", "add", "-q", "--detach", str(path), "HEAD"], root)
     if added.returncode:
         raise RuntimeError("worktree add failed: " + (added.stderr or added.stdout).strip()[:300])
     return path
 
 
 def remove_worktree(root: Path, path: Path) -> None:
-    subprocess.run(["git", "worktree", "remove", "--force", str(path)], cwd=str(root), capture_output=True)
+    git(["worktree", "remove", "--force", str(path)], root)
     shutil.rmtree(path, ignore_errors=True)
 
 
 def worktree_diff(path: Path) -> str:
-    subprocess.run(["git", "add", "-A"], cwd=str(path), capture_output=True)
-    diff = subprocess.run(["git", "diff", "--cached", "--binary"], cwd=str(path), capture_output=True, text=True)
+    git(["add", "-A"], path)
+    diff = git(["diff", "--cached", "--binary"], path)
     return diff.stdout
 
 
