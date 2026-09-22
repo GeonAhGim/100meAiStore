@@ -12,7 +12,9 @@ from pathlib import Path
 from .agent_engine import run_agent
 from .context import check_patch, file_tree, rewrite_violation
 from .filepatch import SYSTEM, build_patch, looks_like_refusal, parse_files, parse_plan, plan_prompt, write_prompt
-from .local_llm import complete
+from contextlib import nullcontext
+
+from .local_llm import LOCAL_LLM_GATE, complete
 from .pm import EXTERNAL_ENGINES, POOLS_PATH, claim, finish, heartbeat_loop, lane_fault, lane_of, pause_lane, touch
 from .state import CONTROL_DIR, read_json
 
@@ -58,10 +60,15 @@ def run_once(worker: str, apply_patch: bool = False) -> dict:
             # worktree; we keep only its diff. See agent_engine.py.
             for stale in (artifact, artifact.with_suffix(".agent.json")):
                 stale.unlink(missing_ok=True)  # never let an older engine's output be mistaken for this run
-            diff, summary = run_agent(PROJECT_ROOT, task, model=model, base_url=endpoint,
-                                      max_turns=int(llm.get("max_turns", 45)),
-                                      wall_seconds=int(lane_pool.get("wall_seconds", llm.get("wall_seconds", 1500))),
-                                      artifact_dir=artifact.parent, engine=engine)
+            # A claude-local run is one long stream of proxy calls: hold the
+            # process-wide gate for its whole duration so reviews and
+            # diagnoses wait instead of adding a second stream to the model.
+            gate = LOCAL_LLM_GATE if engine == "claude-local" else nullcontext()
+            with gate:
+                diff, summary = run_agent(PROJECT_ROOT, task, model=model, base_url=endpoint,
+                                          max_turns=int(llm.get("max_turns", 45)),
+                                          wall_seconds=int(lane_pool.get("wall_seconds", llm.get("wall_seconds", 1500))),
+                                          artifact_dir=artifact.parent, engine=engine)
             if summary.get("stray_edits"):
                 stop.set()
                 return finish(task["id"], "blocked", note="agent wrote outside its worktree (edits quarantined, checkout restored): "

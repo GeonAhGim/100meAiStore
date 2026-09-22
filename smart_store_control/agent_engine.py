@@ -54,6 +54,9 @@ def local_env(model: str, base_url: str) -> dict[str, str]:
         "ANTHROPIC_SMALL_FAST_MODEL": model,
         "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
         "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+        # Identify smart_store to the AIOS proxy so it can route us to the
+        # external-client reserved slot instead of contending for AIOS slots.
+        "ANTHROPIC_CUSTOM_HEADERS": "X-AIOS-Client: smart_store",
     })
     return env
 

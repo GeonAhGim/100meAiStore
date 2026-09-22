@@ -28,9 +28,14 @@ class _Silent(BaseHTTPRequestHandler):
 
 
 class _Answering(BaseHTTPRequestHandler):
+    seen = {}
+
     def do_POST(self):  # noqa: N802
-        self.rfile.read(int(self.headers.get("Content-Length", 0)))
-        body = json.dumps({"choices": [{"message": {"content": "READY"}}]}).encode()
+        request = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+        _Answering.seen = {"path": self.path, "client": self.headers.get("X-AIOS-Client"),
+                           "version": self.headers.get("anthropic-version"), "system": request.get("system"),
+                           "messages": request.get("messages")}
+        body = json.dumps({"type": "message", "content": [{"type": "text", "text": "READY"}]}).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -59,8 +64,14 @@ class LocalLlmDeadlineTests(unittest.TestCase):
     def test_normal_reply_is_returned_and_watchdog_is_cancelled(self):
         endpoint = self._serve(_Answering)
         started = time.monotonic()
-        self.assertEqual("READY", complete("hello", endpoint=endpoint, model="m", timeout=5))
+        self.assertEqual("READY", complete("hello", endpoint=endpoint, model="m", timeout=5, system="be brief"))
         self.assertLess(time.monotonic() - started, 2)  # returned well before the deadline, watchdog did not fire
+        seen = _Answering.seen
+        self.assertEqual("/v1/messages", seen["path"])                       # Anthropic format through the proxy
+        self.assertEqual("smart_store", seen["client"])                      # routed as an external client
+        self.assertEqual("2023-06-01", seen["version"])
+        self.assertEqual("be brief", seen["system"])
+        self.assertEqual([{"role": "user", "content": "hello"}], seen["messages"])
 
     def test_non_local_endpoint_is_refused(self):
         with self.assertRaises(ValueError):
