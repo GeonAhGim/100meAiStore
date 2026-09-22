@@ -115,7 +115,8 @@ def grant_handoff() -> dict[str, Any]:
     )
     runtime.setdefault("local_llm", {"enabled": False, "endpoint": "http://127.0.0.1:8081"})
     runtime.setdefault("slots", {"aios_reserved": 6, "smart_store_reserved": 2, "active": 0})
-    runtime["slots"]["smart_store_reserved"] = max(2, int(runtime["slots"].get("smart_store_reserved", 2)))
+    # The reserved count is the operator's setting; never raise it behind their back.
+    runtime["slots"]["smart_store_reserved"] = max(1, int(runtime["slots"].get("smart_store_reserved", 2)))
     runtime["local_llm"]["enabled"] = True
     runtime["slots"]["active"] = min(
         int(runtime["slots"].get("smart_store_reserved", 2)),
