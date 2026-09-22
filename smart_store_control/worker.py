@@ -50,15 +50,16 @@ def run_once(worker: str, apply_patch: bool = False) -> dict:
         # Raw model output is kept next to the patch so a format failure can be
         # diagnosed from evidence instead of guessed at.
         artifact.with_suffix(".plan.txt").write_text(plan_text, encoding="utf-8")
-        planned = parse_plan(plan_text, set(tree))
-        if not planned:
+        modify, create = parse_plan(plan_text, set(tree))
+        if not modify and not create:
             stop.set()
-            return finish(task["id"], "blocked", note="plan named no existing file from the repository list")
-        contents = {p: (PROJECT_ROOT / p).read_text(encoding="utf-8", errors="replace") for p in planned}
+            return finish(task["id"], "blocked", note="plan named no existing file to modify and no new file to create")
+        contents = {p: (PROJECT_ROOT / p).read_text(encoding="utf-8", errors="replace") for p in modify}
         touch(task["id"], worker, "llm_request")
-        response = complete(write_prompt(task["prompt"], contents, feedback), endpoint=endpoint, model="qwen3.6-35b-a3b")
+        response = complete(write_prompt(task["prompt"], contents, feedback, create), endpoint=endpoint,
+                            model="qwen3.6-35b-a3b")
         artifact.with_suffix(".response.txt").write_text(response, encoding="utf-8")
-        build_error = build_patch(PROJECT_ROOT, parse_files(response), planned, artifact)
+        build_error = build_patch(PROJECT_ROOT, parse_files(response), modify + create, artifact)
         if build_error:
             stop.set()
             return finish(task["id"], "blocked", note=f"patch not produced: {build_error}")

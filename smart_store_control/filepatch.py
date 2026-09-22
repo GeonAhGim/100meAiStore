@@ -36,22 +36,48 @@ _FENCE_INFO = re.compile(r"(?:^|\n)```[\w+-]*[ :]+(?P<path>[\w./-]+\.[\w]+)\s*\n
 _JSON = re.compile(r"\[[^\[\]]*\]", re.DOTALL)
 
 
-def parse_plan(text: str, existing: set[str]) -> list[str]:
-    """Existing paths from the model's JSON list, in order, bounded."""
-    match = _JSON.search(text or "")
-    if not match:
-        return []
+CREATE_PREFIXES = ("packages/", "smart_store_aios/", "smart_store_control/", "tests/", "docs/implementation/", "scripts/")
+
+
+def _clean(path: str) -> str:
+    return path.strip().replace("\\", "/").removeprefix("./")
+
+
+def parse_plan(text: str, existing: set[str]) -> tuple[list[str], list[str]]:
+    """(modify, create) from the model's plan.
+
+    Accepts ``{"modify": [...], "create": [...]}`` or a bare JSON list (treated
+    as modify). ``modify`` keeps only existing paths; ``create`` keeps only new
+    paths under project prefixes. A task that adds files without touching any
+    existing one is a legitimate plan.
+    """
+    raw = text or ""
+    obj = re.search(r"\{.*\}", raw, re.DOTALL)
+    items: dict = {}
     try:
-        items = json.loads(match.group(0))
+        if obj:
+            loaded = json.loads(obj.group(0))
+            if isinstance(loaded, dict):
+                items = loaded
+        if not items:
+            match = _JSON.search(raw)
+            items = {"modify": json.loads(match.group(0))} if match else {}
     except json.JSONDecodeError:
-        return []
-    out = []
-    for item in items:
+        items = {}
+    modify: list[str] = []
+    for item in items.get("modify", []) or []:
         if isinstance(item, str):
-            path = item.strip().replace("\\", "/").removeprefix("./")
-            if path in existing and path not in out:
-                out.append(path)
-    return out[:MAX_PLAN_FILES]
+            path = _clean(item)
+            if path in existing and path not in modify:
+                modify.append(path)
+    create: list[str] = []
+    for item in items.get("create", []) or []:
+        if isinstance(item, str):
+            path = _clean(item)
+            if (path not in existing and path.startswith(CREATE_PREFIXES) and ".." not in path.split("/")
+                    and path not in create):
+                create.append(path)
+    return modify[:MAX_PLAN_FILES], create[:MAX_PLAN_FILES]
 
 
 def parse_files(text: str) -> dict[str, str]:
@@ -76,6 +102,7 @@ def parse_files(text: str) -> dict[str, str]:
 
 
 def allowed_target(path: str, planned: list[str]) -> bool:
+    """``planned`` holds both the modify and create lists; tests are always allowed."""
     return path in planned or (path.startswith("tests/") and path.endswith(".py"))
 
 
@@ -124,17 +151,20 @@ def plan_prompt(task_prompt: str, tree: list[str], feedback: str | None) -> str:
         "You are planning a small change in the smart_store repository. Task:\n" + task_prompt +
         "\n\nREPOSITORY FILES:\n" + "\n".join(tree) +
         ("\n\nPREVIOUS ATTEMPT FAILED:\n" + feedback[:1500] if feedback else "") +
-        f"\n\nReply with ONLY a JSON array of at most {MAX_PLAN_FILES} existing file paths from the list above that "
-        "you will modify. Tests you will add under tests/ do not need to be listed."
+        f"\n\nReply with ONLY a JSON object: {{\"modify\": [existing paths from the list above you will change], "
+        f"\"create\": [new paths you will add]}}. At most {MAX_PLAN_FILES} of each. New paths must start with one of: "
+        + ", ".join(CREATE_PREFIXES) + "."
     )
 
 
-def write_prompt(task_prompt: str, contents: dict[str, str], feedback: str | None) -> str:
+def write_prompt(task_prompt: str, contents: dict[str, str], feedback: str | None,
+                 create: list[str] | None = None) -> str:
     shown = "".join(f"\n\n<<<FILE {p}>>>\n{c[:MAX_FILE_CHARS]}\n<<<END>>>" for p, c in contents.items())
+    planned_new = ("\n\nNew files you planned to create: " + ", ".join(create)) if create else ""
     return (
         "You are the smart_store local implementation worker. Do not use Codex, do not modify any other "
         "project, preserve dry_run and safety gates. Task:\n" + task_prompt +
-        "\n\nCurrent contents of the files you planned to change:" + shown +
+        "\n\nCurrent contents of the files you planned to change:" + (shown or " (none)") + planned_new +
         ("\n\nPREVIOUS ATTEMPT FAILED:\n" + feedback[:1500] if feedback else "") +
         "\n\nReturn the COMPLETE new content of every file you change, and of any new test file under tests/, "
         "each wrapped exactly as:\n<<<FILE path/from/repo/root>>>\n...full file...\n<<<END>>>\n"

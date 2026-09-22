@@ -26,10 +26,15 @@ class FilePatchTests(unittest.TestCase):
         subprocess.run(["git", "-C", str(self.root), "worktree", "prune"], capture_output=True)
         self.tmp.cleanup()
 
-    def test_plan_keeps_only_existing_paths(self):
+    def test_plan_keeps_existing_modify_paths_and_project_create_paths(self):
         existing = {"pkg/mod.py", "pkg/big.py"}
-        self.assertEqual(["pkg/mod.py"], parse_plan('Sure: ["pkg/mod.py", "smart_store/worker.py", "pkg/mod.py"]', existing))
-        self.assertEqual([], parse_plan("no json here", existing))
+        self.assertEqual((["pkg/mod.py"], []),
+                         parse_plan('Sure: ["pkg/mod.py", "smart_store/worker.py", "pkg/mod.py"]', existing))
+        self.assertEqual(([], []), parse_plan("no json here", existing))
+        plan = '{"modify": ["pkg/mod.py", "nope.py"], "create": ["tests/test_new.py", "smart_store_control/new.py", "../x.py", "pkg/mod.py"]}'
+        self.assertEqual((["pkg/mod.py"], ["tests/test_new.py", "smart_store_control/new.py"]), parse_plan(plan, existing))
+        # a create-only plan is legitimate
+        self.assertEqual(([], ["tests/test_only.py"]), parse_plan('{"modify": [], "create": ["tests/test_only.py"]}', existing))
 
     def test_file_blocks_are_parsed(self):
         text = "<<<FILE pkg/mod.py>>>\nA = 1\nB = 3\n<<<END>>>\n<<<FILE tests/test_new.py>>>\nimport unittest\n<<<END>>>"
