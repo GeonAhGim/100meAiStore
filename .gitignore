@@ -14,3 +14,4 @@ docs/*.docx
 *.key
 *.p12
 *.pfx
+build/
