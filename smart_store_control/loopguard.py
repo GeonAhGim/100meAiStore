@@ -33,7 +33,7 @@ HISTORY = 20
 
 # (cause, markers in the lowered note, instruction for the next attempt or None when no instruction helps)
 CAUSES: tuple[tuple[str, tuple[str, ...], str | None], ...] = (
-    ("stray_edits", ("outside its worktree",),
+    ("stray_edits", ("outside its worktree", "live checkout denied"),
      "이전 시도가 작업 worktree 밖(C:\\smart_store 본 체크아웃)의 파일을 수정했다. 현재 작업 디렉터리 안의 "
      "상대 경로 파일만 편집하고 절대 경로로 쓰지 마라."),
     ("max_turns", ("error_max_turns", "max turns", "produced no change"),

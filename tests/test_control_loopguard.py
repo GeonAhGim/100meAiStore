@@ -31,6 +31,8 @@ class LoopGuardUnitTests(unittest.TestCase):
         self.assertEqual("patch_apply", loopguard.cause_of("gate failed: patch does not apply at HEAD"))
         self.assertEqual("gate_tests", loopguard.cause_of("gate failed: full suite: rc=1"))
         self.assertEqual("stray_edits", loopguard.cause_of(STRAY))
+        self.assertEqual("stray_edits", loopguard.cause_of(
+            "agent produced no change: 2 write(s) to the live checkout denied; hit max turns (46) without editing a file"))
         self.assertEqual("max_turns", loopguard.cause_of("agent produced no change: hit max turns (46) without editing a file"))
         self.assertEqual("wall_clock", loopguard.cause_of("lane paused until X: claude-local wall clock exceeded, model congested"))
         self.assertEqual("orphaned", loopguard.cause_of("requeued at startup: holder process is gone"))

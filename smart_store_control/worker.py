@@ -93,6 +93,8 @@ def run_once(worker: str, apply_patch: bool = False) -> dict:
                 if summary.get("subtype") == "error_max_turns":
                     # stderr then only carries CLI start-up warnings; name the real outcome.
                     reason = f"hit max turns ({summary.get('num_turns', '?')}) without editing a file"
+                if summary.get("denied_writes"):
+                    reason = f"{len(summary['denied_writes'])} write(s) to the live checkout denied; " + str(reason)
                 return finish(task["id"], "blocked", note="agent produced no change: " + str(reason)[:220])
             # Bytes, not text: Path.write_text would turn the diff's LF into
             # CRLF on Windows and git apply would then reject every hunk.

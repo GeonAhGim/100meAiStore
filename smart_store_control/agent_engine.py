@@ -266,6 +266,12 @@ def run_agent(root: Path, task: dict, *, model: str, base_url: str, max_turns: i
         else:
             result = {"result": (completed.stdout or "")[-2000:]}
         summary.update({k: result.get(k) for k in ("num_turns", "is_error", "subtype", "duration_ms") if k in result})
+        denied = [str((d.get("tool_input") or {}).get("file_path") or d.get("tool_name"))
+                  for d in result.get("permission_denials") or [] if isinstance(d, dict)]
+        if denied:
+            # Writes the checkout guard refused: tells "gave up after being denied"
+            # apart from "never tried" when a run ends without a diff.
+            summary["denied_writes"] = denied[:20]
         summary["result"] = str(result.get("result") or result.get("raw") or "")[:1500]
         summary["stderr"] = (completed.stderr or "")[-800:]
         stray = quarantine_stray_edits(root, before, int(task["id"]), artifact_dir)
