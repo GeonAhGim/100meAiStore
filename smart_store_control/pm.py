@@ -139,6 +139,56 @@ ACTIVE_STATES = {"in_progress", "reviewing"}
 HEARTBEAT_SECONDS = 15
 
 
+OPERATOR_ACTIONS = ("retry", "approve", "reject", "rereview", "park")
+
+
+def operator_action(task_id: int, action: str, reason: str = "") -> dict[str, Any]:
+    """One explicit operator decision on a task, recorded in the ledger.
+
+    retry:    blocked/needs_decision/planned -> ready with a fresh retry budget
+    approve:  needs_decision -> reviewed (the autopilot lands it)
+    reject:   needs_decision -> blocked, retry budget spent, reason kept
+    rereview: blocked with a patch artifact -> needs_review (objective gate again)
+    park:     any non-active -> planned (out of the queue, nothing lost)
+    """
+    if action not in OPERATOR_ACTIONS:
+        raise ValueError(f"unknown action {action}")
+    with _CLAIM_LOCK:
+        data = _load()
+        for task in data.get("tasks", []):
+            if str(task["id"]) != str(task_id):
+                continue
+            status = task.get("status")
+            if status in ACTIVE_STATES:
+                raise ValueError(f"task {task_id} is {status}; wait for it to finish")
+            stamp = now()
+            who = f"operator: {reason}".strip(": ") if reason else "operator"
+            if action == "retry":
+                task.update({"status": "ready", "worker": "", "reviewer": "", "phase": "retry_queued", "retry_count": 0,
+                             "last_error": task.get("note"), "note": f"{who} requested retry", "updated_at": stamp})
+            elif action == "approve":
+                if status != "needs_decision":
+                    raise ValueError("approve applies to needs_decision only")
+                task.update({"status": "reviewed", "phase": "operator_approved", "review_decision": "pass",
+                             "note": f"{who} approved after model objection", "updated_at": stamp})
+            elif action == "reject":
+                if status != "needs_decision":
+                    raise ValueError("reject applies to needs_decision only")
+                task.update({"status": "blocked", "phase": "operator_rejected", "review_decision": "fail",
+                             "retry_count": 99, "note": f"{who} rejected", "updated_at": stamp})
+            elif action == "rereview":
+                if not task.get("artifact"):
+                    raise ValueError("no patch artifact to review")
+                task.update({"status": "needs_review", "reviewer": "", "phase": "requeued_for_gate",
+                             "note": f"{who} requested re-review", "updated_at": stamp})
+            elif action == "park":
+                task.update({"status": "planned", "worker": "", "reviewer": "", "phase": "parked",
+                             "note": f"{who} parked", "updated_at": stamp})
+            _save(data)
+            return dict(task)
+    raise KeyError(f"unknown task {task_id}")
+
+
 STALE_AFTER_SECONDS = 5 * 60  # 20 missed heartbeats: the holder is gone, not slow
 
 
