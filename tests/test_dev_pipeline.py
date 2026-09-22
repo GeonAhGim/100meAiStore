@@ -38,6 +38,9 @@ class FakeCodex:
         action = self.actions.pop(0)
         if action == "throttle":
             return subprocess.CompletedProcess(command, 1, "", "error: rate limit reached")
+        if action == "throttle-exit0":  # what codex 0.154 actually does
+            return subprocess.CompletedProcess(
+                command, 0, "", "ERROR: You've hit your usage limit. ... or try again at Sep 26th, 2099 11:48 PM.")
         if action == "crash":
             raise RuntimeError("simulated worker crash")
         action(Path(cwd))
@@ -181,6 +184,36 @@ class DevPipelineTests(unittest.TestCase):
         self.assertEqual("queued", row["status"])
         self.assertEqual(0, row["attempts"])
         self.assertIn("throttled", row["last_error"])
+
+    def test_exit_zero_usage_limit_defers_until_the_stated_retry_time(self):
+        job = self._job()
+        worker, _ = self._worker(["throttle-exit0"])
+        worker.run_once()
+        row = self._row(job)
+        self.assertEqual("queued", row["status"])
+        self.assertEqual(0, row["attempts"])
+        self.assertIn("retry in", row["last_error"])
+        self.assertGreater(row["available_at"], "2099-09-26")  # deferred to the hint, not 30 min
+
+    def test_retry_hint_parser(self):
+        from smart_store_aios.dev_pipeline import _retry_at
+        parsed = _retry_at("or try again at Sep 26th, 2026 11:48 PM.")
+        self.assertIsNotNone(parsed)
+        self.assertEqual(2026, parsed.year)
+        self.assertIsNone(_retry_at("no hint here"))
+
+    def test_commit_in_main_checkout_during_a_stage_is_not_a_violation(self):
+        job = self._job()
+        marker = self.root / "docs" / "note.md"
+        marker.write_text("wip\n", encoding="utf-8")  # dirty before the stage
+
+        def spec_and_commit_main(cwd):
+            write_spec()(cwd)
+            subprocess.run(["git", "-C", str(self.root), "add", "-A"], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(self.root), "commit", "-q", "-m", "human commit"], check=True, capture_output=True)
+        worker, _ = self._worker([spec_and_commit_main, write_impl()])
+        worker.run_once()
+        self.assertEqual("done", self._row(job)["status"], self._row(job)["last_error"])
 
     def test_invalid_payload_is_dead_immediately(self):
         job = self.db.enqueue("dev.task", {"task_id": "x", "title": "t", "goal": "g", "acceptance": []})

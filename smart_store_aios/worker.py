@@ -4,6 +4,7 @@ import logging
 import subprocess
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import Settings
@@ -35,8 +36,12 @@ class Worker:
         try:
             result = self._dispatch(job)
         except UsageLimited as exc:
+            delay = self.settings.dev_usage_limit_delay_seconds
+            if exc.retry_at is not None:
+                until = (exc.retry_at - datetime.now(timezone.utc)).total_seconds()
+                delay = max(delay, int(until) + 60)
             try:
-                self.db.defer(job["id"], self.worker_id, self.settings.dev_usage_limit_delay_seconds, str(exc))
+                self.db.defer(job["id"], self.worker_id, delay, f"{exc} (retry in {delay}s)")
             except LeaseError as lost:
                 log.warning("job %s: %s", job["id"], lost)
             else:

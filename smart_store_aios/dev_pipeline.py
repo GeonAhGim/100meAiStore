@@ -35,6 +35,7 @@ import shutil
 import subprocess
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -47,7 +48,29 @@ REWRITE_MAX_RATIO = 0.8     # deleted lines / original lines above this = rewrit
 
 
 class UsageLimited(RuntimeError):
-    """The model backend is throttled; retry later without burning an attempt."""
+    """The model backend is throttled; retry later without burning an attempt.
+
+    ``retry_at`` is the UTC time the backend said it will accept work again,
+    when it said so; the worker defers until then instead of the default delay.
+    """
+
+    def __init__(self, message: str, retry_at: datetime | None = None) -> None:
+        super().__init__(message)
+        self.retry_at = retry_at
+
+
+def _retry_at(text: str) -> datetime | None:
+    """Parse 'try again at Sep 26th, 2026 11:48 PM' style hints. None if absent."""
+    match = re.search(r"try again at ([A-Za-z]{3,9} \d{1,2})(?:st|nd|rd|th)?,? (\d{4}) (\d{1,2}:\d{2} ?[AP]M)", text)
+    if not match:
+        return None
+    for fmt in ("%b %d %Y %I:%M %p", "%B %d %Y %I:%M %p", "%b %d %Y %I:%M%p", "%B %d %Y %I:%M%p"):
+        try:
+            local = datetime.strptime(" ".join(match.groups()), fmt)
+            return local.astimezone(timezone.utc)  # hint is in local time
+        except ValueError:
+            continue
+    return None
 
 
 class PermanentFailure(RuntimeError):
@@ -335,8 +358,9 @@ class DevPipeline:
         except subprocess.TimeoutExpired as exc:
             raise StageTimeout(f"{command[0]} exceeded {timeout}s") from exc
 
-    def _main_checkout_state(self) -> str:
-        return self._run(["git", "status", "--porcelain", "--", ".", ":!data"], self.repo_root, 60).stdout
+    def _main_checkout_state(self) -> set[str]:
+        out = self._run(["git", "status", "--porcelain", "--", ".", ":!data"], self.repo_root, 60).stdout
+        return {line[3:].strip() for line in out.splitlines() if line.strip()}
 
     def _codex(self, prompt: str, label: str) -> str:
         output = self.worktree / "data" / "codex" / f"{label}.txt"
@@ -346,11 +370,17 @@ class DevPipeline:
         before = self._main_checkout_state()
         started = time.monotonic()
         completed = self._run(command, self.worktree, self.settings.dev_stage_timeout_seconds)
-        if self._main_checkout_state() != before:
-            raise PermanentFailure(f"codex {label} modified the main checkout outside its worktree")
-        text = (completed.stdout + "\n" + completed.stderr).lower()
-        if completed.returncode and any(marker in text for marker in USAGE_LIMIT_MARKERS):
-            raise UsageLimited(f"codex {label}: backend throttled")
+        # Only paths that newly appear as modified/untracked count. Paths that
+        # vanish were committed by someone else, which is not Codex's doing.
+        appeared = self._main_checkout_state() - before
+        if appeared:
+            raise PermanentFailure(f"codex {label} modified the main checkout outside its worktree: "
+                                   + ", ".join(sorted(appeared))[:500])
+        text = completed.stdout + "\n" + completed.stderr
+        lowered = text.lower()
+        # Codex can print a usage-limit error and still exit 0, leaving no output.
+        if any(marker in lowered for marker in USAGE_LIMIT_MARKERS) and (completed.returncode or not output.exists()):
+            raise UsageLimited(f"codex {label}: backend throttled", retry_at=_retry_at(text))
         if completed.returncode:
             raise RuntimeError(f"codex {label} failed: {(completed.stderr or completed.stdout)[-2000:]}")
         self._save(**{f"seconds_{label}": round(time.monotonic() - started, 1)})
