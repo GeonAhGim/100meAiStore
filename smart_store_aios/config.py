@@ -30,6 +30,7 @@ class Settings:
     dev_push: bool = False
     dev_usage_limit_delay_seconds: int = 1800
     dev_triage_interval_seconds: int = 0
+    dev_model: str = "codex"  # "codex" runs the CLI; "manual" expects the worktree to be prepared by hand
 
     @classmethod
     def load(cls, path: str | Path) -> "Settings":
@@ -57,5 +58,6 @@ class Settings:
             dev_push=bool(dev.get("push", False)),
             dev_usage_limit_delay_seconds=int(dev.get("usage_limit_delay_seconds", 1800)),
             dev_triage_interval_seconds=int(dev.get("triage_interval_seconds", 0)),
+            dev_model=str(dev.get("model", "codex")),
         )
 

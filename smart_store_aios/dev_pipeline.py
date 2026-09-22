@@ -102,6 +102,8 @@ def codex_executable() -> str:
 
 
 def default_runner(command: list[str], cwd: Path, timeout: int) -> subprocess.CompletedProcess:
+    if command and command[0] == "codex":
+        command = [codex_executable(), *command[1:]]
     return subprocess.run(command, cwd=str(cwd), check=False, text=True, capture_output=True,
                           timeout=timeout, encoding="utf-8", errors="replace")
 
@@ -209,8 +211,11 @@ class DevPipeline:
         text = spec_file.read_text(encoding="utf-8")
         if not all(aid in text for aid in self.acceptance_ids):
             raise RuntimeError("spec is missing acceptance IDs: " + ", ".join(self.acceptance_ids))
-        self._git("add", "-A")
-        self._git("commit", "-q", "-m", f"spec({self.task_id}): L4 packet")
+        # Commit only the spec so any implementation already present (manual
+        # mode, or a model that got ahead of itself) still shows as the
+        # implement stage's diff.
+        self._git("add", "--", self.spec_path.as_posix())
+        self._git("commit", "-q", "-m", f"spec({self.task_id}): L4 packet", "--", self.spec_path.as_posix())
         self._save(spec_commit=self._head(), acceptance_digest=self._acceptance_digest())
         return "implement"
 
@@ -365,7 +370,12 @@ class DevPipeline:
     def _codex(self, prompt: str, label: str) -> str:
         output = self.worktree / "data" / "codex" / f"{label}.txt"
         output.parent.mkdir(parents=True, exist_ok=True)
-        command = [codex_executable(), "exec", "-C", str(self.worktree), "--sandbox", self.settings.codex_sandbox,
+        if self.settings.dev_model == "manual":
+            # An operator (or another agent) prepares the worktree by hand; the
+            # worker still enforces every guard, verifies and publishes.
+            self._save(**{f"manual_{label}": True})
+            return output.read_text(encoding="utf-8", errors="replace") if output.exists() else ""
+        command = ["codex", "exec", "-C", str(self.worktree), "--sandbox", self.settings.codex_sandbox,
                    "--output-last-message", str(output), prompt]
         before = self._main_checkout_state()
         started = time.monotonic()
@@ -394,9 +404,10 @@ class DevPipeline:
                 pyc.unlink(missing_ok=True)
         completed = self._run(self.test_command, self.worktree, self.settings.dev_test_timeout_seconds)
         output = completed.stdout + "\n" + completed.stderr
-        ran = re.search(r"Ran (\d+) tests?", output) or re.search(r"(\d+) passed", output)
+        # Take the last summary line: nested test subprocesses print their own.
+        counts = re.findall(r"Ran (\d+) tests?", output) or re.findall(r"(\d+) passed", output)
         return StageResult(completed.returncode == 0, output, {
-            "returncode": completed.returncode, "ran": int(ran.group(1)) if ran else None,
+            "returncode": completed.returncode, "ran": int(counts[-1]) if counts else None,
             "status": "OK" if completed.returncode == 0 else "FAILED"})
 
     def _security_scan(self) -> StageResult:
