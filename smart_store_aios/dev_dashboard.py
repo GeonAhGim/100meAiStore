@@ -428,8 +428,10 @@ class DevDashboardCollector:
     def _repository_state(self) -> dict[str, Any]:
         def run(args: list[str]) -> str:
             try:
+                # UTF-8, not the console codepage: a commit subject with an em dash
+                # raised UnicodeDecodeError under cp949 and broke the dashboard.
                 return subprocess.run(["git", *args], cwd=self.project_root, capture_output=True, text=True,
-                                      timeout=2, check=True).stdout
+                                      encoding="utf-8", errors="replace", timeout=2, check=True).stdout
             except (OSError, subprocess.SubprocessError):
                 return ""
         changed = [line[3:].strip() for line in run(["status", "--short", "--untracked-files=all"]).splitlines() if len(line) >= 4]
