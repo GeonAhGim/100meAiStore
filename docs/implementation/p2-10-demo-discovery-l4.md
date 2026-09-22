@@ -37,3 +37,9 @@ credentials, no real channel or supplier call. LIVE remains unapproved.
 | P2-10-DEMO-DISCOVERY-01 | A discovery run over synthetic fixtures reports required sample coverage per channel and supplier |
 | P2-10-DEMO-DISCOVERY-02 | External IDs survive a normalize-and-project roundtrip without loss |
 | P2-10-DEMO-DISCOVERY-03 | The report lists missing permissions or lost fields and the run is fail-closed when no DEMO approval record exists |
+
+## Evidence
+
+| Commit | Tests | Fix rounds | Verified by |
+|---|---|---|---|
+| `b61a2d9` | 1 ran, OK | 0 | worker `638ac9a1-5071-444c-91fd-a26500c3c770` |
