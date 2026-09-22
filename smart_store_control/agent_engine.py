@@ -94,7 +94,12 @@ def task_prompt(task: dict) -> str:
     body = {"id": task.get("id"), "title": task.get("title"), "milestone": task.get("milestone"),
             "prompt": task.get("prompt"), "retry_count": task.get("retry_count", 0),
             "last_error": task.get("last_error"), "note": task.get("note")}
-    return template + "\n\n## task\n```json\n" + json.dumps(body, ensure_ascii=False, indent=2) + "\n```\n"
+    instructions = task.get("operator_instructions") or []
+    extra = ""
+    if instructions:
+        extra = "\n\n## 운영자 추가 지시 (가장 우선한다)\n" + "\n".join(
+            f"- ({i.get('at', '')}) {i.get('text', '')}" for i in instructions[-5:])
+    return template + "\n\n## task\n```json\n" + json.dumps(body, ensure_ascii=False, indent=2) + "\n```\n" + extra
 
 
 def prepare_worktree(root: Path, task_id: int) -> Path:

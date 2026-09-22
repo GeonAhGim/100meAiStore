@@ -169,7 +169,8 @@ def claim(worker: str, role: str = "local-impl") -> dict[str, Any] | None:
             active += sum(1 for t in tasks if t.get("status") == "reviewing")  # reviews share the local slots
         if cap["effective"] <= active:
             return None
-        candidates = [t for t in tasks if t.get("role") == IMPL_ROLE and t.get("status") == "ready"]
+        candidates = [t for t in tasks if t.get("role") == IMPL_ROLE and t.get("status") == "ready"
+                      and (not t.get("preferred_lane") or t.get("preferred_lane") == role)]
         if not candidates:
             return None
         task = sorted(candidates, key=lambda t: (-int(t.get("priority", 0)), int(t["id"])))[0]
@@ -205,6 +206,51 @@ HEARTBEAT_SECONDS = 15
 
 
 OPERATOR_ACTIONS = ("retry", "approve", "reject", "rereview", "park")
+MAX_INSTRUCTION_CHARS = 4000
+
+
+def create_operator_task(title: str, instruction: str, *, milestone: str = "OPS", priority: int = 100,
+                         files: list[str] | None = None, lane: str | None = None) -> dict[str, Any]:
+    """A task the operator dictates from the dashboard. Same pipeline as every other task."""
+    title, instruction = title.strip()[:120], instruction.strip()[:MAX_INSTRUCTION_CHARS]
+    if not title or not instruction:
+        raise ValueError("title and instruction are required")
+    if lane and lane not in implementer_lanes():
+        raise ValueError(f"unknown lane {lane}")
+    prompt = instruction
+    if files:
+        prompt += "\n\nEvidence/files to inspect: " + "; ".join(f.strip() for f in files if f.strip()) + "."
+    prompt += " Work offline and fail closed; do not modify AIOS or make external marketplace/payment writes."
+    with _CLAIM_LOCK:
+        data = _load()
+        task = {"id": int(data.get("next_id", 1)), "milestone": milestone, "title": title, "role": IMPL_ROLE,
+                "priority": int(priority), "status": "ready", "prompt": prompt, "source": "operator",
+                "preferred_lane": lane, "operator_instructions": [], "created_at": now(), "updated_at": now(),
+                "note": "operator-dictated task"}
+        data["next_id"] = task["id"] + 1
+        data.setdefault("tasks", []).append(task)
+        _save(data)
+        return dict(task)
+
+
+def add_instruction(task_id: int, text: str) -> dict[str, Any]:
+    """Attach an operator instruction; the next run of the task sees it in its prompt.
+
+    A running CLI cannot be interrupted mid-turn, so the instruction lands on
+    the next attempt (retry, re-review feedback, or the next lane pickup).
+    """
+    text = text.strip()[:MAX_INSTRUCTION_CHARS]
+    if not text:
+        raise ValueError("instruction text is required")
+    with _CLAIM_LOCK:
+        data = _load()
+        for task in data.get("tasks", []):
+            if str(task["id"]) == str(task_id):
+                task.setdefault("operator_instructions", []).append({"at": now(), "text": text})
+                task["updated_at"] = now()
+                _save(data)
+                return dict(task)
+    raise KeyError(f"unknown task {task_id}")
 
 
 def operator_action(task_id: int, action: str, reason: str = "") -> dict[str, Any]:

@@ -40,8 +40,21 @@ details summary{cursor:pointer;color:var(--blue);font-size:13px}
 <body><main>
 <header>
   <div><div class="muted" style="font-size:11px;letter-spacing:2px">SMART_STORE · LOCAL CONTROL</div><h1>smart_store 관제</h1><small id="clock">연결 중…</small></div>
-  <div class="row"><span id="engine" class="chip">엔진 확인 중</span><button id="refresh">새로고침</button><button id="pmrun">PM 실행</button><button id="recover">재점검·복구</button></div>
+  <div class="row"><span id="engine" class="chip">엔진 확인 중</span><button id="refresh">새로고침</button><button class="primary" id="recover">워커풀 지금 호출</button><button id="pmrun">PM 실행</button><button id="dictate">직접 지시</button></div>
 </header>
+
+<section class="panel" id="dictatePanel" style="display:none;margin-bottom:14px;border-color:#2f7a5a">
+  <div class="row" style="justify-content:space-between"><h2>워커풀에 직접 지시</h2><small>새 작업으로 등록되어 다른 작업과 같은 게이트·리뷰·안착을 거칩니다.</small></div>
+  <div class="two" style="margin-top:10px">
+    <div><label><small>제목</small><br><input id="dTitleIn" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--line);background:#0f1520;color:var(--text)" placeholder="예: 주문 라우팅 중복 ID 거부 테스트 추가"></label>
+      <label style="display:block;margin-top:8px"><small>살펴볼 파일 (쉼표 구분, 선택)</small><br><input id="dFiles" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--line);background:#0f1520;color:var(--text)" placeholder="packages/store_core/orders.py, tests/store_core/test_order_routing.py"></label>
+      <div class="row" style="margin-top:8px"><label><small>레인</small> <select id="dLane" style="padding:6px;border-radius:8px;border:1px solid var(--line);background:#0f1520;color:var(--text)"><option value="">아무 레인</option><option value="local-impl">로컬 LLM</option><option value="gemini-impl">Gemini</option><option value="cursor-impl">Cursor</option></select></label>
+      <label><small>우선순위</small> <input id="dPri" type="number" value="100" style="width:70px;padding:6px;border-radius:8px;border:1px solid var(--line);background:#0f1520;color:var(--text)"></label>
+      <label><input id="dRunNow" type="checkbox" checked> 등록 즉시 워커풀 호출</label></div></div>
+    <div><label><small>지시 내용 (요구사항과 완료 조건을 쓰세요)</small><br><textarea id="dText" rows="8" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--line);background:#0f1520;color:var(--text);font:inherit"></textarea></label>
+      <div class="row" style="margin-top:8px"><button class="primary" id="dSubmit">작업 등록</button><button id="dCancel">닫기</button><small id="dStatus"></small></div></div>
+  </div>
+</section>
 
 <section class="hero">
   <div class="panel"><small>마일스톤 진척</small><div class="big" id="msPercent">—</div><div class="track"><div class="fill" id="msFill"></div></div><small id="msCount"></small><div class="groups" id="msGroups"></div></div>
@@ -109,12 +122,18 @@ async function load(){try{const r=await fetch('/api/control',{cache:'no-store'})
 async function act(id,action){const reason=action==='reject'||action==='approve'?prompt('사유(선택)')??'':'';const r=await fetch(`/api/task/${id}/${action}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reason})});const j=await r.json();if(!r.ok)alert(j.error||'실패');load()}
 async function open(id){const r=await fetch(`/api/task/${id}`,{cache:'no-store'});if(!r.ok)return;const d=await r.json(),t=d.task;$('dTitle').textContent=`#${t.id} ${t.title}`;
  const kv=[['상태',t.status],['단계',STAGE[t.phase]||t.phase],['마일스톤',t.milestone],['워커',t.worker||t.reviewer],['재시도',t.retry_count],['브랜치',t.branch?`${t.branch} @ ${t.commit}`:''],['갱신',t.updated_at]].filter(x=>x[1]!==undefined&&x[1]!==''&&x[1]!==null);
- const acts=['in_progress','reviewing'].includes(t.status)?'<span class=muted>실행 중에는 조작할 수 없습니다.</span>':`${t.status==='needs_decision'?'<button class=primary data-act=approve>승인하고 안착</button><button class=danger data-act=reject>거부</button>':''}<button data-act=retry>다시 시도</button>${t.artifact&&t.status!=='done'?'<button data-act=rereview>패치 재검토</button>':''}<button data-act=park>주차</button>`;
- $('dBody').innerHTML=`<table>${kv.map(([k,v])=>`<tr><th style="width:90px">${k}</th><td>${esc(v)}</td></tr>`).join('')}</table><p><b>사유·메모</b><br>${esc(t.note||'')}<br><span class=muted>${esc(t.last_error||'')}</span></p><p><b>요구사항</b><br><span class=muted>${esc(t.prompt||'')}</span></p><div class=row style="margin:8px 0">${acts}</div>${d.review?`<h3>리뷰·게이트</h3><pre>${esc(d.review)}</pre>`:''}${d.agent?`<h3>에이전트 요약</h3><pre>${esc(d.agent)}</pre>`:''}${d.patch?`<h3>패치</h3><pre>${esc(d.patch)}</pre>`:'<p class=muted>패치 없음</p>'}`;
- $('dBody').querySelectorAll('button[data-act]').forEach(b=>b.onclick=()=>act(t.id,b.dataset.act));$('drawer').classList.add('open')}
+ const acts=(['in_progress','reviewing'].includes(t.status)?'<span class=muted>실행 중에는 상태를 바꿀 수 없습니다.</span>':`${t.status==='needs_decision'?'<button class=primary data-act=approve>승인하고 안착</button><button class=danger data-act=reject>거부</button>':''}<button data-act=retry>다시 시도</button>${t.artifact&&t.status!=='done'?'<button data-act=rereview>패치 재검토</button>':''}<button data-act=park>주차</button>`)+`<button id="dInstruct">지시 추가</button>`;
+ const ins=(t.operator_instructions||[]).map(i=>`<li><small>${ago(i.at)}</small> ${esc(i.text)}</li>`).join('');
+ $('dBody').innerHTML=`<table>${kv.map(([k,v])=>`<tr><th style="width:90px">${k}</th><td>${esc(v)}</td></tr>`).join('')}</table><p><b>사유·메모</b><br>${esc(t.note||'')}<br><span class=muted>${esc(t.last_error||'')}</span></p><p><b>요구사항</b><br><span class=muted>${esc(t.prompt||'')}</span></p>${ins?`<p><b>운영자 지시</b><ul>${ins}</ul></p>`:''}<div class=row style="margin:8px 0">${acts}</div>${d.review?`<h3>리뷰·게이트</h3><pre>${esc(d.review)}</pre>`:''}${d.agent?`<h3>에이전트 요약</h3><pre>${esc(d.agent)}</pre>`:''}${d.patch?`<h3>패치</h3><pre>${esc(d.patch)}</pre>`:'<p class=muted>패치 없음</p>'}`;
+ $('dBody').querySelectorAll('button[data-act]').forEach(b=>b.onclick=()=>act(t.id,b.dataset.act));$('dInstruct').onclick=()=>instruct(t.id);$('drawer').classList.add('open')}
 document.addEventListener('click',e=>{const b=e.target.closest('button[data-act][data-id]');if(b){act(b.dataset.id,b.dataset.act);return}const c=e.target.closest('.card[data-id]');if(c&&!e.target.closest('button'))open(c.dataset.id)});
 $('dClose').onclick=()=>$('drawer').classList.remove('open');$('refresh').onclick=load;
-$('pmrun').onclick=async()=>{await fetch('/api/pm/run',{method:'POST'});load()};$('recover').onclick=async()=>{await fetch('/api/pm/recover',{method:'POST'});load()};
+$('pmrun').onclick=async()=>{await fetch('/api/pm/run',{method:'POST'});load()};$('recover').onclick=async()=>{const r=await fetch('/api/pm/recover',{method:'POST'});const j=await r.json();$('clock').textContent=`워커풀 호출: ${j.message||j.status}`;load()};
+$('dictate').onclick=()=>{const p=$('dictatePanel');p.style.display=p.style.display==='none'?'block':'none';if(p.style.display==='block')$('dText').focus()};$('dCancel').onclick=()=>$('dictatePanel').style.display='none';
+$('dSubmit').onclick=async()=>{const body={title:$('dTitleIn').value,instruction:$('dText').value,files:$('dFiles').value,lane:$('dLane').value,priority:Number($('dPri').value)||100,run_now:$('dRunNow').checked};
+ const r=await fetch('/api/task/new',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json();
+ if(!r.ok){$('dStatus').textContent=j.error||'실패';return}$('dStatus').textContent=`#${j.task.id} 등록됨${j.recovery?' · 워커풀 호출됨':''}`;$('dText').value='';$('dTitleIn').value='';load()};
+async function instruct(id){const text=prompt('이 작업에 추가할 지시 (다음 실행에 반영됩니다)');if(!text)return;const r=await fetch(`/api/task/${id}/instruct`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});if(!r.ok)alert((await r.json()).error||'실패');open(id)}
 load();setInterval(()=>{if(!document.hidden)load()},10000);
 </script>
 </body></html>

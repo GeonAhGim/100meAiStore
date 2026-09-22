@@ -19,6 +19,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from .blocked_triage import offline_prep_status
+
 
 DEFAULT_CODEX_HOME = Path.home() / ".codex"
 STALE_AFTER_SECONDS = 180
@@ -181,8 +183,13 @@ class DevDashboardCollector:
         safe_items = [{"id": _redact(x.get("id"), 20), "title": _redact(x.get("title"), 120),
                        "status": x["status"], "evidence": _redact(x.get("evidence"), 180) or None,
                        "phase": _redact(x.get("phase", value.get("default_phase")), 40),
-                       "approval_gate": _redact(x.get("approval_gate"), 60) or None}
+                       "approval_gate": _redact(x.get("approval_gate"), 60) or None,
+                       "approval_mode": _redact(x.get("approval_mode"), 20) or None}
                       for x in items if isinstance(x, dict) and x.get("status") in allowed]
+        prep = offline_prep_status(self.project_root)
+        for x in safe_items:
+            if x["status"] == "blocked":
+                x["offline_prep"] = prep.get(x["id"])
         total = len(safe_items)
         completed = sum(x["status"] == "completed" for x in safe_items)
         phases = []
@@ -421,8 +428,10 @@ class DevDashboardCollector:
     def _repository_state(self) -> dict[str, Any]:
         def run(args: list[str]) -> str:
             try:
+                # UTF-8, not the console codepage: a commit subject with an em dash
+                # raised UnicodeDecodeError under cp949 and broke the dashboard.
                 return subprocess.run(["git", *args], cwd=self.project_root, capture_output=True, text=True,
-                                      timeout=2, check=True).stdout
+                                      encoding="utf-8", errors="replace", timeout=2, check=True).stdout
             except (OSError, subprocess.SubprocessError):
                 return ""
         changed = [line[3:].strip() for line in run(["status", "--short", "--untracked-files=all"]).splitlines() if len(line) >= 4]

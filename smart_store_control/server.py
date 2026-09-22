@@ -20,7 +20,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .autopilot import start as start_autopilot, status as autopilot_status
-from .pm import operator_action, requeue_stale, status as pm_status
+from .pm import add_instruction, create_operator_task, operator_action, requeue_stale, status as pm_status
 from .pm_cycle import current as pm_cycle_status, start as start_pm_cycle
 from .recovery import current as recovery_status, start as start_recovery
 from .state import CONTROL_DIR, grant_handoff, revoke_handoff, snapshot
@@ -129,6 +129,15 @@ class Handler(BaseHTTPRequestHandler):
                 result = start_recovery()
             elif path == "/api/triage":
                 result = run_triage(force=True)
+            elif path == "/api/task/new":
+                # Operator-dictated task: enters the same queue, gate and review as any other.
+                task = create_operator_task(str(payload.get("title") or ""), str(payload.get("instruction") or ""),
+                                            priority=int(payload.get("priority") or 100),
+                                            files=[f for f in str(payload.get("files") or "").replace("\n", ",").split(",") if f.strip()],
+                                            lane=str(payload.get("lane") or "") or None)
+                result = {"task": task, "recovery": start_recovery() if payload.get("run_now", True) else None}
+            elif len(parts) == 5 and parts[1:3] == ["api", "task"] and parts[4] == "instruct":
+                result = add_instruction(parts[3], str(payload.get("text") or ""))
             elif len(parts) == 5 and parts[1:3] == ["api", "task"]:
                 result = operator_action(parts[3], parts[4], str(payload.get("reason") or "")[:200])
             else:
