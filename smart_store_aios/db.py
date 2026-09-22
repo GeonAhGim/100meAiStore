@@ -34,6 +34,10 @@ CREATE TABLE IF NOT EXISTS audit_log (
 """
 
 
+class LeaseError(RuntimeError):
+    """Raised when a worker acts on a job whose lease it no longer owns."""
+
+
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -88,10 +92,21 @@ class StoreDB:
             result["payload"] = json.loads(result["payload"])
             return result
 
-    def complete(self, job_id: int, event: str, details: dict) -> None:
+    def _owned_running(self, connection: sqlite3.Connection, job_id: int, worker_id: str, now: str) -> sqlite3.Row:
+        row = connection.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+        if row is None:
+            connection.execute("ROLLBACK")
+            raise LeaseError(f"job {job_id} not found")
+        if row["status"] != "running" or row["worker_id"] != worker_id or (row["leased_until"] or "") <= now:
+            connection.execute("ROLLBACK")
+            raise LeaseError(f"job {job_id} lease is stale or owned by another worker")
+        return row
+
+    def complete(self, job_id: int, worker_id: str, event: str, details: dict) -> None:
         now = utcnow().isoformat()
         with self.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            self._owned_running(connection, job_id, worker_id, now)
             connection.execute(
                 "UPDATE jobs SET status='done', leased_until=NULL, updated_at=? WHERE id=?",
                 (now, job_id),
@@ -102,16 +117,28 @@ class StoreDB:
             )
             connection.execute("COMMIT")
 
-    def fail(self, job_id: int, message: str, max_attempts: int) -> None:
+    def fail(self, job_id: int, worker_id: str, message: str, max_attempts: int) -> str:
+        """Release a lease after a failure. Returns the new status ('queued' or 'dead')."""
         now = utcnow()
         with self.connect() as connection:
-            attempts = int(connection.execute("SELECT attempts FROM jobs WHERE id=?", (job_id,)).fetchone()[0])
+            connection.execute("BEGIN IMMEDIATE")
+            row = self._owned_running(connection, job_id, worker_id, now.isoformat())
+            attempts = int(row["attempts"])
             status = "dead" if attempts >= max_attempts else "queued"
             delay = min(2 ** attempts, 60)
+            available = now if status == "dead" else now + timedelta(seconds=delay)
             connection.execute(
                 "UPDATE jobs SET status=?, available_at=?, leased_until=NULL, last_error=?, updated_at=? WHERE id=?",
-                (status, (now + timedelta(minutes=delay)).isoformat(), message[:2000], now.isoformat(), job_id),
+                (status, available.isoformat(), message[:2000], now.isoformat(), job_id),
             )
+            connection.execute(
+                "INSERT INTO audit_log(event,entity_id,details,created_at) VALUES(?,?,?,?)",
+                ("job.failed", str(job_id),
+                 json.dumps({"status": status, "attempts": attempts, "error": message[:500]}, ensure_ascii=False),
+                 now.isoformat()),
+            )
+            connection.execute("COMMIT")
+            return status
 
     def stats(self) -> list[dict]:
         with self.connect() as connection:

@@ -48,7 +48,9 @@ def parser() -> argparse.ArgumentParser:
     enqueue.add_argument("kind")
     enqueue.add_argument("payload", help="JSON object")
     worker = commands.add_parser("worker")
-    worker.add_argument("--once", action="store_true")
+    worker.add_argument("--once", action="store_true", help="process at most one job and exit")
+    worker.add_argument("--drain", action="store_true", help="process until the queue is empty, then exit")
+    worker.add_argument("--poll-seconds", type=float, default=2.0, help="idle sleep in daemon mode (the default)")
     commands.add_parser("status")
     economics = commands.add_parser("economics")
     economics.add_argument("--price", type=int, required=True)
@@ -73,9 +75,15 @@ def main() -> None:
         worker = Worker(settings)
         if args.once:
             print(json.dumps({"processed": worker.run_once()}))
-        else:
+        elif args.drain:
             while worker.run_once():
                 pass
+        else:
+            import signal
+            stopping: list[bool] = []
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                signal.signal(sig, lambda *_: stopping.append(True))
+            worker.run_forever(args.poll_seconds, stop=lambda: bool(stopping))
     elif args.command == "status":
         print(json.dumps(db.stats(), ensure_ascii=False))
     elif args.command == "economics":

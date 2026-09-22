@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-import json
+import logging
 import subprocess
+import time
 import uuid
 from pathlib import Path
 
 from .config import Settings
-from .db import StoreDB
+from .db import LeaseError, StoreDB
+
+log = logging.getLogger(__name__)
 
 
 class Worker:
@@ -16,16 +19,36 @@ class Worker:
         self.worker_id = str(uuid.uuid4())
 
     def run_once(self) -> bool:
+        """Claim and process one job. Returns False when nothing was claimable.
+
+        A job failure is recorded on the job (retry or dead) and never
+        propagates, so a daemon loop survives bad jobs. A lost lease is logged
+        and the job is left to whichever worker now owns it.
+        """
         job = self.db.claim(self.worker_id, self.settings.lease_seconds)
         if job is None:
             return False
         try:
             result = self._dispatch(job["kind"], job["payload"])
-            self.db.complete(job["id"], f"{job['kind']}.completed", result)
-        except Exception as exc:
-            self.db.fail(job["id"], str(exc), self.settings.max_attempts)
-            raise
+        except Exception as exc:  # noqa: BLE001 - job isolation boundary
+            try:
+                status = self.db.fail(job["id"], self.worker_id, str(exc), self.settings.max_attempts)
+            except LeaseError as lost:
+                log.warning("job %s: %s", job["id"], lost)
+            else:
+                log.warning("job %s failed (%s): %s", job["id"], status, exc)
+            return True
+        try:
+            self.db.complete(job["id"], self.worker_id, f"{job['kind']}.completed", result)
+        except LeaseError as lost:
+            log.warning("job %s: %s", job["id"], lost)
         return True
+
+    def run_forever(self, poll_seconds: float = 2.0, stop=None) -> None:
+        """Poll until ``stop()`` is truthy. Sleeps ``poll_seconds`` after an empty claim."""
+        while not (stop and stop()):
+            if not self.run_once():
+                time.sleep(poll_seconds)
 
     def _dispatch(self, kind: str, payload: dict) -> dict:
         if kind == "codex.task":
@@ -44,7 +67,11 @@ class Worker:
             "codex", "exec", "-C", str(Path.cwd()), "--sandbox", self.settings.codex_sandbox,
             "--output-last-message", str(output_path), prompt,
         ]
-        completed = subprocess.run(command, check=False, text=True, capture_output=True)
+        timeout = max(1, self.settings.lease_seconds - 5)
+        try:
+            completed = subprocess.run(command, check=False, text=True, capture_output=True, timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(f"codex exec exceeded {timeout}s lease budget") from exc
         if completed.returncode:
             raise RuntimeError(completed.stderr or completed.stdout)
         return {"returncode": completed.returncode, "output": str(output_path)}

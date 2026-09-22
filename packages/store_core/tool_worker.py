@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from .domain import AttemptState, Capability, OutboxState
-from .errors import ConflictError, NotFoundError
+from .domain import AttemptState, Capability
+from .errors import ConflictError
 from .execution import DemoExecutionControlPlane
 from .synthetic_provider import DurableSyntheticProvider
 
@@ -30,17 +30,41 @@ class DemoToolCommandWorker:
         self.lease_seconds = lease_seconds
 
     def process(self, context, event_id: str):
+        """Claim one named outbox event and drive it. Raises on binding errors."""
         self.service.require(context, Capability.TENANT_ADMIN)
         now = self.service._clock()
-        event = next((row for row in self.service.repo.outbox_for(context.tenant_id)
-                      if row.id == event_id), None)
-        if event is None:
-            raise NotFoundError("outbox event not found")
-        if event.topic != "tool.command" or event.state == OutboxState.COMPLETED:
-            raise ConflictError("processable tool command event required")
         event = self.service.repo.claim_outbox(
-            context.tenant_id, event.id, self.worker_id, now,
+            context.tenant_id, event_id, self.worker_id, now,
             now + timedelta(seconds=self.lease_seconds))
+        return self._drive(context, event)
+
+    def process_next(self, context, *, max_attempts: int = 5):
+        """Claim the next ready ``tool.command`` event, if any, and drive it.
+
+        Returns ``None`` when nothing is claimable. Unlike :meth:`process`, a
+        failure while driving the event is recorded with ``fail_outbox`` (retry
+        with backoff, or dead after ``max_attempts``) instead of propagating,
+        so a polling loop survives a bad event. Events of other topics are
+        released as failed so they do not block the queue forever.
+        """
+        self.service.require(context, Capability.TENANT_ADMIN)
+        now = self.service._clock()
+        event = self.service.repo.claim_next_outbox(
+            context.tenant_id, self.worker_id, now,
+            now + timedelta(seconds=self.lease_seconds))
+        if event is None:
+            return None
+        try:
+            return self._drive(context, event)
+        except Exception as exc:  # noqa: BLE001 - event isolation boundary
+            self.service.repo.fail_outbox(
+                context.tenant_id, event.id, self.worker_id, event.fencing_token,
+                str(exc), self.service._clock(), max_attempts=max_attempts)
+            return None
+
+    def _drive(self, context, event):
+        if event.topic != "tool.command":
+            raise ConflictError("processable tool command event required")
         command_id = event.payload.get("command_id")
         command = self.service.repo.get_tool_command(context.tenant_id, command_id)
         if (event.aggregate_ref != command.id or command.state != "accepted"
