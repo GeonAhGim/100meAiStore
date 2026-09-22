@@ -228,7 +228,9 @@ def finish_review(task_id: int, decision: str, artifact: str = "", note: str = "
         data = _load()
         for task in data.get("tasks", []):
             if str(task["id"]) == str(task_id):
-                final = "reviewed" if decision == "pass" else "blocked"
+                # pass -> reviewed (landed by the autopilot); needs_decision ->
+                # a human reads the model's objection, no retry spent; else blocked.
+                final = {"pass": "reviewed", "needs_decision": "needs_decision"}.get(decision, "blocked")
                 task.update({"status": final, "review_decision": decision, "review_artifact": artifact, "note": note,
                              "phase": "review_finished", "heartbeat_at": now(), "updated_at": now()})
                 _save(data)

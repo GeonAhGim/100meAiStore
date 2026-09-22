@@ -6,6 +6,7 @@ import logging
 import threading
 from datetime import datetime, timezone
 
+from .land import land_reviewed
 from .pm import ensure_workflow_tasks, requeue_blocked, status as pm_status
 from .recovery import current as recovery_status, start as start_recovery
 from .state import CONTROL_DIR, grant_handoff, read_json, write_json
@@ -47,6 +48,9 @@ def tick() -> dict:
         pm = pm_status()
     queued = []
     reopened = []
+    landed = land_reviewed()
+    if landed:
+        pm = pm_status()
     if not any(task.get("status") in {"ready", "needs_review", "in_progress", "reviewing"} for task in pm["tasks"]):
         reopened = requeue_blocked(limit=2)
         if reopened:
