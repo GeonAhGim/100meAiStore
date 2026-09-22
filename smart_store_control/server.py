@@ -24,6 +24,7 @@ from .pm import operator_action, requeue_stale, status as pm_status
 from .pm_cycle import current as pm_cycle_status, start as start_pm_cycle
 from .recovery import current as recovery_status, start as start_recovery
 from .state import CONTROL_DIR, grant_handoff, revoke_handoff, snapshot
+from .triage import run_triage, status as triage_status
 
 HERE = Path(__file__).resolve().parent
 PAGE = HERE / "dashboard.html"
@@ -64,6 +65,7 @@ def control_view() -> dict:
     view["pm_cycle"] = pm_cycle_status()
     view["pm_recovery"] = recovery_status()
     view["autopilot"] = autopilot_status()
+    view["triage"] = triage_status()
     view["progress"] = {"milestones": milestone_progress(view), "tasks": task_progress(view["pm"].get("tasks", []))}
     view["server_time"] = datetime.now(timezone.utc).isoformat()
     return view
@@ -125,6 +127,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = start_pm_cycle()
             elif path == "/api/pm/recover":
                 result = start_recovery()
+            elif path == "/api/triage":
+                result = run_triage(force=True)
             elif len(parts) == 5 and parts[1:3] == ["api", "task"]:
                 result = operator_action(parts[3], parts[4], str(payload.get("reason") or "")[:200])
             else:

@@ -97,7 +97,10 @@ function render(d){const pm=d.pm||{},tasks=pm.tasks||[],p=d.progress||{},ms=p.mi
  $('recent').innerHTML=recent.map(t=>`<tr><td>${ago(t.updated_at)}</td><td>#${esc(t.id)}</td><td class="${t.status==='done'?'ok':t.status==='blocked'?'bad':t.status==='needs_decision'?'warn':''}">${esc(t.status)}</td><td>${reason(t).slice(0,90)}</td></tr>`).join('');
  const items=((d.milestones||{}).milestones||[]);$('msTable').innerHTML='<tr><th>ID</th><th>작업</th><th>상태</th><th>완료 조건</th></tr>'+items.map(m=>`<tr><td>${esc(m.id)}</td><td>${esc(m.title)}</td><td class="${m.status==='done'?'ok':''}">${esc(m.status)}</td><td class=muted>${esc(m.exit_criteria)}</td></tr>`).join('');
  $('parked').innerHTML=by.planned.map(card).join('')||'<span class=muted>없음</span>';
- const rec=d.pm_recovery||{},ap=d.autopilot||{};$('foot').textContent=`autopilot ${ap.enabled?'on':'off'} · 복구 ${rec.status||'-'} ${rec.updated_at?ago(rec.updated_at):''} · LLM 호출 0 (관제는 원장만 읽습니다)`;
+ const rec=d.pm_recovery||{},ap=d.autopilot||{},tr=d.triage||{};
+ const trLines=(tr.recent||[]).slice(-3).reverse().map(e=>`${ago(e.at)}: `+e.actions.map(a=>`#${a.task} ${a.cause}→${a.action==='requeued'?'재대기':'운영자 에스컬레이션'}`).join(', ')).join(' | ');
+ $('foot').innerHTML=`autopilot ${ap.enabled?'on':'off'} · 복구 ${esc(rec.status||'-')} ${rec.updated_at?ago(rec.updated_at):''} · 막힘 점검 10분 주기, 마지막 ${tr.last_run_at?ago(tr.last_run_at):'아직 없음'} <button id="triageNow" style="padding:2px 8px;font-size:12px">지금 점검</button><br>${esc(trLines)||'최근 자동 조치 없음'} · LLM 호출 0 (관제는 원장만 읽습니다)`;
+ $('triageNow').onclick=async()=>{await fetch('/api/triage',{method:'POST'});load()};
 }
 async function load(){try{const r=await fetch('/api/control',{cache:'no-store'});render(await r.json())}catch(e){$('clock').textContent='서버에 연결할 수 없습니다'}}
 async function act(id,action){const reason=action==='reject'||action==='approve'?prompt('사유(선택)')??'':'';const r=await fetch(`/api/task/${id}/${action}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reason})});const j=await r.json();if(!r.ok)alert(j.error||'실패');load()}
