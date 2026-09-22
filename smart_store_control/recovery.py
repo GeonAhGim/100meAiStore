@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 from .local_llm import complete
-from .pm import TASKS_PATH, effective_capacity, finish, status as pm_status
+from .pm import TASKS_PATH, effective_capacity, finish, requeue_stale, status as pm_status
 from .pm_cycle import ARTIFACT_DIR, RUN_PATH
 from .state import CONTROL_DIR, read_json, write_json
 from .worker import run_once
@@ -46,18 +46,10 @@ def _save(value: dict) -> None:
 
 
 def _requeue_stale() -> list[int]:
-    data = read_json(TASKS_PATH, {"tasks": []})
-    recovered = []
-    for task in data.get("tasks", []):
-        started = _parse(task.get("started_at"))
-        stale_limit = REVIEW_STALE_MINUTES if task.get("status") == "reviewing" else STALE_MINUTES
-        if task.get("status") in {"in_progress", "reviewing"} and started and _now() - started > timedelta(minutes=stale_limit):
-            next_status = "needs_review" if task.get("status") == "reviewing" else "ready"
-            task.update({"status": next_status, "worker": "", "reviewer": "", "updated_at": _stamp(), "note": "supervisor requeued stale worker"})
-            recovered.append(int(task["id"]))
-    if recovered:
-        write_json(TASKS_PATH, data)
-    return recovered
+    # Heartbeat-based and lock-protected (see pm.requeue_stale). The old rule
+    # keyed on started_at, so a dead holder was ignored for 30 minutes while a
+    # long but healthy run could be yanked; and it wrote the ledger unlocked.
+    return requeue_stale()
 
 
 def _run() -> None:

@@ -11,6 +11,8 @@ from .pm import status as pm_status
 from .pm_cycle import current as pm_cycle_status, start as start_pm_cycle
 from .recovery import current as recovery_status, start as start_recovery
 from .autopilot import start as start_autopilot, status as autopilot_status
+from .pm import requeue_stale
+import logging
 from .state import grant_handoff, revoke_handoff, snapshot
 
 
@@ -89,6 +91,11 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8877)
     args = parser.parse_args()
+    # Startup self-check: tasks held by the previous process can never
+    # heartbeat again. Release them before any worker or autopilot runs.
+    orphans = requeue_stale(stale_after_seconds=0, note="requeued at startup: holder process is gone")
+    if orphans:
+        logging.getLogger(__name__).warning("released %d orphaned task(s) at startup: %s", len(orphans), orphans)
     start_autopilot()
     ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()
 

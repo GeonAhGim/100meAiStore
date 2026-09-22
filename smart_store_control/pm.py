@@ -139,6 +139,41 @@ ACTIVE_STATES = {"in_progress", "reviewing"}
 HEARTBEAT_SECONDS = 15
 
 
+STALE_AFTER_SECONDS = 5 * 60  # 20 missed heartbeats: the holder is gone, not slow
+
+
+def requeue_stale(stale_after_seconds: int = STALE_AFTER_SECONDS, note: str = "supervisor requeued stale worker") -> list[int]:
+    """Return held tasks whose heartbeat stopped to the queue.
+
+    Keyed on ``heartbeat_at``, not ``started_at``: a live worker beats every
+    ``HEARTBEAT_SECONDS`` however long its model call takes, while a worker
+    whose process died (restart, crash, reboot) leaves the heartbeat frozen.
+    Called at server start so orphans from the previous process are released
+    immediately, and by recovery on every stale signal.
+    """
+    cutoff = datetime.now(timezone.utc).timestamp() - stale_after_seconds
+    recovered: list[int] = []
+    with _CLAIM_LOCK:
+        data = _load()
+        for task in data.get("tasks", []):
+            if task.get("status") not in ACTIVE_STATES:
+                continue
+            raw = task.get("heartbeat_at") or task.get("started_at") or ""
+            try:
+                beat = datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                beat = 0.0
+            if beat > cutoff:
+                continue
+            next_status = "needs_review" if task.get("status") == "reviewing" else "ready"
+            task.update({"status": next_status, "worker": "", "reviewer": "", "phase": "requeued",
+                         "note": note, "updated_at": now()})
+            recovered.append(int(task["id"]))
+        if recovered:
+            _save(data)
+    return recovered
+
+
 def heartbeat_loop(stop: threading.Event, task_id: int, holder: str, phase: str,
                    interval: float = HEARTBEAT_SECONDS) -> None:
     """Refresh a task's heartbeat until ``stop`` is set.
