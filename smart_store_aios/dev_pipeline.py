@@ -346,6 +346,11 @@ class DevPipeline:
         return output.read_text(encoding="utf-8", errors="replace") if output.exists() else ""
 
     def _run_tests(self) -> StageResult:
+        # Stale bytecode can mask an edit whose size and mtime second match the
+        # previous version, producing a false verdict. Always verify from source.
+        for cache in self.worktree.rglob("__pycache__"):
+            for pyc in cache.glob("*.pyc"):
+                pyc.unlink(missing_ok=True)
         completed = self._run(self.test_command, self.worktree, self.settings.dev_test_timeout_seconds)
         output = completed.stdout + "\n" + completed.stderr
         ran = re.search(r"Ran (\d+) tests?", output) or re.search(r"(\d+) passed", output)

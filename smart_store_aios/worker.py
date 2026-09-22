@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .config import Settings
 from .db import LeaseError, StoreDB
+from .blocked_triage import BlockedTriage
 from .dev_pipeline import DevPipeline, PermanentFailure, UsageLimited
 
 log = logging.getLogger(__name__)
@@ -19,6 +20,7 @@ class Worker:
         self.db = StoreDB(settings.database)
         self.worker_id = str(uuid.uuid4())
         self.dev_runner = None  # tests inject a fake subprocess runner
+        self.repo_root = Path.cwd()
 
     def run_once(self) -> bool:
         """Claim and process one job. Returns False when nothing was claimable.
@@ -57,13 +59,29 @@ class Worker:
         return True
 
     def run_forever(self, poll_seconds: float = 2.0, stop=None) -> None:
-        """Poll until ``stop()`` is truthy. Sleeps ``poll_seconds`` after an empty claim."""
+        """Poll until ``stop()`` is truthy. Sleeps ``poll_seconds`` after an empty claim.
+
+        When ``dev.triage_interval_seconds`` is positive and the queue is idle, a
+        ``blocked.triage`` job is enqueued at that interval so blocked progress
+        items keep receiving offline preparation work without an operator.
+        """
+        last_triage = 0.0
         while not (stop and stop()):
-            if not self.run_once():
-                time.sleep(poll_seconds)
+            if self.run_once():
+                continue
+            interval = self.settings.dev_triage_interval_seconds
+            if interval > 0 and time.monotonic() - last_triage >= interval:
+                last_triage = time.monotonic()
+                live = self.db.find_job("blocked.triage", "blocked-triage")
+                if not live or live["status"] in {"done", "dead"}:
+                    self.db.enqueue("blocked.triage", {"task_id": "blocked-triage", "auto": True})
+                    continue
+            time.sleep(poll_seconds)
 
     def _dispatch(self, job: dict) -> dict:
         kind, payload = job["kind"], job["payload"]
+        if kind == "blocked.triage":
+            return BlockedTriage(self.db, self.repo_root).run()
         if kind == "dev.task":
             kwargs = {"runner": self.dev_runner} if self.dev_runner else {}
             return DevPipeline(self.settings, self.db, job, self.worker_id, **kwargs).run()

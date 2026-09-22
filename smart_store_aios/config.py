@@ -29,6 +29,7 @@ class Settings:
     dev_test_command: tuple[str, ...] = ("python", "-m", "unittest", "discover", "-s", "tests", "-t", ".")
     dev_push: bool = False
     dev_usage_limit_delay_seconds: int = 1800
+    dev_triage_interval_seconds: int = 0
 
     @classmethod
     def load(cls, path: str | Path) -> "Settings":
@@ -55,5 +56,6 @@ class Settings:
             dev_test_command=tuple(dev.get("test_command") or cls.dev_test_command),
             dev_push=bool(dev.get("push", False)),
             dev_usage_limit_delay_seconds=int(dev.get("usage_limit_delay_seconds", 1800)),
+            dev_triage_interval_seconds=int(dev.get("triage_interval_seconds", 0)),
         )
 

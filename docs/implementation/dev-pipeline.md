@@ -57,6 +57,32 @@ Numbers are the AIOS local-pool incident list (2026-09-15 to 09-22).
 Not adopted on purpose: no automatic capacity governor (#3). Capacity is the
 number of worker processes the operator starts.
 
+## Blocked items
+
+A progress item marked `blocked` in `development-progress.json` is waiting on
+a human approval gate (G1..G5). The worker pool cannot grant a gate and never
+changes that status. It can still act:
+
+```powershell
+store-aios triage-blocked          # enqueue a blocked.triage job
+store-aios triage-blocked --now    # run it in this process
+```
+
+`blocked.triage` enqueues one `dev.task` per blocked item, `prep-<item>`,
+whose goal is the gate-free part: draft the approval packet for each gate
+letter (fields listed in `live-phase2-backlog.md`), implement the offline
+portion against synthetic fixtures, and prove the gated capability fails
+closed until an approval record exists. Changes are limited to
+`packages/store_core/`, `docs/implementation/` and `tests/`. It is
+idempotent: a live prep job is kept, a dead one is re-enqueued.
+
+The link is written to `data/blocked-triage.json`. The development dashboard
+reads it and shows, under each blocked item, the prep job status and stage
+("오프라인 준비 실행 중 · verify") together with the gate that still needs a
+person. With `dev.triage_interval_seconds` > 0 the daemon enqueues the triage
+itself whenever the queue is idle, so blocked items keep receiving work
+without an operator.
+
 ## Configuration
 
 ```json
@@ -66,7 +92,8 @@ number of worker processes the operator starts.
   "test_timeout_seconds": 900,
   "test_command": ["python", "-m", "unittest", "discover", "-s", "tests", "-t", "."],
   "push": false,
-  "usage_limit_delay_seconds": 1800
+  "usage_limit_delay_seconds": 1800,
+  "triage_interval_seconds": 0
 }
 ```
 

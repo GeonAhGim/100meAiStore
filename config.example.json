@@ -31,6 +31,7 @@
       "."
     ],
     "push": false,
-    "usage_limit_delay_seconds": 1800
+    "usage_limit_delay_seconds": 1800,
+    "triage_interval_seconds": 0
   }
 }

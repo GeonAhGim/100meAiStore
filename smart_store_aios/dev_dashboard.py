@@ -19,6 +19,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from .blocked_triage import offline_prep_status
+
 
 DEFAULT_CODEX_HOME = Path.home() / ".codex"
 STALE_AFTER_SECONDS = 180
@@ -182,6 +184,10 @@ class DevDashboardCollector:
                        "phase": _redact(x.get("phase", value.get("default_phase")), 40),
                        "approval_gate": _redact(x.get("approval_gate"), 60) or None}
                       for x in items if isinstance(x, dict) and x.get("status") in allowed]
+        prep = offline_prep_status(self.project_root)
+        for x in safe_items:
+            if x["status"] == "blocked":
+                x["offline_prep"] = prep.get(x["id"])
         total = len(safe_items)
         completed = sum(x["status"] == "completed" for x in safe_items)
         phases = []

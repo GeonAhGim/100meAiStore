@@ -54,6 +54,8 @@ def parser() -> argparse.ArgumentParser:
     dev.add_argument("--accept", action="append", required=True, help="acceptance criterion (repeatable)")
     dev.add_argument("--file", action="append", default=[], help="path the implementation may change (repeatable)")
     dev.add_argument("--max-fix-rounds", type=int)
+    triage = commands.add_parser("triage-blocked", help="enqueue offline preparation for blocked progress items")
+    triage.add_argument("--now", action="store_true", help="run the triage in this process instead of enqueueing")
     worker = commands.add_parser("worker")
     worker.add_argument("--once", action="store_true", help="process at most one job and exit")
     worker.add_argument("--drain", action="store_true", help="process until the queue is empty, then exit")
@@ -84,6 +86,12 @@ def main() -> None:
         if args.max_fix_rounds is not None:
             payload["max_fix_rounds"] = args.max_fix_rounds
         print(db.enqueue("dev.task", payload))
+    elif args.command == "triage-blocked":
+        if args.now:
+            from .blocked_triage import BlockedTriage
+            print(json.dumps(BlockedTriage(db, Path.cwd()).run(), ensure_ascii=False))
+        else:
+            print(db.enqueue("blocked.triage", {"task_id": "blocked-triage"}))
     elif args.command == "worker":
         worker = Worker(settings)
         if args.once:

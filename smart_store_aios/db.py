@@ -187,6 +187,27 @@ class StoreDB:
             connection.execute("COMMIT")
             return status
 
+    def job(self, job_id: int) -> dict | None:
+        with self.connect() as connection:
+            row = connection.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        for key in ("payload", "checkpoint"):
+            try:
+                result[key] = json.loads(result[key]) if result.get(key) else {}
+            except json.JSONDecodeError:
+                result[key] = {}
+        return result
+
+    def find_job(self, kind: str, task_id: str) -> dict | None:
+        """Most recent job of ``kind`` whose payload.task_id matches, or None."""
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT id FROM jobs WHERE kind=? AND json_extract(payload,'$.task_id')=? ORDER BY id DESC LIMIT 1",
+                (kind, task_id)).fetchone()
+        return self.job(int(row["id"])) if row else None
+
     def stats(self) -> list[dict]:
         with self.connect() as connection:
             return [dict(row) for row in connection.execute("SELECT status, COUNT(*) AS count FROM jobs GROUP BY status")]
