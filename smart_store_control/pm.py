@@ -57,9 +57,15 @@ def effective_capacity(role: str = "local-impl") -> dict[str, Any]:
     # running even when AIOS holds every probed slot (llama.cpp queues the
     # extra request). 0 by default, so AIOS priority is unchanged unless set.
     floor = max(0, int(runtime.get("slots", {}).get("operator_floor", 0)))
-    effective = max(min(configured, available), min(configured, floor)) if handoff else 0
+    if str(pool.get("engine", "")) in EXTERNAL_ENGINES:
+        # Spare-capacity lanes (cursor, gemini) do not use the shared local
+        # llama.cpp, so AIOS priority and the handoff do not apply to them.
+        effective = configured
+    else:
+        effective = max(min(configured, available), min(configured, floor)) if handoff else 0
     return {
         "role": role,
+        "engine": str(pool.get("engine", "local-http")),
         "configured": configured,
         "aios_available": available,
         "operator_floor": floor,
@@ -80,6 +86,7 @@ def status() -> dict[str, Any]:
     attention = sum(1 for task in view_tasks if task["health"] in {"stale", "error"})
     review_pending = sum(1 for task in view_tasks if task.get("status") == "needs_review")
     capacity = effective_capacity()
+    lanes = [effective_capacity(lane) for lane in implementer_lanes()]
     active = [t for t in view_tasks if t.get("status") in {"in_progress", "reviewing"}]
     pool_cfg = read_json(POOLS_PATH, {}).get("pools", {}).get("local-impl", {})
     target = int(pool_cfg.get("min_size", pool_cfg.get("size", 2)))
@@ -87,6 +94,7 @@ def status() -> dict[str, Any]:
         "project": "smart_store", "tasks": view_tasks, "counts": counts,
         "attention": attention, "review_pending": review_pending,
         "capacity": capacity,
+        "lanes": lanes,
         "worker_pool": {
             "name": "smart-store-local", "target": target,
             "configured": capacity["configured"], "effective": capacity["effective"],
@@ -101,15 +109,39 @@ def status() -> dict[str, Any]:
     }
 
 
+EXTERNAL_ENGINES = ("cursor", "gemini")
+IMPL_ROLE = "local-impl"  # every implementation task carries this role; any implementer lane may claim it
+
+
+def lane_of(worker: str) -> str:
+    """'cursor-impl-1' -> 'cursor-impl'; 'local-impl-2' -> 'local-impl'."""
+    return worker.rsplit("-", 1)[0] if worker.rsplit("-", 1)[-1].isdigit() else worker
+
+
+def implementer_lanes() -> list[str]:
+    pools = read_json(POOLS_PATH, {}).get("pools", {})
+    return [name for name, pool in pools.items()
+            if name == IMPL_ROLE or str(pool.get("engine", "")) in EXTERNAL_ENGINES]
+
+
 def claim(worker: str, role: str = "local-impl") -> dict[str, Any] | None:
+    """Claim a ready implementation task for ``worker`` in lane ``role``.
+
+    Capacity is per lane: the local lane is bounded by shared llama.cpp slots,
+    the cursor and gemini lanes by their own pool size. Active tasks are
+    counted by the lane prefix of their holder, so one saturated lane never
+    starves another.
+    """
     with _CLAIM_LOCK:
         data = _load()
         tasks = data.get("tasks", [])
         cap = effective_capacity(role)
-        active = sum(1 for t in tasks if t.get("status") in {"in_progress", "reviewing"})
+        active = sum(1 for t in tasks if t.get("status") == "in_progress" and lane_of(str(t.get("worker") or "")) == role)
+        if role == IMPL_ROLE:
+            active += sum(1 for t in tasks if t.get("status") == "reviewing")  # reviews share the local slots
         if cap["effective"] <= active:
             return None
-        candidates = [t for t in tasks if t.get("role") == role and t.get("status") == "ready"]
+        candidates = [t for t in tasks if t.get("role") == IMPL_ROLE and t.get("status") == "ready"]
         if not candidates:
             return None
         task = sorted(candidates, key=lambda t: (-int(t.get("priority", 0)), int(t["id"])))[0]

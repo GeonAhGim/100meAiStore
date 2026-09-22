@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 from .local_llm import complete
-from .pm import TASKS_PATH, effective_capacity, finish, requeue_stale, status as pm_status
+from .pm import TASKS_PATH, effective_capacity, finish, implementer_lanes, requeue_stale, status as pm_status
 from .pm_cycle import ARTIFACT_DIR, RUN_PATH
 from .state import CONTROL_DIR, read_json, write_json
 from .worker import run_once
@@ -87,8 +87,17 @@ def _run() -> None:
         else:
             fn, prefix = None, ""
         if fn:
-            with ThreadPoolExecutor(max_workers=slots) as pool:
-                futures = [pool.submit(fn, f"{prefix}-{index}") for index in range(1, slots + 1)]
+            # One thread per slot per implementer lane: the local lane plus the
+            # cursor/gemini spare-capacity lanes, each bounded by its own capacity.
+            jobs = [(fn, f"{prefix}-{index}") for index in range(1, slots + 1)]
+            if fn is run_once:
+                for lane in implementer_lanes():
+                    if lane == "local-impl":
+                        continue
+                    lane_slots = int(effective_capacity(lane)["effective"])
+                    jobs += [(run_once, f"{lane}-{index}") for index in range(1, lane_slots + 1)]
+            with ThreadPoolExecutor(max_workers=max(1, len(jobs))) as pool:
+                futures = [pool.submit(job_fn, name) for job_fn, name in jobs]
                 worker_result = [future.result() for future in futures]
         else:
             worker_result = {"status": "not_started", "reason": "worker already active"}

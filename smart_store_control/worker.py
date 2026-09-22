@@ -13,7 +13,7 @@ from .agent_engine import run_agent
 from .context import check_patch, file_tree, rewrite_violation
 from .filepatch import SYSTEM, build_patch, looks_like_refusal, parse_files, parse_plan, plan_prompt, write_prompt
 from .local_llm import complete
-from .pm import claim, finish, heartbeat_loop, touch
+from .pm import EXTERNAL_ENGINES, POOLS_PATH, claim, finish, heartbeat_loop, lane_of, touch
 from .state import CONTROL_DIR, read_json
 
 PROJECT_ROOT = CONTROL_DIR.parents[1]
@@ -25,10 +25,12 @@ def extract_patch(text: str) -> str:
 
 
 def run_once(worker: str, apply_patch: bool = False) -> dict:
-    task = claim(worker)
+    lane = lane_of(worker)
+    task = claim(worker, lane)
     if not task:
-        return {"status": "idle", "reason": "no effective slot or ready task"}
+        return {"status": "idle", "reason": "no effective slot or ready task", "lane": lane}
     endpoint = read_json(CONTROL_DIR / "runtime.json", {}).get("local_llm", {}).get("endpoint", "http://127.0.0.1:8081")
+    lane_pool = read_json(POOLS_PATH, {}).get("pools", {}).get(lane, {})
     # Feed back the concrete reason the previous attempt was rejected (apply error
     # or review verdict) so a retry is not a blind repeat.
     feedback = None
@@ -46,16 +48,20 @@ def run_once(worker: str, apply_patch: bool = False) -> dict:
         llm = read_json(CONTROL_DIR / "runtime.json", {}).get("local_llm", {})
         engine = str(llm.get("engine", "claude-local"))
         model = str(llm.get("model", "qwen3.6-35b-a3b"))
+        if str(lane_pool.get("engine", "")) in EXTERNAL_ENGINES:
+            # cursor / gemini spare-capacity lane: same worktree-and-diff flow,
+            # different CLI; the pool entry names the engine and optional model.
+            engine, model = str(lane_pool["engine"]), str(lane_pool.get("model") or "")
 
-        if engine == "claude-local":
+        if engine in ("claude-local", *EXTERNAL_ENGINES):
             # AIOS lane: the CLI edits real files with tools in a throwaway
             # worktree; we keep only its diff. See agent_engine.py.
             for stale in (artifact, artifact.with_suffix(".agent.json")):
                 stale.unlink(missing_ok=True)  # never let an older engine's output be mistaken for this run
             diff, summary = run_agent(PROJECT_ROOT, task, model=model, base_url=endpoint,
                                       max_turns=int(llm.get("max_turns", 45)),
-                                      wall_seconds=int(llm.get("wall_seconds", 1500)),
-                                      artifact_dir=artifact.parent)
+                                      wall_seconds=int(lane_pool.get("wall_seconds", llm.get("wall_seconds", 1500))),
+                                      artifact_dir=artifact.parent, engine=engine)
             if summary.get("stray_edits"):
                 stop.set()
                 return finish(task["id"], "blocked", note="agent wrote outside its worktree (edits quarantined, checkout restored): "

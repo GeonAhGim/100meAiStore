@@ -63,6 +63,32 @@ def build_argv(exe: str, model: str, max_turns: int) -> list[str]:
             "--output-format", "json", "--settings", str(SETTINGS_PATH), "--strict-mcp-config"]
 
 
+# Spare-capacity lanes that do not consume the shared local llama.cpp slots.
+# Both read the prompt from stdin and edit files in the task worktree like the
+# claude-local lane; only argv, environment and output parsing differ.
+CURSOR_EXE = Path.home() / "AppData" / "Local" / "cursor-agent" / "cursor-agent.cmd"
+EXTERNAL_ENGINES = ("cursor", "gemini")
+
+
+def engine_command(engine: str, model: str, max_turns: int) -> tuple[list[str], dict[str, str], str]:
+    """(argv, env, output_kind) for an engine. output_kind: 'json' or 'text'."""
+    base = {key: os.environ[key] for key in BASE_ENV_KEYS if key in os.environ}
+    if engine == "cursor":
+        exe = shutil.which("cursor-agent") or (str(CURSOR_EXE) if CURSOR_EXE.exists() else None)
+        if not exe:
+            raise RuntimeError("cursor-agent not found")
+        argv = [exe, "-p", "--force", "--output-format", "text"] + (["--model", model] if model else [])
+        return argv, base, "text"
+    if engine == "gemini":
+        exe = shutil.which("gemini")
+        if not exe:
+            raise RuntimeError("gemini CLI not found")
+        argv = [exe, "-p", "Follow the task instructions given on stdin.", "--approval-mode", "yolo",
+                "-o", "text"] + (["-m", model] if model else [])
+        return argv, base, "text"
+    raise RuntimeError(f"unknown external engine {engine}")
+
+
 def task_prompt(task: dict) -> str:
     template = PROMPT_PATH.read_text(encoding="utf-8")
     body = {"id": task.get("id"), "title": task.get("title"), "milestone": task.get("milestone"),
@@ -132,20 +158,26 @@ def quarantine_stray_edits(root: Path, before: set[str], task_id: int, artifact_
 
 def run_agent(root: Path, task: dict, *, model: str, base_url: str, max_turns: int = DEFAULT_MAX_TURNS,
               wall_seconds: int = DEFAULT_WALL_SECONDS, spawn: Spawn = subprocess.run,
-              artifact_dir: Path | None = None) -> tuple[str, dict]:
+              artifact_dir: Path | None = None, engine: str = "claude-local") -> tuple[str, dict]:
     """Run the CLI in a fresh worktree; return (diff, summary). The worktree is removed afterwards."""
     before = main_checkout_state(root)
     worktree = prepare_worktree(root, int(task["id"]))
-    summary: dict = {"engine": "claude-local", "model": model, "max_turns": max_turns}
+    summary: dict = {"engine": engine, "model": model, "max_turns": max_turns}
     try:
-        completed = spawn(build_argv(claude_executable(), model, max_turns), cwd=str(worktree), input=task_prompt(task),
-                          capture_output=True, text=True, timeout=wall_seconds, env=local_env(model, base_url),
-                          encoding="utf-8", errors="replace")
+        if engine == "claude-local":
+            argv, env, kind = build_argv(claude_executable(), model, max_turns), local_env(model, base_url), "json"
+        else:
+            argv, env, kind = engine_command(engine, model, max_turns)
+        completed = spawn(argv, cwd=str(worktree), input=task_prompt(task), capture_output=True, text=True,
+                          timeout=wall_seconds, env=env, encoding="utf-8", errors="replace")
         summary["returncode"] = completed.returncode
-        try:
-            result = json.loads(completed.stdout or "{}")
-        except json.JSONDecodeError:
-            result = {"raw": (completed.stdout or "")[-2000:]}
+        if kind == "json":
+            try:
+                result = json.loads(completed.stdout or "{}")
+            except json.JSONDecodeError:
+                result = {"raw": (completed.stdout or "")[-2000:]}
+        else:
+            result = {"result": (completed.stdout or "")[-2000:]}
         summary.update({k: result.get(k) for k in ("num_turns", "is_error", "subtype", "duration_ms") if k in result})
         summary["result"] = str(result.get("result") or result.get("raw") or "")[:1500]
         summary["stderr"] = (completed.stderr or "")[-800:]
