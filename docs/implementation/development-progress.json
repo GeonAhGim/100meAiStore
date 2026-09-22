@@ -7,7 +7,7 @@
     {"id":"demo_foundation","title":"DEMO 기반"},
     {"id":"live_readiness","title":"Phase 2 · 실연동 준비"}
   ],
-  "availability_note": "실제 판매채널 연결 미확인 · LIVE 미승인 · 진행률은 작업 패키지 수 기준",
+  "availability_note": "실제 판매채널 연결 미확인 · LIVE 미승인 · P2-10~12는 DEMO 게이트 승인만 보유 · 진행률은 작업 패키지 수 기준",
   "items": [
     {"id":"B01","title":"테넌트·권한·세션·정책·감사","status":"completed","evidence":"docs/implementation/core01-evidence.md"},
     {"id":"B02","title":"상품 원본·표준·채널 투영 및 계보","status":"completed","evidence":"docs/implementation/b02-demo-catalog-l4.md"},
@@ -29,9 +29,9 @@
     {"id":"P2-07","phase":"live_readiness","title":"개인정보·보존·라이선스 검토 패키지","status":"completed","evidence":"docs/implementation/live-p2-07-privacy-license-l4.md"},
     {"id":"P2-08","phase":"live_readiness","title":"상품·재고·송장·클레임 오프라인 계약","status":"in_progress","evidence":"docs/implementation/live-p2-08-write-contract-l4.md"},
     {"id":"P2-09","phase":"live_readiness","title":"운영 DB·인증·PWA·복구 준비","status":"in_progress","evidence":"docs/implementation/live-p2-09-platform-l4.md"},
-    {"id":"P2-10","phase":"live_readiness","title":"승인된 실제 채널·공급처 Discovery","status":"blocked","evidence":"docs/implementation/live-phase2-backlog.md","approval_gate":"G1/G2/G3"},
-    {"id":"P2-11","phase":"live_readiness","title":"승인된 읽기 전용 Shadow 운영","status":"blocked","evidence":"docs/implementation/live-phase2-backlog.md","approval_gate":"G1/G3/G5"},
-    {"id":"P2-12","phase":"live_readiness","title":"승인·범위 제한 실운영 검증","status":"blocked","evidence":"docs/implementation/live-phase2-backlog.md","approval_gate":"G4/G5"},
+    {"id":"P2-10","phase":"live_readiness","title":"승인된 실제 채널·공급처 Discovery","status":"pending","evidence":"docs/implementation/live-phase2-backlog.md","approval_gate":"G1/G2/G3","approval_mode":"demo","approval_record":"docs/implementation/approvals/"},
+    {"id":"P2-11","phase":"live_readiness","title":"승인된 읽기 전용 Shadow 운영","status":"pending","evidence":"docs/implementation/live-phase2-backlog.md","approval_gate":"G1/G3/G5","approval_mode":"demo","approval_record":"docs/implementation/approvals/"},
+    {"id":"P2-12","phase":"live_readiness","title":"승인·범위 제한 실운영 검증","status":"pending","evidence":"docs/implementation/live-phase2-backlog.md","approval_gate":"G4/G5","approval_mode":"demo","approval_record":"docs/implementation/approvals/"},
     {"id":"P2-13","phase":"live_readiness","title":"전수 감사·최소 E2E·설치 및 재시작 검증","status":"pending","evidence":"docs/implementation/live-p2-13-final-audit-l4.md"}
   ]
 }

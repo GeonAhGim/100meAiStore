@@ -182,7 +182,8 @@ class DevDashboardCollector:
         safe_items = [{"id": _redact(x.get("id"), 20), "title": _redact(x.get("title"), 120),
                        "status": x["status"], "evidence": _redact(x.get("evidence"), 180) or None,
                        "phase": _redact(x.get("phase", value.get("default_phase")), 40),
-                       "approval_gate": _redact(x.get("approval_gate"), 60) or None}
+                       "approval_gate": _redact(x.get("approval_gate"), 60) or None,
+                       "approval_mode": _redact(x.get("approval_mode"), 20) or None}
                       for x in items if isinstance(x, dict) and x.get("status") in allowed]
         prep = offline_prep_status(self.project_root)
         for x in safe_items:
