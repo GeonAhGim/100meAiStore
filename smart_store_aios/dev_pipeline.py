@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import shutil
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -65,6 +66,16 @@ class StageResult:
 
 
 Runner = Callable[[list[str], Path, int], subprocess.CompletedProcess]
+
+
+def codex_executable() -> str:
+    """Resolve the Codex CLI. On Windows the npm shim is ``codex.cmd``, which a
+    bare ``codex`` argv cannot find without a shell; resolving it up front turns
+    a cryptic WinError 2 into a clear message."""
+    found = shutil.which("codex")
+    if not found:
+        raise RuntimeError("codex CLI not found on PATH")
+    return found
 
 
 def default_runner(command: list[str], cwd: Path, timeout: int) -> subprocess.CompletedProcess:
@@ -330,7 +341,7 @@ class DevPipeline:
     def _codex(self, prompt: str, label: str) -> str:
         output = self.worktree / "data" / "codex" / f"{label}.txt"
         output.parent.mkdir(parents=True, exist_ok=True)
-        command = ["codex", "exec", "-C", str(self.worktree), "--sandbox", self.settings.codex_sandbox,
+        command = [codex_executable(), "exec", "-C", str(self.worktree), "--sandbox", self.settings.codex_sandbox,
                    "--output-last-message", str(output), prompt]
         before = self._main_checkout_state()
         started = time.monotonic()

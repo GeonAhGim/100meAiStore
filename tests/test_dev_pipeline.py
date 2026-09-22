@@ -31,7 +31,7 @@ class FakeCodex:
         self.calls = []
 
     def __call__(self, command, cwd, timeout):
-        if command[0] != "codex":
+        if not Path(command[0]).name.lower().startswith("codex"):
             return default_runner(command, cwd, timeout)
         label = Path(command[command.index("--output-last-message") + 1]).stem
         self.calls.append(label)

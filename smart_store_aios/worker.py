@@ -9,7 +9,7 @@ from pathlib import Path
 from .config import Settings
 from .db import LeaseError, StoreDB
 from .blocked_triage import BlockedTriage
-from .dev_pipeline import DevPipeline, PermanentFailure, UsageLimited
+from .dev_pipeline import DevPipeline, PermanentFailure, UsageLimited, codex_executable
 
 log = logging.getLogger(__name__)
 
@@ -98,7 +98,7 @@ class Worker:
         output_path = Path(payload.get("output", "data/codex-last-message.txt")).resolve()
         output_path.parent.mkdir(parents=True, exist_ok=True)
         command = [
-            "codex", "exec", "-C", str(Path.cwd()), "--sandbox", self.settings.codex_sandbox,
+            codex_executable(), "exec", "-C", str(Path.cwd()), "--sandbox", self.settings.codex_sandbox,
             "--output-last-message", str(output_path), prompt,
         ]
         timeout = max(1, self.settings.lease_seconds - 5)
