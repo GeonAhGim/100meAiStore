@@ -11,9 +11,13 @@ import json
 from urllib.request import Request, urlopen
 
 
-def complete(prompt: str, *, endpoint: str = "http://127.0.0.1:8081", model: str = "local", timeout: int = 120) -> str:
+def complete(prompt: str, *, endpoint: str = "http://127.0.0.1:8081", model: str = "local", timeout: int = 900,
+             max_tokens: int = 6000) -> str:
+    # 900s: a 35B model sharing llama.cpp with AIOS needs minutes for a full
+    # file; the 120s default produced TimeoutError on every real task.
     payload = json.dumps(
-        {"model": model, "messages": [{"role": "user", "content": prompt}], "stream": False}
+        {"model": model, "messages": [{"role": "user", "content": prompt}], "stream": False,
+         "max_tokens": max_tokens, "temperature": 0.2}
     ).encode("utf-8")
     request = Request(
         endpoint.rstrip("/") + "/v1/chat/completions",

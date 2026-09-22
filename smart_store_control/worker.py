@@ -9,7 +9,8 @@ import threading
 import time
 from pathlib import Path
 
-from .context import check_patch, repository_context
+from .context import check_patch, file_tree
+from .filepatch import build_patch, parse_files, parse_plan, plan_prompt, write_prompt
 from .local_llm import complete
 from .pm import finish, claim, touch
 from .state import CONTROL_DIR, read_json
@@ -35,12 +36,6 @@ def run_once(worker: str, apply_patch: bool = False) -> dict:
         review = task.get("review_artifact")
         if review and Path(str(review)).is_file():
             feedback = (feedback or "") + "\n" + Path(str(review)).read_text(encoding="utf-8", errors="replace")[:1500]
-    prompt = (
-        "You are the smart_store local implementation worker. Work only in the smart_store project. "
-        "Do not use Codex, do not modify any other project, preserve dry_run and safety gates. "
-        + task["prompt"]
-        + repository_context(PROJECT_ROOT, task["prompt"], feedback)
-    )
     try:
         stop = threading.Event()
         def heartbeat() -> None:
@@ -48,14 +43,24 @@ def run_once(worker: str, apply_patch: bool = False) -> dict:
                 touch(task["id"], worker, "llm_request")
         threading.Thread(target=heartbeat, daemon=True).start()
         touch(task["id"], worker, "llm_request")
-        response = complete(prompt, endpoint=endpoint, model="qwen3.6-35b-a3b")
         artifact = CONTROL_DIR / "artifacts" / f"task-{task['id']}.patch"
         artifact.parent.mkdir(parents=True, exist_ok=True)
-        artifact.write_text(extract_patch(response), encoding="utf-8")
 
-        # A diff that cannot apply must not reach review: it would burn a
-        # review round and a retry on an invented path. Block it with the git
-        # error so the next attempt sees exactly what to fix.
+        # Two short calls: plan the files, then return whole files. git makes
+        # the diff, so it always applies (see filepatch.py for why).
+        tree = file_tree(PROJECT_ROOT)
+        planned = parse_plan(complete(plan_prompt(task["prompt"], tree, feedback), endpoint=endpoint,
+                                      model="qwen3.6-35b-a3b"), set(tree))
+        if not planned:
+            stop.set()
+            return finish(task["id"], "blocked", note="plan named no existing file from the repository list")
+        contents = {p: (PROJECT_ROOT / p).read_text(encoding="utf-8", errors="replace") for p in planned}
+        touch(task["id"], worker, "llm_request")
+        response = complete(write_prompt(task["prompt"], contents, feedback), endpoint=endpoint, model="qwen3.6-35b-a3b")
+        build_error = build_patch(PROJECT_ROOT, parse_files(response), planned, artifact)
+        if build_error:
+            stop.set()
+            return finish(task["id"], "blocked", note=f"patch not produced: {build_error}")
         apply_error = check_patch(PROJECT_ROOT, artifact)
         if apply_error:
             stop.set()
