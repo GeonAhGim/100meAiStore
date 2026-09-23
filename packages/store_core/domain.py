@@ -114,9 +114,19 @@ class BrowserSession:
     identity_assertion_ref: str
     issued_at: datetime
     expires_at: datetime
+    channel_key_ref: str = ""
+    ai_key_ref: str = ""
+
+    def __repr__(self) -> str:
+        return (
+            f"BrowserSession(token_digest={self.token_digest!r}, "
+            f"tenant_id={self.tenant_id!r}, user_id={self.user_id!r}, "
+            f"channel_key_ref={self.channel_key_ref!r}, "
+            f"ai_key_ref={self.ai_key_ref!r})"
+        )
 
 
-@dataclass
+@dataclass(frozen=True)
 class ApprovalConfirmationNonce:
     token_digest: str
     session_digest: str
@@ -126,6 +136,13 @@ class ApprovalConfirmationNonce:
     issued_at: datetime
     expires_at: datetime
     consumed_at: datetime | None = None
+
+    def __repr__(self) -> str:
+        return (
+            f"ApprovalConfirmationNonce(token_digest={self.token_digest!r}, "
+            f"session_digest={self.session_digest!r}, "
+            f"tenant_id={self.tenant_id!r}, approval_id={self.approval_id!r})"
+        )
 
 
 @dataclass
