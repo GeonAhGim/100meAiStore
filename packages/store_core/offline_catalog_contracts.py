@@ -129,7 +129,17 @@ class FixtureCatalogResult:
     real_change_confirmed: bool = field(default=False, init=False)
 
 
-def reconcile_catalog_fixture(plan: FixtureCatalogReview, response: Any, *, readback: Any = None) -> FixtureCatalogResult:
+def reconcile_catalog_fixture(plan: FixtureCatalogReview, response: Any, *, readback: Any = None,
+                              readback_observed_at: datetime | None = None,
+                              now: datetime | None = None) -> FixtureCatalogResult:
+    """Match a readback against the reviewed change.
+
+    The readback must have been observed inside the review's window (after the
+    review was created, not in the future, before it expires). A readback taken
+    before the change can show the proposed value by coincidence, for example
+    when an earlier edit already set it, so an unstamped or out-of-window
+    readback never confirms anything; the return contract applies the same rule.
+    """
     if not isinstance(plan, FixtureCatalogReview):
         raise ContractQuarantine("catalog_fixture_required")
     _digest(response)
@@ -138,6 +148,9 @@ def reconcile_catalog_fixture(plan: FixtureCatalogReview, response: Any, *, read
     if readback is None:
         return FixtureCatalogResult("READBACK_REQUIRED")
     try:
+        observed, current = _aware(readback_observed_at), _aware(now)
+        if not datetime.fromisoformat(plan.created_at) <= observed <= current < datetime.fromisoformat(plan.expires_at):
+            return FixtureCatalogResult("RECONCILE_REQUIRED")
         _digest(readback)
         quantity, price, on_sale = _inventory(readback, plan.vendor_item_id)
     except ContractQuarantine:

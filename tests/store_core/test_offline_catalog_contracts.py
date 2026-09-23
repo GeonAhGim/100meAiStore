@@ -41,7 +41,8 @@ class OfflineCatalogContractTest(unittest.TestCase):
             self.assertEqual("READBACK_REQUIRED", reconcile_catalog_fixture(plan, response).decision)
             readback = copy.deepcopy(self.body)
             readback["data"]["salePrice"] = 1100
-            result = reconcile_catalog_fixture(plan, response, readback=readback)
+            result = reconcile_catalog_fixture(plan, response, readback=readback,
+                                               readback_observed_at=self.now, now=self.now)
         self.assertEqual("MATCHED_READBACK_FIXTURE", result.decision)
         self.assertFalse(result.real_change_confirmed)
         self.assertFalse(result.resend_authorized)
@@ -116,9 +117,29 @@ class OfflineCatalogContractTest(unittest.TestCase):
         for change in (dict(sellerItemId=7), dict(salePrice=1000), dict(onSale=False)):
             body = copy.deepcopy(self.body)
             body["data"].update(change)
-            result = reconcile_catalog_fixture(plan, {"code": "SUCCESS"}, readback=body)
+            result = reconcile_catalog_fixture(plan, {"code": "SUCCESS"}, readback=body,
+                                               readback_observed_at=self.now, now=self.now)
             self.assertEqual("RECONCILE_REQUIRED", result.decision)
             self.assertFalse(result.resend_authorized)
+
+    def test_matching_readback_outside_the_review_window_confirms_nothing(self):
+        plan = self.build()
+        readback = copy.deepcopy(self.body)
+        readback["data"]["salePrice"] = 1100                      # the proposed value, but when was it seen?
+        second = timedelta(seconds=1)
+        for observed, now in ((None, self.now),                   # unstamped
+                              (self.now.replace(tzinfo=None), self.now),  # naive
+                              (self.now - second, self.now),      # taken before the reviewed change
+                              (self.now + 2 * second, self.now + second),  # from the future
+                              (self.now, self.now + timedelta(seconds=60))):  # review expired
+            with self.subTest(observed=observed, now=now):
+                result = reconcile_catalog_fixture(plan, {"code": "SUCCESS"}, readback=readback,
+                                                   readback_observed_at=observed, now=now)
+                self.assertEqual("RECONCILE_REQUIRED", result.decision)
+                self.assertFalse(result.resend_authorized)
+        fresh = reconcile_catalog_fixture(plan, {"code": "SUCCESS"}, readback=readback,
+                                          readback_observed_at=self.now + second, now=self.now + 2 * second)
+        self.assertEqual("MATCHED_READBACK_FIXTURE", fresh.decision)
 
 
 if __name__ == "__main__":
