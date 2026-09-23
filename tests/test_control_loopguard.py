@@ -126,6 +126,27 @@ class LoopGuardLedgerTests(unittest.TestCase):
         pm.requeue_stale(stale_after_seconds=0, note="requeued at startup: holder process is gone")
         self.assertEqual(("needs_review", "orphaned"), (self._row(2)["status"], self._row(2)["attempts"][0]["cause"]))
 
+    def test_an_orphaned_run_is_charged_up_to_its_last_heartbeat_not_the_downtime(self):
+        # 2026-09-23: the server was down four hours; charging that as worker
+        # time escalated two tasks as "inefficient".
+        self._write({"id": 1, "status": "in_progress", "worker": "w", "started_at": _stamp(4 * 3600 + 300),
+                     "heartbeat_at": _stamp(4 * 3600)})
+        pm.requeue_stale(stale_after_seconds=0, note="requeued at startup: holder process is gone")
+        self.assertAlmostEqual(300, self._row(1)["attempts"][0]["seconds"], delta=5)
+        self.assertIsNone(loopguard.verdict(self._row(1)))
+
+    def test_operator_retry_starts_the_guard_over(self):
+        guard = {"stage": "escalated", "cause": "stray_edits", "at": _stamp(100)}
+        self._write({"id": 1, "status": "blocked", "phase": "needs_claude", "retry_count": 3, "note": STRAY,
+                     "loop_guard": guard, "attempts": _attempts(STRAY, 5)})
+        pm.operator_action(1, "retry", "infra fixed")
+        row = self._row(1)
+        self.assertEqual(("ready", 0, None), (row["status"], row["retry_count"], row["loop_guard"]))
+        self.assertEqual(5, len(row["attempts"]))                  # history kept
+        self.assertIsNone(loopguard.verdict(row))                   # but no longer counted
+        triage.run_triage(force=True)
+        self.assertEqual("ready", self._row(1)["status"])
+
     def test_free_requeue_loop_ends_in_a_handoff(self):
         # Transient failures are requeued without retry cost, which used to let
         # one task run forever. The guard bounds it: remedy once, then hand off.

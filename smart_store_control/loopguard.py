@@ -88,14 +88,18 @@ def instruction_for(cause: str) -> str | None:
     return next((text for name, _, text in CAUSES if name == cause), None)
 
 
-def record(task: dict[str, Any], note: str, kind: str) -> None:
-    """Append one failed attempt to ``task['attempts']`` (in place; the caller saves)."""
+def record(task: dict[str, Any], note: str, kind: str, *, until: float | None = None) -> None:
+    """Append one failed attempt to ``task['attempts']`` (in place; the caller saves).
+
+    ``until`` ends the charged time early: an orphaned run stopped working at
+    its last heartbeat, not when a restart found it hours later.
+    """
     started = _ts(task.get("started_at"))
     last_at = _ts((task.get("attempts") or [{}])[-1].get("at")) if task.get("attempts") else None
     # Time is charged once per run: a review failure after an implementation
     # run does not count the implementation's minutes again.
     begin = max(filter(None, (started, last_at)), default=None)
-    seconds = int(_now().timestamp() - begin) if begin else 0
+    seconds = int((until if until is not None else _now().timestamp()) - begin) if begin else 0
     entry = {"at": _now().isoformat().replace("+00:00", "Z"), "kind": kind, "cause": cause_of(note),
              "sig": signature(note), "seconds": max(0, seconds)}
     task["attempts"] = ((task.get("attempts") or []) + [entry])[-HISTORY:]
@@ -126,7 +130,9 @@ def baseline_red(task: dict[str, Any], others: list[dict[str, Any]]) -> set[str]
 
 def verdict(task: dict[str, Any], others: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
     """None, or {'action': 'remediate'|'escalate', 'cause', 'reason', 'instruction'} for this task."""
-    attempts = task.get("attempts") or []
+    reset = _ts(task.get("guard_reset_at")) if task.get("guard_reset_at") else None
+    # An operator retry starts the guard over; earlier attempts stay as history.
+    attempts = [a for a in task.get("attempts") or [] if reset is None or (_ts(a.get("at")) or 0) > reset]
     if not attempts:
         return None
     guard = task.get("loop_guard") or {}

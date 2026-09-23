@@ -279,7 +279,10 @@ def operator_action(task_id: int, action: str, reason: str = "") -> dict[str, An
             stamp = now()
             who = f"operator: {reason}".strip(": ") if reason else "operator"
             if action == "retry":
+                # A human decided to try again: a fresh retry budget and a fresh
+                # loop-guard window, or the old history would escalate it at once.
                 task.update({"status": "ready", "worker": "", "reviewer": "", "phase": "retry_queued", "retry_count": 0,
+                             "loop_guard": None, "escalation": None, "guard_reset_at": stamp,
                              "last_error": task.get("note"), "note": f"{who} requested retry", "updated_at": stamp})
             elif action == "approve":
                 if status != "needs_decision":
@@ -338,7 +341,7 @@ def requeue_stale(stale_after_seconds: int = STALE_AFTER_SECONDS, note: str = "s
             next_status = "needs_review" if task.get("status") == "reviewing" else "ready"
             # A task whose holder keeps dying (it may be what kills the server)
             # must show up as a loop too, so an orphaning counts as an attempt.
-            loopguard.record(task, note, "orphaned")
+            loopguard.record(task, note, "orphaned", until=beat or None)
             task.update({"status": next_status, "worker": "", "reviewer": "", "phase": "requeued",
                          "note": note, "updated_at": now()})
             recovered.append(int(task["id"]))
