@@ -49,8 +49,33 @@ def milestone_progress(view: dict) -> dict:
         row = parents.setdefault(key, {"id": key, "total": 0, "done": 0})
         row["total"] += 1
         row["done"] += 1 if m.get("status") == "done" else 0
-    return {"total": len(items), "done": done, "percent": round(done * 100 / len(items)) if items else None,
-            "groups": sorted(parents.values(), key=lambda r: r["id"])}
+    # Build a lookup for dependency resolution
+    by_id = {str(m["id"]): m for m in items}
+
+    def _dep_labels(m: dict) -> list[str]:
+        deps = m.get("depends_on") or []
+        return [str(d) for d in deps if d in by_id and by_id[d].get("status") == "done"]
+
+    enriched = []
+    for m in items:
+        enriched.append({
+            "id": m.get("id", ""),
+            "title": m.get("title", ""),
+            "status": m.get("status", "planned"),
+            "priority": m.get("priority", 50),
+            "depends_on": m.get("depends_on") or [],
+            "satisfied_deps": _dep_labels(m),
+            "exit_criteria": m.get("exit_criteria", ""),
+        })
+    # Sort by priority (highest first), then by id for stability
+    enriched.sort(key=lambda x: (-x["priority"], x["id"]))
+    return {
+        "total": len(items),
+        "done": done,
+        "percent": round(done * 100 / len(items)) if items else None,
+        "groups": sorted(parents.values(), key=lambda r: r["id"]),
+        "items": enriched,
+    }
 
 
 def task_progress(tasks: list[dict]) -> dict:
