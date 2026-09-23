@@ -20,6 +20,16 @@ COUPANG_STATES = frozenset({"ACCEPT", "INSTRUCT", "DEPARTURE", "DELIVERING",
 _LOCAL_REFERENCE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
 
 
+class ReadBackConflict(ValueError):
+    """Raised when a retransmitted readback conflicts with recorded state.
+
+    Used by the idempotency layer to reject duplicate or mismatched
+    readback payloads without triggering a re-execution of the channel
+    request.  Sub-class of ``ValueError`` so that existing
+    ``ContractQuarantine`` paths remain unaffected.
+    """
+
+
 @dataclass(frozen=True)
 class OfflineReadPlan:
     tenant_ref: str = field(repr=False)
