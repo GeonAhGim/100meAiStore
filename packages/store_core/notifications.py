@@ -73,3 +73,27 @@ def acknowledge_demo_incident(service: Any, context: Any, incident_id: str, note
         if not replay:
             service._audit(context.tenant_id, context.user_id, "incident.acknowledged", incident_id, "succeeded", {})
         return value, replay
+
+
+# --- Queryable notification traceability (M2.4) ---
+
+
+def query_notifications(
+    service: StoreControlPlane,
+    tenant_id: str,
+    incident_id: str | None = None,
+    state: str | None = None,
+    limit: int = 50,
+) -> list[DemoNotificationDelivery]:
+    """Query notification delivery records for a tenant.
+
+    Returns notifications matching the given filters, newest first.
+    Used by the dashboard to show notification traceability.
+    """
+    records = list(service.repo.notification_deliveries_for(tenant_id))
+    if incident_id is not None:
+        records = [r for r in records if r.notification_key == incident_id]
+    if state is not None:
+        records = [r for r in records if r.state == state]
+    records.sort(key=lambda r: r.sent_at, reverse=True)
+    return records[:limit]

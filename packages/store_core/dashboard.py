@@ -68,6 +68,8 @@ class DashboardProjection:
             "reconciliation_open": 0,
         }
         approvals = self._approval_count(context.tenant_id)
+        notifications = self._notification_trace(context.tenant_id)
+        acks = self._acknowledgements(context.tenant_id)
         blockers = []
         if not readiness.get("ready", False):
             blockers.append("storage_not_ready")
@@ -87,6 +89,8 @@ class DashboardProjection:
             "agent_status_source": "sqlite_checkpoint" if agents else "no_checkpoint_found",
             "queues": queues,
             "approvals_required": approvals,
+            "notifications": notifications,
+            "acknowledgements": acks,
             "next_work": "durable inbox → approval intent digest → UNKNOWN reconciliation",
             "blockers": blockers,
             "readiness": readiness,
@@ -196,3 +200,55 @@ class DashboardProjection:
             }
         except (OSError, ValueError, TypeError):
             return {"last_result": "unknown", "passed": None, "failed": None, "source": "missing_checkpoint"}
+
+    # --- Notification & acknowledgement traceability (M2.4) ---
+
+    def _notification_trace(self, tenant_id: str) -> dict[str, Any]:
+        """Project notification delivery state for the tenant.
+
+        M2.4: notifications must be traceable through the dashboard.
+        """
+        deliveries = list(self.repo.notification_deliveries_for(tenant_id))
+        if not deliveries:
+            return {"count": 0, "recent": [], "by_state": {}}
+        # Count by state
+        by_state: dict[str, int] = {}
+        for d in deliveries:
+            by_state[d.state] = by_state.get(d.state, 0) + 1
+        # Recent deliveries (newest first)
+        deliveries.sort(key=lambda d: d.sent_at, reverse=True)
+        recent = []
+        for d in deliveries[:10]:
+            recent.append({
+                "notification_key": d.notification_key,
+                "state": d.state,
+                "channels": d.channels,
+                "sent_at": _iso(d.sent_at),
+                "delivery_id": d.id,
+            })
+        return {"count": len(deliveries), "by_state": by_state, "recent": recent}
+
+    def _acknowledgements(self, tenant_id: str) -> dict[str, Any]:
+        """Project incident acknowledgement state for the tenant.
+
+        M2.4: acknowledgements must be traceable through the dashboard.
+        """
+        if not hasattr(self.repo, "incident_acknowledgements"):
+            return {"count": 0, "incidents": []}
+        # Access the repo's storage directly (it's in-memory demo data)
+        raw = getattr(self.repo, "incident_acknowledgements", {})
+        acks = [row for (tid, _), row in raw.items() if tid == tenant_id]
+        if not acks:
+            return {"count": 0, "incidents": []}
+        # Group by incident
+        incidents: dict[str, list[dict[str, Any]]] = {}
+        for a in acks:
+            if a.incident_id not in incidents:
+                incidents[a.incident_id] = []
+            incidents[a.incident_id].append({
+                "ack_id": a.id,
+                "user_id": a.user_id,
+                "note": a.note,
+                "acknowledged_at": _iso(a.acknowledged_at),
+            })
+        return {"count": len(acks), "incidents": incidents}
