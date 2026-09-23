@@ -106,6 +106,35 @@ def issue_approval_confirmation_nonce(service: Any, session_token: str,
     return IssuedApprovalNonce(token, expires)
 
 
+def verify_approval_confirmation_nonce(service: Any, session_token: str,
+                                       approval_id: str, nonce_token: str) -> TenantContext:
+    """Verify a nonce without consuming it.
+
+    Returns the authenticated ``TenantContext`` when the nonce is valid for
+    the given approval.  The caller should then call
+    ``decide_approval_authenticated`` (or ``consume_approval_confirmation_nonce``
+    directly) to atomically consume and decide.
+
+    Raises ``AuthorizationError`` when the nonce is unknown, expired, consumed,
+    bound to a different session, or attached to a different approval.
+    """
+    if not isinstance(approval_id, str) or not isinstance(nonce_token, str):
+        raise ConflictError("invalid parameters")
+    context = authenticate_browser_session(service, session_token)
+    now = service._clock()
+    nonce = service.repo.get_approval_confirmation_nonce(
+        _digest(nonce_token), context.tenant_id, approval_id)
+    if nonce is None:
+        raise AuthorizationError("unknown approval confirmation nonce")
+    if nonce.session_digest != _digest(session_token):
+        raise AuthorizationError("nonce bound to different session")
+    if nonce.consumed_at is not None:
+        raise AuthorizationError("approval confirmation nonce already used")
+    if now >= nonce.expires_at:
+        raise AuthorizationError("approval confirmation nonce expired")
+    return context
+
+
 def decide_approval_authenticated(service: Any, session_token: str, approval_id: str,
                                   approve: bool, reason: str, nonce_token: str) -> Any:
     if type(approve) is not bool or not isinstance(reason, str) or not reason.strip() or len(reason) > 1000:

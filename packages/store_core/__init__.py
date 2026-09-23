@@ -33,7 +33,8 @@ from .safety import set_demo_stop, backup_demo_sqlite
 from .readiness import evaluate_demo_readiness
 from .contract_demo_bridge import ContractFixtureReadAdapter
 from .browser_auth import (authenticate_browser_session, browser_session_cookie, decide_approval_authenticated,
-                           issue_approval_confirmation_nonce, issue_browser_session)
+                           issue_approval_confirmation_nonce, issue_browser_session,
+                           verify_approval_confirmation_nonce)
 from .listing_gateway import request_listing_approval, submit_approved_listing, reconcile_approved_listing
 from .return_gateway import request_return_approval, submit_approved_return
 from .tracking_gateway import request_tracking_approval, submit_approved_tracking
@@ -102,6 +103,7 @@ __all__ = [
     "decide_approval_authenticated",
     "issue_approval_confirmation_nonce",
     "issue_browser_session",
+    "verify_approval_confirmation_nonce",
     "request_listing_approval",
     "submit_approved_listing",
     "reconcile_approved_listing",
