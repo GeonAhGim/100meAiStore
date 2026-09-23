@@ -32,8 +32,10 @@ Windows 로그온 시 자동 시작을 설치하려면 관리자 권한 없이 �
 powershell -ExecutionPolicy Bypass -File .\scripts\install-control-dashboard-startup.ps1
 ```
 
-자동 시작 해제는 `-Uninstall` 옵션을 사용한다. 로그온 항목은 `scripts/run-control-server-watchdog.ps1`을
-창 없이 실행하고, watchdog이 서버가 종료되면 다시 띄운다. 서버 출력은 `data/control/server.log`, 종료 기록은
+자동 시작 해제는 `-Uninstall` 옵션을 사용한다. 설치 스크립트는 작업 스케줄러 작업
+`SmartStore-ControlServer`를 등록해 로그온 시와 5분마다 `scripts/run-control-server-watchdog.ps1`을 창 없이
+실행한다(이미 실행 중이면 뮤텍스로 즉시 종료). watchdog은 서버가 종료되면 다시 띄우고, watchdog 자체가
+셸 재시작 등으로 죽어도 5분 안에 되살아난다. 서버 출력은 `data/control/server.log`, 종료 기록은
 `data/control/server.exit`에 남는다.
 
 ## 안착 작업의 main 통합

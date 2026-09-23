@@ -7,5 +7,5 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-echo Installed. The dashboard starts at the next Windows logon.
+echo Installed. The control server starts at logon and is revived within 5 minutes if it stops.
 endlocal
