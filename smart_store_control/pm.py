@@ -172,7 +172,9 @@ def claim(worker: str, role: str = "local-impl") -> dict[str, Any] | None:
         if cap["effective"] <= active:
             return None
         candidates = [t for t in tasks if t.get("role") == IMPL_ROLE and t.get("status") == "ready"
-                      and (not t.get("preferred_lane") or t.get("preferred_lane") == role)]
+                      and (not t.get("preferred_lane") or t.get("preferred_lane") == role)
+                      # the doctor diagnoses a failure before the task runs again (doctor.py)
+                      and not loopguard.awaiting_diagnosis(t)]
         if not candidates:
             return None
         task = sorted(candidates, key=lambda t: (-int(t.get("priority", 0)), int(t["id"])))[0]
@@ -199,6 +201,24 @@ def finish(task_id: int, status_name: str, artifact: str = "", note: str = "") -
                     loopguard.record(task, note, "implement")
                 task.update({"status": status_name, "artifact": artifact, "note": note,
                              "phase": "finished" if status_name != "blocked" else "error",
+                             "heartbeat_at": now(), "updated_at": now()})
+                _save(data)
+                return task
+    raise KeyError(f"unknown task {task_id}")
+
+
+def release(task_id: int, note: str) -> dict[str, Any]:
+    """Hand a task back to the queue because its lane failed, not the task.
+
+    A provider quota or login fault used to finish the task as blocked, which
+    recorded the lane's fault as the task's failed attempt and replaced the
+    task's real last error in the next prompt. Nothing is charged here.
+    """
+    with _CLAIM_LOCK:
+        data = _load()
+        for task in data.get("tasks", []):
+            if str(task["id"]) == str(task_id):
+                task.update({"status": "ready", "worker": "", "phase": "lane_released", "note": note,
                              "heartbeat_at": now(), "updated_at": now()})
                 _save(data)
                 return task

@@ -9,13 +9,13 @@ import threading
 import time
 from pathlib import Path
 
-from .agent_engine import run_agent
+from .agent_engine import diagnosis_note, run_agent
 from .context import check_patch, file_tree, rewrite_violation
 from .filepatch import SYSTEM, build_patch, looks_like_refusal, parse_files, parse_plan, plan_prompt, write_prompt
 from contextlib import nullcontext
 
 from .local_llm import LOCAL_LLM_GATE, complete
-from .pm import EXTERNAL_ENGINES, POOLS_PATH, claim, finish, heartbeat_loop, lane_fault, lane_of, pause_lane, touch
+from .pm import EXTERNAL_ENGINES, POOLS_PATH, claim, finish, heartbeat_loop, lane_fault, lane_of, pause_lane, release, touch
 from .state import CONTROL_DIR, read_json
 
 PROJECT_ROOT = CONTROL_DIR.parents[1]
@@ -41,6 +41,8 @@ def run_once(worker: str, apply_patch: bool = False) -> dict:
         review = task.get("review_artifact")
         if review and Path(str(review)).is_file():
             feedback = (feedback or "") + "\n" + Path(str(review)).read_text(encoding="utf-8", errors="replace")[:1500]
+    if diagnosis_note(task):
+        feedback = diagnosis_note(task).strip() + "\n\n" + (feedback or "")
     try:
         stop = threading.Event()
         threading.Thread(target=heartbeat_loop, args=(stop, task["id"], worker, "llm_request"), daemon=True).start()
@@ -86,7 +88,7 @@ def run_once(worker: str, apply_patch: bool = False) -> dict:
                     # Provider quota, login or trust problem: the lane, not the task.
                     until = pause_lane(lane, f"{engine}: {fault}")
                     stop.set()
-                    return finish(task["id"], "blocked", note=f"lane paused until {until}: {engine} {fault}")
+                    return release(task["id"], f"lane paused until {until}: {engine} {fault}; task returned to the queue")
             if not diff.strip():
                 stop.set()
                 reason = summary.get("result") or summary.get("stderr") or "agent produced no change"

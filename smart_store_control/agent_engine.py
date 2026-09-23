@@ -135,7 +135,25 @@ def task_prompt(task: dict) -> str:
     if instructions:
         extra = "\n\n## 운영자 추가 지시 (가장 우선한다)\n" + "\n".join(
             f"- ({i.get('at', '')}) {i.get('text', '')}" for i in instructions[-5:])
-    return template + "\n\n## task\n```json\n" + json.dumps(body, ensure_ascii=False, indent=2) + "\n```\n" + extra
+    return (template + "\n\n## task\n```json\n" + json.dumps(body, ensure_ascii=False, indent=2) + "\n```\n"
+            + diagnosis_note(task) + extra)
+
+
+def diagnosis_note(task: dict) -> str:
+    """The doctor's diagnosis of the previous failure (doctor.py), the first thing the next attempt must fix."""
+    d = task.get("diagnosis") or {}
+    if not d.get("fix"):
+        return ""
+    lines = ["", "", "## 이전 시도 실패 진단 (먼저 해결하라)", f"- 원인: {d.get('cause', '')}", f"- 조치: {d['fix']}"]
+    if d.get("errors"):
+        lines.append("- 오류: " + " | ".join(str(e) for e in d["errors"][:3]))
+    if d.get("tests"):
+        lines.append("- 실패 테스트: " + ", ".join(d["tests"][:5]))
+    if d.get("raised_at"):
+        lines.append("- 위치: " + ", ".join(d["raised_at"]))
+    if d.get("repeat"):
+        lines.append("- 주의: 같은 오류가 이미 한 번 진단됐는데 다시 났다. 이전과 다른 방법으로 고쳐라.")
+    return "\n".join(lines) + "\n"
 
 
 def worktree_note(root: Path, worktree: Path) -> str:

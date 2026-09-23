@@ -143,6 +143,10 @@ def handoff_markdown(tasks: list[dict[str, Any]]) -> str:
             last_error = " ".join(str(t.get("last_error") or "").split())
             if last_error and last_error != note:
                 out.append(f"- 직전 오류: {last_error[:400]}")
+            diagnosis = t.get("diagnosis") or {}
+            if diagnosis.get("fix"):
+                out.append(f"- 진단({diagnosis.get('source')}{', 반복' if diagnosis.get('repeat') else ''}): "
+                           f"{diagnosis.get('cause', '')} → {diagnosis['fix'][:400]}")
             if codex.get("job_id"):
                 state = (codex.get("codex") or {}).get("status", "queued")
                 out.append(f"- Codex job {codex['job_id']} ({codex.get('task_id')}) · {state}")

@@ -7,7 +7,9 @@ import logging
 import threading
 from datetime import datetime, timedelta, timezone
 
+from . import doctor
 from .local_llm import complete
+from .pm import _CLAIM_LOCK as pm_lock, _load as pm_load
 from .pm import TASKS_PATH, effective_capacity, finish, implementer_lanes, requeue_stale, status as pm_status
 from .pm_cycle import ARTIFACT_DIR, RUN_PATH
 from .state import CONTROL_DIR, read_json, write_json
@@ -139,6 +141,33 @@ def dispatch() -> list[str]:
             thread.start()
             started.append(name)
     return started
+
+
+def _doctor() -> None:
+    try:
+        doctor.run_pending()
+    except Exception as exc:  # noqa: BLE001 - the doctor must never take the dispatcher down
+        logging.getLogger(__name__).warning("doctor failed: %s: %s", type(exc).__name__, exc)
+
+
+def start_doctor() -> bool:
+    """Run the doctor worker (doctor.py) when a failed attempt awaits diagnosis; True when started.
+
+    It is a slot of its own, outside the implementer capacity: most failures are
+    explained by probes that need no model, and a claim waits for the diagnosis.
+    """
+    with _SLOTS_LOCK:
+        thread = _SLOTS.get("doctor")
+        if thread is not None and thread.is_alive():
+            return False
+        with pm_lock:
+            todo = doctor.pending(pm_load().get("tasks", []))
+        if not todo:
+            return False
+        thread = threading.Thread(target=_doctor, name="smart-store-doctor", daemon=True)
+        _SLOTS["doctor"] = thread
+        thread.start()
+        return True
 
 
 def start() -> dict:

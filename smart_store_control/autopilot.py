@@ -10,7 +10,7 @@ from .land import land_reviewed
 from .integrate import integrate_landed
 from .triage import run_triage
 from .pm import ensure_workflow_tasks, requeue_blocked, status as pm_status
-from .recovery import current as recovery_status, dispatch, start as start_recovery
+from .recovery import current as recovery_status, dispatch, start as start_recovery, start_doctor
 from .state import CONTROL_DIR, grant_handoff, read_json
 
 _STOP = threading.Event()
@@ -71,6 +71,8 @@ def tick() -> dict:
         queued = ensure_workflow_tasks(limit=max(1, lane_capacity - ready_count))
         if queued:
             pm = pm_status()
+    # A failed attempt is diagnosed before its task runs again (doctor.py).
+    start_doctor()
     recovery = recovery_status()
     if recovery.get("status") in {"diagnosing", "running"}:
         recovery_updated = _parse(recovery.get("updated_at") or recovery.get("started_at"))

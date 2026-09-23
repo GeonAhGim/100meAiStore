@@ -30,6 +30,9 @@ REPEAT_LIMIT = 3
 AFTER_REMEDY_ATTEMPTS = 3
 TIME_BUDGET_SECONDS = 3 * 3600
 HISTORY = 20
+# How long a claim waits for the doctor (doctor.py) to diagnose a failed
+# attempt. Past this the task runs undiagnosed rather than stalling the pool.
+DIAGNOSIS_WAIT_SECONDS = 15 * 60
 
 # (cause, markers in the lowered note, instruction for the next attempt or None when no instruction helps)
 CAUSES: tuple[tuple[str, tuple[str, ...], str | None], ...] = (
@@ -101,8 +104,31 @@ def record(task: dict[str, Any], note: str, kind: str, *, until: float | None = 
     begin = max(filter(None, (started, last_at)), default=None)
     seconds = int((until if until is not None else _now().timestamp()) - begin) if begin else 0
     entry = {"at": _now().isoformat().replace("+00:00", "Z"), "kind": kind, "cause": cause_of(note),
-             "sig": signature(note), "seconds": max(0, seconds)}
+             "sig": signature(note), "seconds": max(0, seconds),
+             # the attempt's own words: claims and requeues overwrite note and last_error
+             "note": str(note or "")[:400]}
     task["attempts"] = ((task.get("attempts") or []) + [entry])[-HISTORY:]
+
+
+def _key(attempt: dict[str, Any]) -> Any:
+    """The doctor's precise error key when there is one, else the note's signature."""
+    return attempt.get("key") or attempt.get("sig")
+
+
+def needs_diagnosis(task: dict[str, Any], skip: set[str] | frozenset[str] = frozenset({"orphaned", "infra"})) -> bool:
+    """The last attempt failed and the doctor has not diagnosed it yet."""
+    attempts = task.get("attempts") or []
+    if not attempts or attempts[-1].get("cause") in skip:
+        return False
+    return (task.get("diagnosis") or {}).get("attempt_at") != attempts[-1].get("at")
+
+
+def awaiting_diagnosis(task: dict[str, Any]) -> bool:
+    """Hold the next run until the doctor has spoken, but never longer than DIAGNOSIS_WAIT_SECONDS."""
+    if not needs_diagnosis(task):
+        return False
+    at = _ts((task.get("attempts") or [{}])[-1].get("at"))
+    return at is not None and _now().timestamp() - at < DIAGNOSIS_WAIT_SECONDS
 
 
 def failing_tests(task: dict[str, Any]) -> set[str]:
@@ -141,13 +167,18 @@ def verdict(task: dict[str, Any], others: list[dict[str, Any]] | None = None) ->
     last = attempts[-1]
     cause = str(last.get("cause") or "other")
     spent = sum(int(a.get("seconds") or 0) for a in attempts)
-    tail = [a.get("sig") for a in attempts[-REPEAT_LIMIT:]]
+    tail = [_key(a) for a in attempts[-REPEAT_LIMIT:]]
     repeated = len(tail) == REPEAT_LIMIT and len(set(tail)) == 1
     if spent > TIME_BUDGET_SECONDS:
         return {"action": "escalate", "cause": cause, "instruction": None,
                 "reason": f"{spent // 60} minutes of worker time over {len(attempts)} attempts; the local pool is not efficient here"}
+    diagnosis = task.get("diagnosis") or {}
+    if guard and diagnosis.get("repeat") and diagnosis.get("attempt_at") == last.get("at") and len(recent) >= 1:
+        # The doctor prescribed a fix for this exact error and it came back unchanged.
+        return {"action": "escalate", "cause": cause, "instruction": None,
+                "reason": f"the diagnosed fix did not work: the same error again after the remedy ({diagnosis.get('key')})"}
     if guard:
-        same_again = len(recent) >= 2 and len({a.get("sig") for a in recent[-2:]}) == 1
+        same_again = len(recent) >= 2 and len({_key(a) for a in recent[-2:]}) == 1
         if same_again or len(recent) >= AFTER_REMEDY_ATTEMPTS:
             return {"action": "escalate", "cause": cause, "instruction": None,
                     "reason": f"still failing after the loop-guard remedy ({len(recent)} more attempts, last: {cause})"}
@@ -163,7 +194,10 @@ def verdict(task: dict[str, Any], others: list[dict[str, Any]] | None = None) ->
             return {"action": "escalate", "cause": "baseline_red", "instruction": None,
                     "reason": f"{why}; the same tests fail in other tasks' gates too, so HEAD or the environment "
                               "is red: " + ", ".join(sorted(shared))[:300]}
-        instruction = instruction_for(cause)
+        diagnosis = task.get("diagnosis") or {}
+        # The doctor's concrete fix beats the generic per-cause instruction.
+        fresh = diagnosis.get("attempt_at") == last.get("at")
+        instruction = (diagnosis.get("fix") if fresh else None) or instruction_for(cause)
         if cause in UNFIXABLE or not instruction:
             return {"action": "escalate", "cause": cause, "instruction": None,
                     "reason": f"{why}; cause '{cause}' is not something the implementer can fix"}

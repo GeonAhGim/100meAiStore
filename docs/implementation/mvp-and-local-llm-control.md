@@ -59,4 +59,16 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-control-dashboard-sta
 - triage는 매번 `data/control/handoff.md`를 다시 써서 Codex·Claude Code가 원장 없이도 원인, 시도 이력,
   산출물, 원래 지시를 보고 이어받을 수 있게 한다.
 
+### 진단 워커(doctor)
+
+실패한 시도는 다시 실행되기 전에 진단 워커(`smart_store_control/doctor.py`)가 먼저 본다. 실패 노트와 리뷰 게이트 출력에서
+실제 예외·실패 테스트·발생 위치를 뽑고, 현재 체크아웃을 직접 조사해(모듈이 실제로 정의하는 이름, 패키지의 실제 모듈,
+함수의 실제 시그니처) 구체적 조치를 만든다. 조사로 설명되지 않으면 로컬 모델에 한 번 묻고, 모델이 바쁘면 원인별 기본
+지시를 쓴다. 진단은 작업의 `diagnosis`에 저장되어 다음 프롬프트의 "이전 시도 실패 진단" 절로 들어가고, 대시보드 카드와
+`handoff.md`에도 보인다. 작업은 진단이 나올 때까지(최대 15분) 다시 claim되지 않는다.
+
+진단은 오류의 정확한 키(예: `import:packages.store_core.service.StoreService`)도 남긴다. 루프 가드는 일반 게이트 노트가
+아니라 이 키로 "같은 실패"를 판단하고, 진단된 조치 뒤에도 같은 키로 실패하면 반복하지 않고 바로 넘긴다. cursor·gemini
+레인의 할당량·로그인 오류는 레인의 문제이므로 작업의 실패로 기록하지 않고 작업을 대기열로 돌려보낸다.
+
 대시보드는 상태 조회를 10초마다 갱신한다. 로컬 LLM 사용은 대시보드의 명시적 핸드오프 승인 뒤에만 가능하다.
