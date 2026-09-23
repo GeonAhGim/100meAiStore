@@ -428,6 +428,7 @@ class ClaimStatus(str, Enum):
     REFUND_PENDING = "REFUND_PENDING"
     REFUNDED = "REFUNDED"
     CLOSED = "CLOSED"
+    PARTIAL_APPROVED = "PARTIAL_APPROVED"
 
 
 @dataclass
