@@ -84,7 +84,7 @@ details summary{cursor:pointer;color:var(--blue);font-size:13px}
 
 <script>
 const $=id=>document.getElementById(id);const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const STAGE={claimed:'착수',llm_request:'모델 작업 중',review_gate:'테스트 게이트',review_llm:'모델 리뷰',requeued:'재대기',retry_queued:'재시도 대기',requeued_for_gate:'게이트 재검토 대기',landed:'브랜치 안착',finished:'완료',error:'오류',operator_approved:'승인됨',operator_rejected:'거부됨',parked:'주차',loop_remediated:'루프 진단 후 재시도',rebase_needed:'재구현 필요',needs_claude:'Claude Code 조치 필요',codex:'Codex 위임'};
+const STAGE={claimed:'착수',llm_request:'모델 작업 중',review_gate:'테스트 게이트',review_llm:'모델 리뷰',requeued:'재대기',retry_queued:'재시도 대기',requeued_for_gate:'게이트 재검토 대기',landed:'브랜치 안착',finished:'완료',error:'오류',operator_approved:'승인됨',operator_rejected:'거부됨',parked:'주차',loop_remediated:'루프 진단 후 재시도',rebase_needed:'재구현 필요',needs_claude:'Claude Code 조치 필요',codex:'Codex 위임',merged:'main 병합',merge_lost:'브랜치 유실'};
 const ago=iso=>{if(!iso)return '';const s=Math.max(0,(Date.now()-Date.parse(iso))/1000);return s<60?`${Math.round(s)}초 전`:s<3600?`${Math.round(s/60)}분 전`:`${(s/3600).toFixed(1)}시간 전`};
 function reason(t){const g=t.loop_guard;return (g?`[루프 가드 ${g.stage==='escalated'?'위임':'진단'}: ${esc(g.cause)}] `:'')+esc(t.note||t.last_error||'').slice(0,160)}  // current note first; history lives in the drawer
 function card(t){const live=['in_progress','reviewing'].includes(t.status);const cls=live?(t.health==='stale'?'stale':'live'):t.status==='needs_review'?'review':t.status==='needs_decision'?'decide':t.status==='blocked'?'blocked':t.status==='done'?'done':'';

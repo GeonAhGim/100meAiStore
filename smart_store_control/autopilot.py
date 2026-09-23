@@ -7,6 +7,7 @@ import threading
 from datetime import datetime, timezone
 
 from .land import land_reviewed
+from .integrate import integrate_landed
 from .triage import run_triage
 from .pm import ensure_workflow_tasks, requeue_blocked, status as pm_status
 from .recovery import current as recovery_status, start as start_recovery
@@ -50,8 +51,11 @@ def tick() -> dict:
     queued = []
     reopened = []
     landed = land_reviewed()
+    # Landed work reaches main (full suite on the merge first) and completes its
+    # milestone; without this the milestone graph never advanced and the pool idled.
+    integrated = integrate_landed()
     triaged = run_triage()  # self-throttled to every 10 minutes
-    if landed or triaged.get("actions"):
+    if landed or integrated or triaged.get("actions"):
         pm = pm_status()
     if not any(task.get("status") in {"ready", "needs_review", "in_progress", "reviewing"} for task in pm["tasks"]):
         reopened = requeue_blocked(limit=2)

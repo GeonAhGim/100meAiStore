@@ -36,6 +36,14 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-control-dashboard-sta
 창 없이 실행하고, watchdog이 서버가 종료되면 다시 띄운다. 서버 출력은 `data/control/server.log`, 종료 기록은
 `data/control/server.exit`에 남는다.
 
+## 안착 작업의 main 통합
+
+게이트와 리뷰를 통과한 작업은 `control/task-<id>` 브랜치에 안착한다. autopilot은 한 번에 하나씩 이 브랜치를
+임시 worktree에서 현재 main과 병합하고 전체 테스트를 돌린다. 통과하면 main을 fast-forward하고 마일스톤을
+`done`으로 표시해 의존 마일스톤이 다음 작업을 만들 수 있게 한다(`smart_store_control/integrate.py`).
+충돌이나 테스트 실패는 이유를 피드백으로 붙여 재구현 대기로 돌리고, main 체크아웃이 fast-forward를
+거부하면(예: 운영자의 미커밋 수정) 10분 뒤 다시 시도한다. push는 하지 않는다.
+
 ## 반복 실패 방지(루프 가드)와 인수인계
 
 로컬 풀은 일시 오류, 혼잡, 재베이스, 서버 재시작으로 인한 고아 작업을 재시도 예산 없이 다시 큐에 넣는다.
