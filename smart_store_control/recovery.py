@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 from .local_llm import complete
@@ -84,36 +84,61 @@ def _run() -> None:
                 diagnosis = f"diagnosis unavailable: {type(exc).__name__}: {exc}"[:500]
             artifact = ARTIFACT_DIR / f"recovery-{_now().strftime('%Y%m%dT%H%M%SZ')}.md"
             artifact.write_text(diagnosis, encoding="utf-8")
-        after = pm_status()
-        slots = max(1, int(capacity["effective"]))
-        needs_review = any(t.get("status") == "needs_review" for t in after["tasks"])
-        active = any(t.get("status") in {"in_progress", "reviewing"} for t in after["tasks"])
-        if needs_review:
-            fn, prefix = review_once, "local-review"
-        elif not active:
-            fn, prefix = run_once, "local-impl"
-        else:
-            fn, prefix = None, ""
-        if fn:
-            # One thread per slot per implementer lane: the local lane plus the
-            # cursor/gemini spare-capacity lanes, each bounded by its own capacity.
-            jobs = [(fn, f"{prefix}-{index}") for index in range(1, slots + 1)]
-            if fn is run_once:
-                for lane in implementer_lanes():
-                    if lane == "local-impl":
-                        continue
-                    lane_slots = int(effective_capacity(lane)["effective"])
-                    jobs += [(run_once, f"{lane}-{index}") for index in range(1, lane_slots + 1)]
-            with ThreadPoolExecutor(max_workers=max(1, len(jobs))) as pool:
-                futures = [pool.submit(job_fn, name) for job_fn, name in jobs]
-                worker_result = [future.result() for future in futures]
-        else:
-            worker_result = {"status": "not_started", "reason": "worker already active"}
-        _save({"status": "completed", "requeued": recovered, "artifact": str(artifact), "worker": worker_result, "updated_at": _stamp()})
+        started = dispatch()
+        _save({"status": "completed", "requeued": recovered, "artifact": str(artifact), "dispatched": started, "updated_at": _stamp()})
     except Exception as exc:
         _save({"status": "failed", "error": f"{type(exc).__name__}: {exc}"[:300], "updated_at": _stamp()})
     finally:
         _LOCK.release()
+
+
+_SLOTS: dict[str, threading.Thread] = {}
+_SLOTS_LOCK = threading.Lock()
+
+
+def slot_names() -> list[str]:
+    """One name per effective slot: local slots, then each spare-capacity lane's slots."""
+    names = [f"local-{index}" for index in range(1, int(effective_capacity("local-impl")["effective"]) + 1)]
+    for lane in implementer_lanes():
+        if lane != "local-impl":
+            names += [f"{lane}-{index}" for index in range(1, int(effective_capacity(lane)["effective"]) + 1)]
+    return names
+
+
+def _slot(name: str) -> None:
+    """One claim cycle for one slot. Claims enforce capacity, so a surplus slot just idles."""
+    try:
+        if name.startswith("local-"):
+            index = name.rsplit("-", 1)[1]
+            # Reviews first: a reviewed patch lands and unblocks more than a new draft.
+            if review_once(f"local-review-{index}").get("status") == "idle":
+                run_once(f"local-impl-{index}")
+        else:
+            run_once(name)
+    except Exception as exc:  # noqa: BLE001 - a slot thread must never take the dispatcher down
+        logging.getLogger(__name__).warning("slot %s failed: %s: %s", name, type(exc).__name__, exc)
+
+
+def dispatch() -> list[str]:
+    """Start a worker on every slot whose previous worker has finished; returns the slots started.
+
+    The pool used to run in batches: a recovery run started one kind of job
+    (all reviews, or all implementations) on every slot and waited for the
+    whole batch, so one pending review idled the other local slot and both
+    spare lanes for up to the 25-minute agent wall clock. Each slot now
+    refills independently as soon as its own worker returns.
+    """
+    started = []
+    with _SLOTS_LOCK:
+        for name in slot_names():
+            thread = _SLOTS.get(name)
+            if thread is not None and thread.is_alive():
+                continue
+            thread = threading.Thread(target=_slot, args=(name,), name=f"smart-store-slot-{name}", daemon=True)
+            _SLOTS[name] = thread
+            thread.start()
+            started.append(name)
+    return started
 
 
 def start() -> dict:
