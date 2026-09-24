@@ -93,20 +93,34 @@ def run_gate(root: Path, patch_path: Path, task_id: int) -> tuple[bool, str]:
         shutil.rmtree(scratch, ignore_errors=True)
 
 
-def review_prompt(patch_text: str, gate_report: str, root: Path) -> str:
+def review_prompt(patch_text: str, gate_report: str, root: Path, task_prompt: str = "") -> str:
+    """The review request. The files shown are the state BEFORE the patch.
+
+    They used to be labelled only "CURRENT ... the patch is applied to", and
+    the model kept reading them as the post-patch state: every new function
+    was "missing from CURRENT", so sound patches failed review and piled up
+    as needs_decision until the pool stalled (tasks 27 and 29, 2026-09-25).
+    """
     shown = []
     for path in touched_paths(patch_text):
         file = root / path
         if file.is_file():
             text = file.read_text(encoding="utf-8", errors="replace")
-            shown.append(f"\n\n<<<CURRENT {path}>>>\n{text[:MAX_FILE_CHARS]}\n<<<END>>>")
+            cut = " (truncated)" if len(text) > MAX_FILE_CHARS else ""
+            shown.append(f"\n\n<<<BEFORE {path}{cut}>>>\n{text[:MAX_FILE_CHARS]}\n<<<END>>>")
     return (
         "You are the smart_store local review worker. Review the candidate patch for correctness, safety and "
-        "scope. The objective gate below already applied the patch and ran the tests; treat its results as facts. "
-        "The CURRENT files are the repository contents the patch is applied to: do not claim a function, class or "
-        "fixture is missing unless it is absent from them. End with exactly REVIEW: PASS or REVIEW: FAIL, "
-        "followed by concise reasons.\n\nGATE RESULTS:\n" + gate_report + "\n\nPATCH:\n" + patch_text[:20000]
-        + "".join(shown)
+        "scope against the task. The objective gate below already applied the patch and ran the tests; treat its "
+        "results as facts: the patched code compiles, imports and passes them.\n"
+        "The BEFORE files show the repository BEFORE the patch and may be truncated. Code the patch adds is in "
+        "PATCH, never in BEFORE; its absence from BEFORE is expected and is not a defect. Use BEFORE only to "
+        "check that the patch fits existing names and signatures.\n"
+        "FAIL only for a concrete defect you can point to in the patch: a wrong result, a safety or security "
+        "problem, a change outside the task, or an exit criterion of the task the patch does not meet (for "
+        "example tests the task requires are missing). Quote the patch line for each FAIL reason. Style alone is "
+        "not a FAIL. End with exactly REVIEW: PASS or REVIEW: FAIL, followed by concise reasons.\n\n"
+        + (f"TASK:\n{task_prompt[:3000]}\n\n" if task_prompt else "")
+        + "GATE RESULTS:\n" + gate_report + "\n\nPATCH:\n" + patch_text[:20000] + "".join(shown)
     )
 
 
@@ -133,7 +147,7 @@ def run_once(worker: str = "local-review-1") -> dict:
         endpoint = read_json(CONTROL_DIR / "runtime.json", {}).get("local_llm", {}).get("endpoint", "http://127.0.0.1:8081")
         model = read_json(CONTROL_DIR / "runtime.json", {}).get("local_llm", {}).get("model", "qwen3.6-35b-a3b")
         try:
-            response = complete(review_prompt(patch_text, gate_report, PROJECT_ROOT), endpoint=endpoint, model=model, system=SYSTEM)
+            response = complete(review_prompt(patch_text, gate_report, PROJECT_ROOT, str(task.get("prompt") or "")), endpoint=endpoint, model=model, system=SYSTEM)
         except Exception as exc:  # noqa: BLE001 - the gate passed; the model's read is advisory
             response = f"REVIEW: PASS\n(model review unavailable: {type(exc).__name__}; gate passed)"
         review_path.write_text("GATE:\n" + gate_report + "\n\nMODEL:\n" + response, encoding="utf-8")

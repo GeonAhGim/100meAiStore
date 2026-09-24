@@ -125,6 +125,7 @@ def lane_of(worker: str) -> str:
 
 LANE_PAUSE_SECONDS = 30 * 60
 LANE_FAULT_MARKERS = ("usage limit", "quota", "rate limit", "not trusted", "not logged in", "unauthorized",
+                      "can't reach the api server", "enotfound", "econnrefused",
                       "authentication", "429", "actionrequirederror",
                       "503", "high demand", "overloaded", "temporarily unavailable", "resource_exhausted")
 

@@ -39,6 +39,8 @@ CAUSES: tuple[tuple[str, tuple[str, ...], str | None], ...] = (
     ("stray_edits", ("outside its worktree", "live checkout denied"),
      "이전 시도가 작업 worktree 밖(C:\\smart_store 본 체크아웃)의 파일을 수정했다. 현재 작업 디렉터리 안의 "
      "상대 경로 파일만 편집하고 절대 경로로 쓰지 마라."),
+    # An outage also reads as "agent produced no change"; it is the machine, not the task.
+    ("infra", ("can't reach the api server", "enotfound", "econnrefused", "econnreset"), None),
     # A run that changed nothing because it judged the work already done. Checked
     # before max_turns, whose "produced no change" marker it also carries.
     ("noop_claim", ("already complete", "already satisfied", "already implemented", "report-only patch",

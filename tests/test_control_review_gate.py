@@ -56,11 +56,13 @@ class ReviewGateTests(unittest.TestCase):
         self.assertFalse(passed)
         self.assertIn("3 != 2", report)
 
-    def test_review_prompt_shows_current_files_and_forbids_missing_claims(self):
-        prompt = review.review_prompt(GOOD_PATCH, "full suite: rc=0", self.root)
-        self.assertIn("<<<CURRENT pkg/mod.py>>>", prompt)
+    def test_review_prompt_shows_pre_patch_files_as_before_and_the_task(self):
+        prompt = review.review_prompt(GOOD_PATCH, "full suite: rc=0", self.root, "Exit criteria: B is 2.")
+        self.assertIn("<<<BEFORE pkg/mod.py>>>", prompt)
+        self.assertNotIn("<<<CURRENT", prompt)
         self.assertIn("A = 1", prompt)
-        self.assertIn("do not claim a function", prompt)
+        self.assertIn("never in BEFORE", prompt)
+        self.assertIn("TASK:\nExit criteria: B is 2.", prompt)
         self.assertIn("GATE RESULTS", prompt)
 
     def test_decisions_map_to_reviewed_needs_decision_or_blocked(self):

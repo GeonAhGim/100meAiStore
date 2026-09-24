@@ -54,6 +54,13 @@ class FleetRuleTests(unittest.TestCase):
         self.assertEqual("noop_claim", loopguard.cause_of("agent produced no change: 모든 완료조건이 이미 만족되고 있다"))
         self.assertIn("직접 실행", loopguard.instruction_for("noop_claim"))
 
+    def test_a_network_outage_is_infra_and_a_lane_fault_not_a_turn_budget(self):
+        # tasks 28 and 30, 2026-09-25: ENOTFOUND three times read as max_turns and went to Codex.
+        note = "agent produced no change: API Error: Can't reach the API server - check your internet or DNS (ENOTFOUND)"
+        self.assertEqual("infra", loopguard.cause_of(note))
+        self.assertIsNotNone(pm.lane_fault(note))
+        self.assertEqual("gate_tests", loopguard.cause_of("gate failed: full suite: rc=1 ConnectionError"))
+
     def test_reviews_are_not_blocked_by_a_claude_lane_run(self):
         self.tasks.write_text(json.dumps({"tasks": [
             {"id": 1, "role": "local-impl", "status": "in_progress", "worker": "claude-impl-1"},
