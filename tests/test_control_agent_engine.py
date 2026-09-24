@@ -130,7 +130,7 @@ class KillMarkerTests(unittest.TestCase):
     def test_generated_settings_mark_the_run(self):
         argv = agent_engine.build_argv("C:/npm/claude.cmd", "m", 5,
                                        settings=Path("C:/smart_store/data/control/worker_settings.generated.json"))
-        self.assertEqual("C:\smart_store\data\control\worker_settings.generated.json".replace("\\", "/"),
+        self.assertEqual("C:/smart_store/data/control/worker_settings.generated.json",
                          agent_engine.run_marker(argv).replace("\\", "/"))
 
     def test_no_marker_kills_nothing(self):

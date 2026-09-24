@@ -68,7 +68,10 @@ def build_argv(exe: str, model: str, max_turns: int, settings: Path = SETTINGS_P
 
 def rule_path(path: Path) -> str:
     """C:/smart_store/packages -> //c/smart_store/packages (Claude Code's absolute-path rule form)."""
-    posix = path.resolve().as_posix()
+    raw = str(path).replace("\\", "/")
+    # A drive-letter path is already absolute; resolve() on POSIX would treat it
+    # as relative and prefix the working directory.
+    posix = raw if len(raw) > 2 and raw[1] == ":" and raw[2] == "/" else path.resolve().as_posix()
     if len(posix) > 1 and posix[1] == ":":
         posix = "/" + posix[0].lower() + posix[2:]
     return "/" + posix
