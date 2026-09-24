@@ -102,34 +102,83 @@ class M33ReleaseReview:
 def check_no_secrets(root: Path) -> tuple[bool, str]:
     """Fail-closed check: no repository keys/credentials in cleartext.
 
+    Checks files tracked by git (respects .gitignore when available). Scans actual
+    file content for credential patterns: key=token, private key headers, known prefixes.
+
     Returns (passed, evidence) where passed is True if no credentials found.
     """
     try:
-        suspicious_patterns = re.compile(r"(?i)password|api_key|secret|credential|token|authorization")
-        # Check common credential file locations
-        cred_files = ["config.json", "secrets.json", ".env", ".env.local"]
-        found_files = []
-        for fname in cred_files:
-            path = root / fname
-            if path.exists():
-                found_files.append(fname)
+        import subprocess
+        import os
 
-        if found_files:
-            return False, f"Found credential files: {', '.join(found_files)}"
+        root = Path(root)
 
-        # Quick scan of main code directories for hardcoded patterns
+        # Get git-tracked files (respects .gitignore if git available)
+        tracked_files = []
+        result = subprocess.run(
+            ["git", "ls-files"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+
+        if result.returncode == 0 and result.stdout.strip():
+            tracked_files = result.stdout.strip().split('\n')
+        else:
+            # Fallback: list all non-hidden files (no .gitignore filtering)
+            for dirpath, dirnames, filenames in os.walk(root):
+                dirnames[:] = [d for d in dirnames if not d.startswith('.')]
+                for fname in filenames:
+                    if not fname.startswith('.'):
+                        full_path = Path(dirpath) / fname
+                        tracked_files.append(str(full_path.relative_to(root)))
+
+        # Credential patterns: must have quotes/assignment to avoid false positives on code definitions
+        secret_patterns = [
+            re.compile(r"\w+\s*=\s*['\"].*password.*['\"]", re.IGNORECASE),
+            re.compile(r"\w+\s*=\s*['\"].*api[_-]?key.*['\"]", re.IGNORECASE),
+            re.compile(r"(?:api[_-]?key|secret|token|password)\s*:\s*['\"][^'\"]{8,}['\"]", re.IGNORECASE),
+            re.compile(r"-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY"),
+            re.compile(r"sk_live_[a-zA-Z0-9]{32,}"),
+            re.compile(r"sk_test_[a-zA-Z0-9]{32,}"),
+            re.compile(r"pk_live_[a-zA-Z0-9]{32,}"),
+        ]
+
+        found_secrets = []
         scanned_count = 0
-        for pyfile in (root / "packages").rglob("*.py"):
+
+        for file_path in tracked_files:
+            if not file_path or file_path.startswith('.'):
+                continue
+
+            # Skip test files (fixture data, not production code)
+            if file_path.startswith('tests/') or file_path.startswith('test_'):
+                continue
+
+            full_path = root / file_path
+            if not full_path.exists() or full_path.is_dir():
+                continue
+
             try:
-                text = pyfile.read_text(encoding="utf-8", errors="replace")
+                text = full_path.read_text(encoding="utf-8", errors="replace")
                 scanned_count += 1
-                if suspicious_patterns.search(text) and "DEMO" not in text and "fixture" not in text:
-                    # Too noisy - skip this check for now. DEMO-specific code mentions these legitimately.
-                    pass
+
+                # Skip DEMO fixture files (legitimate test data in production code)
+                if "DEMO" in text and "fixture" in text:
+                    continue
+
+                for pattern in secret_patterns:
+                    if pattern.search(text):
+                        found_secrets.append(str(file_path))
+                        break
             except Exception:
                 pass
 
-        return True, f"No cleartext credentials found (scanned {scanned_count} .py files)"
+        if found_secrets:
+            return False, f"Found credential patterns in: {', '.join(found_secrets[:3])}"
+
+        return True, f"No cleartext credentials found (scanned {scanned_count} files)"
     except Exception as e:
         return False, f"Security check error: {str(e)[:100]}"
 
