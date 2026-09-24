@@ -7,10 +7,9 @@ import threading
 from datetime import datetime, timezone
 
 from .land import land_reviewed
-from .integrate import integrate_landed
 from .triage import run_triage
 from .pm import ensure_workflow_tasks, requeue_blocked, status as pm_status
-from .recovery import current as recovery_status, dispatch, start as start_recovery, start_doctor
+from .recovery import current as recovery_status, dispatch, start as start_recovery, start_doctor, start_integrator
 from .state import CONTROL_DIR, grant_handoff, read_json
 
 _STOP = threading.Event()
@@ -53,9 +52,11 @@ def tick() -> dict:
     landed = land_reviewed()
     # Landed work reaches main (full suite on the merge first) and completes its
     # milestone; without this the milestone graph never advanced and the pool idled.
-    integrated = integrate_landed()
+    # In its own thread: the suite takes minutes and, run inline, it held this
+    # tick, so no slot was refilled while a merge was being tested.
+    start_integrator()
     triaged = run_triage()  # self-throttled to every 10 minutes
-    if landed or integrated or triaged.get("actions"):
+    if landed or triaged.get("actions"):
         pm = pm_status()
     # Retry blocked work whenever the queue has nothing ready, not only when every
     # slot is idle: one long run no longer holds the other slots empty.

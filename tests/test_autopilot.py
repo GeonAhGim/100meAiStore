@@ -9,7 +9,7 @@ def _tick_env(tasks, **extra):
     patches = [patch.object(autopilot, "status", lambda: {"enabled": True, "local_first": True}),
                patch.object(autopilot, "pm_status", lambda: {"tasks": tasks, "attention": 0}),
                patch.object(autopilot, "recovery_status", lambda: {"status": "idle"}),
-               patch.object(autopilot, "integrate_landed", lambda: []),
+               patch.object(autopilot, "start_integrator", lambda: False),
                patch.object(autopilot, "start_doctor", lambda: False)]
     patches += [patch.object(autopilot, name, value) for name, value in extra.items()]
     return patches

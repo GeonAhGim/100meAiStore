@@ -8,6 +8,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 
 from . import doctor
+from .integrate import integrate_landed, pending as pending_integration
 from .local_llm import complete
 from .pm import _CLAIM_LOCK as pm_lock, _load as pm_load
 from .pm import TASKS_PATH, effective_capacity, finish, implementer_lanes, requeue_stale, status as pm_status
@@ -148,6 +149,32 @@ def _doctor() -> None:
         doctor.run_pending()
     except Exception as exc:  # noqa: BLE001 - the doctor must never take the dispatcher down
         logging.getLogger(__name__).warning("doctor failed: %s: %s", type(exc).__name__, exc)
+
+
+def _integrator() -> None:
+    try:
+        integrate_landed()
+    except Exception as exc:  # noqa: BLE001 - integration must never take the dispatcher down
+        logging.getLogger(__name__).warning("integrator failed: %s: %s", type(exc).__name__, exc)
+
+
+def start_integrator() -> bool:
+    """Merge landed branches into main in a thread of its own; True when started.
+
+    One at a time (the thread slot) so two merges never race for main.
+    """
+    with _SLOTS_LOCK:
+        thread = _SLOTS.get("integrator")
+        if thread is not None and thread.is_alive():
+            return False
+        with pm_lock:
+            todo = pending_integration(pm_load().get("tasks", []))
+        if not todo:
+            return False
+        thread = threading.Thread(target=_integrator, name="smart-store-integrator", daemon=True)
+        _SLOTS["integrator"] = thread
+        thread.start()
+        return True
 
 
 def start_doctor() -> bool:
