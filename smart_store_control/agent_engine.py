@@ -106,7 +106,14 @@ def checkout_guard_settings(root: Path) -> Path:
 # Both read the prompt from stdin and edit files in the task worktree like the
 # claude-local lane; only argv, environment and output parsing differ.
 CURSOR_EXE = Path.home() / "AppData" / "Local" / "cursor-agent" / "cursor-agent.cmd"
-EXTERNAL_ENGINES = ("cursor", "gemini")
+EXTERNAL_ENGINES = ("cursor", "gemini", "claude")
+
+
+def claude_env() -> dict[str, str]:
+    """The operator's own Claude login (no proxy, no inherited ANTHROPIC_*): the paid Claude lane."""
+    env = {key: os.environ[key] for key in BASE_ENV_KEYS if key in os.environ}
+    env.update({"CLAUDE_CODE_ATTRIBUTION_HEADER": "0", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"})
+    return env
 
 
 def engine_command(engine: str, model: str, max_turns: int) -> tuple[list[str], dict[str, str], str]:
@@ -267,9 +274,11 @@ def run_agent(root: Path, task: dict, *, model: str, base_url: str, max_turns: i
     worktree = prepare_worktree(root, int(task["id"]))
     summary: dict = {"engine": engine, "model": model, "max_turns": max_turns}
     try:
-        if engine == "claude-local":
+        if engine in ("claude-local", "claude"):
+            # Same CLI, tools and checkout guard; claude-local talks to the local
+            # model through the AIOS proxy, claude to Anthropic on the operator's login.
             argv = build_argv(claude_executable(), model, max_turns, checkout_guard_settings(root))
-            env, kind = local_env(model, base_url), "json"
+            env, kind = (local_env(model, base_url) if engine == "claude-local" else claude_env()), "json"
         else:
             argv, env, kind = engine_command(engine, model, max_turns)
         try:

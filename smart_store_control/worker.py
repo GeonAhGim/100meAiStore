@@ -53,8 +53,8 @@ def run_once(worker: str, apply_patch: bool = False) -> dict:
         engine = str(llm.get("engine", "claude-local"))
         model = str(llm.get("model", "qwen3.6-35b-a3b"))
         if str(lane_pool.get("engine", "")) in EXTERNAL_ENGINES:
-            # cursor / gemini spare-capacity lane: same worktree-and-diff flow,
-            # different CLI; the pool entry names the engine and optional model.
+            # cursor / gemini / claude lane: same worktree-and-diff flow, its
+            # own CLI or account; the pool entry names the engine and model.
             engine, model = str(lane_pool["engine"]), str(lane_pool.get("model") or "")
 
         if engine in ("claude-local", *EXTERNAL_ENGINES):
@@ -68,7 +68,7 @@ def run_once(worker: str, apply_patch: bool = False) -> dict:
             gate = LOCAL_LLM_GATE if engine == "claude-local" else nullcontext()
             with gate:
                 diff, summary = run_agent(PROJECT_ROOT, task, model=model, base_url=endpoint,
-                                          max_turns=int(llm.get("max_turns", 45)),
+                                          max_turns=int(lane_pool.get("max_turns", llm.get("max_turns", 45))),
                                           wall_seconds=int(lane_pool.get("wall_seconds", llm.get("wall_seconds", 1500))),
                                           artifact_dir=artifact.parent, engine=engine)
             if summary.get("stray_edits"):

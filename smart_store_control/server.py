@@ -6,7 +6,7 @@ module; the API is:
 
 GET  /api/control          full snapshot (runtime, capacity, tasks, milestones, autopilot, recovery)
 GET  /api/task/<id>        one task with its artifacts (patch head, review, agent summary)
-POST /api/task/<id>/<act>  act in retry|approve|reject|rereview|park, JSON body {"reason": "..."} optional
+POST /api/task/<id>/<act>  act in retry|approve|reject|rereview|park, JSON body {"reason": "...", "lane": "..."} optional
 POST /api/handoff/grant|revoke, /api/pm/run, /api/pm/recover   (unchanged)
 """
 from __future__ import annotations
@@ -164,7 +164,8 @@ class Handler(BaseHTTPRequestHandler):
             elif len(parts) == 5 and parts[1:3] == ["api", "task"] and parts[4] == "instruct":
                 result = add_instruction(parts[3], str(payload.get("text") or ""))
             elif len(parts) == 5 and parts[1:3] == ["api", "task"]:
-                result = operator_action(parts[3], parts[4], str(payload.get("reason") or "")[:200])
+                result = operator_action(parts[3], parts[4], str(payload.get("reason") or "")[:200],
+                                         lane=str(payload.get("lane") or "") or None)
             else:
                 self.send_error(404)
                 return

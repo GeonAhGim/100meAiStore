@@ -114,7 +114,7 @@ def status() -> dict[str, Any]:
     }
 
 
-EXTERNAL_ENGINES = ("cursor", "gemini")
+EXTERNAL_ENGINES = ("cursor", "gemini", "claude")
 IMPL_ROLE = "local-impl"  # every implementation task carries this role; any implementer lane may claim it
 
 
@@ -277,7 +277,7 @@ def add_instruction(task_id: int, text: str) -> dict[str, Any]:
     raise KeyError(f"unknown task {task_id}")
 
 
-def operator_action(task_id: int, action: str, reason: str = "") -> dict[str, Any]:
+def operator_action(task_id: int, action: str, reason: str = "", lane: str | None = None) -> dict[str, Any]:
     """One explicit operator decision on a task, recorded in the ledger.
 
     retry:    blocked/needs_decision/planned -> ready with a fresh retry budget
@@ -285,9 +285,15 @@ def operator_action(task_id: int, action: str, reason: str = "") -> dict[str, An
     reject:   needs_decision -> blocked, retry budget spent, reason kept
     rereview: blocked with a patch artifact -> needs_review (objective gate again)
     park:     any non-active -> planned (out of the queue, nothing lost)
+
+    ``lane`` (retry only) routes the task to one implementer lane, e.g. the
+    Claude lane for work the local model could not finish.
     """
     if action not in OPERATOR_ACTIONS:
         raise ValueError(f"unknown action {action}")
+    if lane and (action != "retry" or lane not in implementer_lanes()):
+        raise ValueError(f"lane {lane} applies to retry on a configured implementer lane only")
+    withdrawn = None
     with _CLAIM_LOCK:
         data = _load()
         for task in data.get("tasks", []):
@@ -301,6 +307,9 @@ def operator_action(task_id: int, action: str, reason: str = "") -> dict[str, An
             if action == "retry":
                 # A human decided to try again: a fresh retry budget and a fresh
                 # loop-guard window, or the old history would escalate it at once.
+                withdrawn = task.get("escalation") if status == "escalated" else None
+                if lane:
+                    task["preferred_lane"] = lane
                 task.update({"status": "ready", "worker": "", "reviewer": "", "phase": "retry_queued", "retry_count": 0,
                              "loop_guard": None, "escalation": None, "guard_reset_at": stamp,
                              "last_error": task.get("note"), "note": f"{who} requested retry", "updated_at": stamp})
@@ -328,6 +337,10 @@ def operator_action(task_id: int, action: str, reason: str = "") -> dict[str, An
                 task.update({"status": "superseded", "worker": "", "reviewer": "", "phase": "superseded",
                              "note": f"{who} superseded", "updated_at": stamp})
             _save(data)
+            if withdrawn and withdrawn.get("engine") == "codex":
+                # The operator took the task back: a Codex worker started later must not redo it.
+                from .escalation import withdraw_codex  # local import: escalation imports pm
+                withdraw_codex(withdrawn, f"control: operator retried task {task_id} locally")
             return dict(task)
     raise KeyError(f"unknown task {task_id}")
 

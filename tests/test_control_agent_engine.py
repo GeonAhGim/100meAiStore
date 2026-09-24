@@ -137,3 +137,32 @@ class KillMarkerTests(unittest.TestCase):
         with mock.patch.object(agent_engine.subprocess, "run") as run:
             agent_engine.kill_agent_tree(["C:/npm/gemini.cmd", "-p", "x"])
         run.assert_not_called()
+
+
+class ClaudeLaneTests(unittest.TestCase):
+    """The paid Claude lane: same CLI, tools and checkout guard, the operator's login instead of the proxy."""
+
+    def test_claude_env_carries_no_proxy_or_key(self):
+        with mock.patch.dict(os.environ, {"ANTHROPIC_BASE_URL": "http://127.0.0.1:8081", "ANTHROPIC_API_KEY": "x"}):
+            env = agent_engine.claude_env()
+        self.assertNotIn("ANTHROPIC_BASE_URL", env)
+        self.assertNotIn("ANTHROPIC_API_KEY", env)
+
+    def test_claude_engine_runs_the_cli_with_the_guard_and_its_model(self):
+        root = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+        (root / "pkg").mkdir()
+        (root / "pkg" / "a.py").write_text("A = 1\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=root, check=True)
+        subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"], cwd=root, check=True)
+        seen = {}
+
+        def spawn(argv, cwd, input, **kwargs):
+            seen.update(argv=argv, env=kwargs["env"])
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"result": "done", "num_turns": 2}), "")
+        with mock.patch.object(agent_engine, "claude_executable", lambda: "claude"):
+            agent_engine.run_agent(root, {"id": 9, "prompt": "p"}, model="claude-haiku-4-5-20251001",
+                                   base_url="http://127.0.0.1:8081", spawn=spawn, engine="claude")
+        self.assertIn("claude-haiku-4-5-20251001", seen["argv"])
+        self.assertTrue(seen["argv"][seen["argv"].index("--settings") + 1].endswith("worker_settings.generated.json"))
+        self.assertNotIn("ANTHROPIC_BASE_URL", seen["env"])

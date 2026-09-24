@@ -85,6 +85,17 @@ class EscalationTests(unittest.TestCase):
         self.assertIn("never picked up", self._task()["last_error"])
         self.assertEqual("dead", db.job(job["id"])["status"])  # a Codex worker started later will not redo it
 
+    def test_operator_retry_to_a_lane_takes_the_task_back_from_codex(self):
+        triage.run_triage(force=True)
+        job = StoreDB(self.codex_db).find_job("dev.task", "ctl-4")
+        with mock.patch.object(pm, "implementer_lanes", lambda: ["local-impl", "claude-impl"]):
+            pm.operator_action(4, "retry", "claude lane", lane="claude-impl")
+            with self.assertRaises(ValueError):
+                pm.operator_action(4, "park", lane="claude-impl")
+        task = self._task()
+        self.assertEqual(("ready", "claude-impl", None), (task["status"], task["preferred_lane"], task["escalation"]))
+        self.assertEqual("dead", StoreDB(self.codex_db).job(job["id"])["status"])
+
     def test_withdraw_leaves_a_claimed_job_alone(self):
         db = StoreDB(self.codex_db)
         job_id = db.enqueue("dev.task", {"task_id": "x"})
