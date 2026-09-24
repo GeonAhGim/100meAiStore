@@ -122,3 +122,18 @@ class AgentEngineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class KillMarkerTests(unittest.TestCase):
+    """A timed-out run is killed by its own settings file, never by the CLI path every Claude process shares."""
+
+    def test_generated_settings_mark_the_run(self):
+        argv = agent_engine.build_argv("C:/npm/claude.cmd", "m", 5,
+                                       settings=Path("C:/smart_store/data/control/worker_settings.generated.json"))
+        self.assertEqual("C:\smart_store\data\control\worker_settings.generated.json".replace("\\", "/"),
+                         agent_engine.run_marker(argv).replace("\\", "/"))
+
+    def test_no_marker_kills_nothing(self):
+        with mock.patch.object(agent_engine.subprocess, "run") as run:
+            agent_engine.kill_agent_tree(["C:/npm/gemini.cmd", "-p", "x"])
+        run.assert_not_called()

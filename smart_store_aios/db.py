@@ -187,6 +187,24 @@ class StoreDB:
             connection.execute("COMMIT")
             return status
 
+    def withdraw(self, job_id: int, reason: str) -> bool:
+        """Dead-letter a job that no worker has claimed yet; False when it is already running or finished.
+
+        The requester takes the work back (the control plane hands an unclaimed
+        dev.task to Claude Code), so a worker started later must not run it too.
+        """
+        now = utcnow().isoformat()
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            changed = connection.execute(
+                "UPDATE jobs SET status='dead', last_error=?, updated_at=? WHERE id=? AND status='queued'",
+                (reason[:2000], now, job_id)).rowcount
+            if changed:
+                connection.execute("INSERT INTO audit_log(event,entity_id,details,created_at) VALUES(?,?,?,?)",
+                                   ("job.withdrawn", str(job_id), json.dumps({"reason": reason[:500]}, ensure_ascii=False), now))
+            connection.execute("COMMIT")
+        return bool(changed)
+
     def job(self, job_id: int) -> dict | None:
         with self.connect() as connection:
             row = connection.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()

@@ -186,15 +186,29 @@ def worktree_diff(path: Path) -> str:
     return diff.stdout
 
 
+def run_marker(argv: list[str]) -> str | None:
+    """The smart_store-only settings file on the command line, which only this pool's agent runs carry."""
+    if "--settings" in argv[:-1]:
+        value = argv[argv.index("--settings") + 1]
+        if "smart_store" in value.replace("\\", "/") and value.endswith(".json"):
+            return value
+    return None
+
+
 def kill_agent_tree(argv: list[str]) -> None:
     """Kill every process started for this agent run.
 
     On Windows the CLI is launched through a .cmd shim; killing only the shim
     leaves the real process (claude.exe, node) running, holding the local LLM
-    slot and still able to write files. Match by the run's own settings path or
-    binary so nothing outside this run is touched.
+    slot and still able to write files. Match by the run's own settings file so
+    nothing outside this run is touched; an engine without one (cursor,
+    gemini) is left to subprocess's own kill of the shim.
     """
-    marker = next((a for a in argv if a.endswith("worker_settings_local.json") and "smart_store_control" in a), None) or argv[0]
+    marker = run_marker(argv)
+    if not marker:
+        # Never fall back to argv[0]: every Claude CLI on the machine (AIOS
+        # agents, operator sessions) shares that path, and /T /F kills them all.
+        return
     try:
         listing = subprocess.run(["powershell", "-NoProfile", "-Command",
                                   "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }"],

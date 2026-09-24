@@ -66,6 +66,32 @@ class EscalationTests(unittest.TestCase):
         self.assertEqual("done", result["actions"][0]["action"])
         self.assertEqual(("done", "worker/ctl-4", "abc123"), (self._task()["status"], self._task()["branch"], self._task()["commit"]))
 
+    def test_a_codex_job_nobody_picks_up_comes_back_to_claude_and_is_withdrawn(self):
+        # task 18, 2026-09-23: queued with zero attempts for 20h (no Codex worker,
+        # quota spent) while M4.7 waited behind it.
+        triage.run_triage(force=True)
+        db = StoreDB(self.codex_db)
+        job = db.find_job("dev.task", "ctl-4")
+        self.assertEqual([], triage.run_triage(force=True)["actions"])  # fresh: still waiting
+        old = (datetime.now(timezone.utc) - timedelta(seconds=escalation.CODEX_PICKUP_SECONDS + 60)).isoformat()
+        with db.connect() as c:
+            c.execute("UPDATE jobs SET available_at=? WHERE id=?", (old, job["id"]))
+        data = json.loads(self.tasks.read_text(encoding="utf-8"))
+        data["tasks"][0]["escalation"]["at"] = _stamp(escalation.CODEX_PICKUP_SECONDS + 60)
+        self.tasks.write_text(json.dumps(data), encoding="utf-8")
+        result = triage.run_triage(force=True)
+        self.assertEqual([{"task": 4, "cause": "codex_timeout", "action": "claude"}], result["actions"])
+        self.assertEqual(("blocked", "needs_claude"), (self._task()["status"], self._task()["phase"]))
+        self.assertIn("never picked up", self._task()["last_error"])
+        self.assertEqual("dead", db.job(job["id"])["status"])  # a Codex worker started later will not redo it
+
+    def test_withdraw_leaves_a_claimed_job_alone(self):
+        db = StoreDB(self.codex_db)
+        job_id = db.enqueue("dev.task", {"task_id": "x"})
+        db.claim("w", 60)
+        self.assertFalse(db.withdraw(job_id, "r"))
+        self.assertEqual("running", db.job(job_id)["status"])
+
     def test_dead_codex_job_raises_to_claude(self):
         triage.run_triage(force=True)
         db = StoreDB(self.codex_db)

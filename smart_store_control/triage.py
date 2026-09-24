@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from . import loopguard
-from .escalation import codex_outcome, hand_to_codex, write_handoff
+from .escalation import codex_outcome, hand_to_codex, withdraw_codex, write_handoff
 from .pm import _CLAIM_LOCK, _load, _save, now
 from .state import CONTROL_DIR, read_json, write_json
 
@@ -142,6 +142,8 @@ def run_triage(force: bool = False) -> dict[str, Any]:
                                  "note": f"Codex pipeline landed {details.get('branch')} at {details.get('commit')}", "updated_at": now()})
                     actions.append({"task": task["id"], "cause": "codex_done", "action": "done"})
                 elif outcome in ("dead", "timeout"):
+                    if outcome == "timeout":
+                        withdraw_codex(record, f"control: handed to Claude Code ({details.get('reason')})")
                     task.update({"status": "blocked", "phase": "needs_claude",
                                  "last_error": f"codex: {details.get('reason')}", "note": "Codex could not finish; Claude Code to act",
                                  "updated_at": now()})
