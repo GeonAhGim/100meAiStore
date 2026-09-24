@@ -16,8 +16,11 @@ import json
 from datetime import datetime, timezone
 from typing import Iterator
 
-import psycopg2
-import psycopg2.extras
+try:  # optional driver: the offline core and its tests import this package without it
+    import psycopg2
+    import psycopg2.extras
+except ImportError:  # pragma: no cover - exercised on hosts without the driver
+    psycopg2 = None
 
 from .domain import (
     Approval,
@@ -644,6 +647,8 @@ class TenantAwarePostgresRepository:
     """
 
     def __init__(self, connection: psycopg2.extensions.connection, tenant_id: str) -> None:
+        if psycopg2 is None:
+            raise RuntimeError("TenantAwarePostgresRepository needs psycopg2 (pip install psycopg2-binary)")
         self._conn = connection
         self._tenant_id = tenant_id
         self._ensure_tenant()
