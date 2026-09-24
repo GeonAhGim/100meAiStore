@@ -13,6 +13,13 @@ key. SQLite and InMemory repositories provide restart-safe storage and tenant
 boundary checks. Preference writes use version CAS; all successful or blocked
 operations append local audit/outbox evidence.
 
-Acceptance covers priority fallback, per-item mute, replay/conflict, incident
+## Acceptance evidence
+
+| ID | Acceptance criterion |
+|---|---|
+| B09-01 | Notification fallback from app_push to email to chatgpt uses local simulator with deterministic DELIVERED/FAILED/MUTED outcomes and no external calls |
+| B09-02 | Delivery is idempotent and tenant-scoped; operator incident acknowledgement with reason and idempotency key survives restart |
+
+Acceptance (prior): covers priority fallback, per-item mute, replay/conflict, incident
 acknowledgement replay, invalid channel/note rejection, and no external side
 effect.

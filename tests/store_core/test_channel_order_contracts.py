@@ -22,7 +22,7 @@ class ChannelOrderContractTest(unittest.TestCase):
         return parse_naver_details(self.fixtures["naver"] if body is None else body,
                                    requested_ids=("fixture-product-order-1",))
 
-    def test_naver_preserves_partial_quantity_and_discounted_payment(self):
+    def test_naver_preserves_partial_quantity_and_discounted_payment(self):  # P2-03-01
         with patch("socket.socket", side_effect=AssertionError("network prohibited")):
             page = self.naver()
         snapshot = page.snapshots[0]
@@ -34,7 +34,7 @@ class ChannelOrderContractTest(unittest.TestCase):
         self.assertNotIn("PRIVATE", page.canonical_payload())
         self.assertEqual(64, len(snapshot.source_digest))
 
-    def test_naver_detail_id_coverage_and_unknown_state_quarantine(self):
+    def test_naver_detail_id_coverage_and_unknown_state_quarantine(self):  # P2-03-01
         for change in ("missing", "unexpected", "duplicate", "unknown", "remaining", "legacy"):
             body = copy.deepcopy(self.fixtures["naver"])
             product = body["data"][0]["productOrder"]

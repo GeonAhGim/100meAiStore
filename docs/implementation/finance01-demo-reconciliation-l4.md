@@ -27,6 +27,15 @@ never used to overwrite a projection. A missing cost or unresolved match keeps
 realized profit unavailable/exceptional. Batch, lines, match status, audit and
 outbox commit atomically and survive restart; all reads are tenant scoped.
 
+## Acceptance evidence
+
+| ID | Acceptance criterion |
+|---|---|
+| B07-01 | Settlement reconciliation matches channel orders and computes realized contribution separately from projected margin |
+| B07-02 | Missing orders or currency mismatches produce EXCEPTION; only complete match reaches RECONCILED |
+| B07-03 | Duplicate source rows and changed idempotency keys are rejected before writes; same digest is idempotent |
+| B07-04 | Batch, lines, match status, audit and outbox commit atomically and survive restart |
+
 Acceptance targets: duplicate files, split-order rows, fee/refund adjustments,
 currency/missing-order exceptions, idempotent replay, restart recovery,
 tenant isolation, rollback on audit/outbox failure, and zero external effects.

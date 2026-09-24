@@ -34,7 +34,14 @@ hashes; page identity/replay checks and versioned checkpoint update in one local
 SQLite transaction. Replay cannot rewind the cursor. Restart and cross-scope
 tests use temporary databases; this is not the production ledger or migration.
 
-Acceptance: synthetic Naver partial claims/discounts/missing IDs, same-time
+## Acceptance evidence
+
+| ID | Acceptance criterion |
+|---|---|
+| P2-03-01 | Pure parsers produce immutable, PII-minimized snapshots with source hashes; unknown states and malformed paging are quarantine errors with fixed diagnostic codes |
+| P2-03-02 | Page journal persists page evidence/checkpoints only in atomic local SQLite transaction; replay cannot rewind cursor |
+
+Acceptance (prior): synthetic Naver partial claims/discounts/missing IDs, same-time
 continuation, Coupang split shipments/cancellation counts/large numeric IDs,
 malformed/unknown quarantine, PII exclusion, duplicate+restart+CAS rollback.
 Full suite, compileall, diff check and pattern scan precede local commit. Keep

@@ -33,6 +33,15 @@ settlement, customer notification, or claim closure. Unknown or contradictory
 tracking remains an exception for reconciliation and never triggers a blind
 external write.
 
+## Acceptance evidence
+
+| ID | Acceptance criterion |
+|---|---|
+| B05-01 | Pending purchase order cancellation is atomic (CAS) and moves order and PO to CANCELLED state |
+| B05-02 | Submitted/acknowledged purchase order cancellation retains evidence and emits a durable CANCEL_REQUESTED task for external work |
+| B05-03 | Tracking is line-level; duplicate tracking is idempotent and corrected status appends immutably to checkpoint history |
+| B05-04 | Order restart recovery is atomic; outbox crash rolls back order status, routing decisions, and split POs |
+
 ## Acceptance targets
 
 Tests must cover pending-PO cancellation, submitted-PO cancellation race,
