@@ -20,8 +20,10 @@ guard bounds it. Nothing is pushed.
 """
 from __future__ import annotations
 
+import hashlib
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -93,6 +95,33 @@ def integrate_branch(root: Path, task_id: int, branch: str, title: str) -> tuple
     return "merged", sha
 
 
+DONE_CHECK_TIMEOUT_SECONDS = 600
+
+
+def done_check(root: Path, task: dict[str, Any]) -> tuple[bool, str] | None:
+    """Run the milestone's ``done_check`` argv on main; None when it has none.
+
+    Merging a task is progress, not completion: M4.7 was marked done twice
+    while the audit its exit criteria name still failed. A milestone with a
+    done_check is done only when that command exits 0.
+    """
+    if task.get("source") != "milestone-workflow":
+        return None
+    item = next((m for m in read_json(MILESTONES_PATH, {"milestones": []}).get("milestones", [])
+                 if str(m.get("id")) == str(task.get("milestone"))), None)
+    argv = list((item or {}).get("done_check") or [])
+    if not argv:
+        return None
+    if argv[0] == "python":
+        argv[0] = sys.executable
+    try:
+        run = subprocess.run(argv, cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace",
+                             timeout=DONE_CHECK_TIMEOUT_SECONDS)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"done check could not run: {type(exc).__name__}: {exc}"[:300]
+    return run.returncode == 0, ((run.stdout or "") + (run.stderr or "")).strip()[-1500:]
+
+
 def _complete_milestone(task: dict[str, Any], sha: str) -> str | None:
     if task.get("source") != "milestone-workflow":
         return None
@@ -112,6 +141,8 @@ def integrate_landed(root: Path = PROJECT_ROOT, limit: int = 1) -> list[dict[str
     for candidate in pending(_load().get("tasks", []))[:limit]:
         outcome, detail = integrate_branch(root, int(candidate["id"]), str(candidate["branch"]),
                                            str(candidate.get("title") or f"task {candidate['id']}"))
+        # Outside the ledger lock: the check may take a while.
+        check = done_check(root, candidate) if outcome == "merged" else None
         with _CLAIM_LOCK:
             data = _load()
             task = next((t for t in data.get("tasks", []) if t["id"] == candidate["id"]), None)
@@ -122,6 +153,13 @@ def integrate_landed(root: Path = PROJECT_ROOT, limit: int = 1) -> list[dict[str
                 # there). Back off so a refusing checkout does not cost a full
                 # suite run every autopilot tick.
                 task.update({"integration_retry_after": _later(BUSY_BACKOFF_SECONDS), "integration_note": detail[:300]})
+            elif outcome == "merged" and check is not None and not check[0]:
+                # Keep the merged progress; the task goes on with what is left.
+                note = f"done check failed after merging {detail[:7]}: " + check[1]
+                loopguard.record(task, note, "done_check",
+                                 key="done_check:" + hashlib.sha256(check[1].encode("utf-8")).hexdigest()[:16])
+                task.update({"status": "ready", "worker": "", "reviewer": "", "phase": "done_check_failed",
+                             "merged_commit": detail, "last_error": note[:1800], "note": note[:300], "updated_at": now()})
             elif outcome == "merged":
                 milestone = _complete_milestone(task, detail)
                 task.update({"phase": "merged", "merged_commit": detail, "updated_at": now(),

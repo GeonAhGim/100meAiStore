@@ -46,6 +46,9 @@ CAUSES: tuple[tuple[str, tuple[str, ...], str | None], ...] = (
      "이전 시도는 완료조건이 이미 충족됐다고 판단하고 아무것도 바꾸지 않았다. 완료 주장은 증거로만 인정된다. "
      "완료조건을 검증하는 명령(감사 함수, 관련 테스트)을 직접 실행해 그 출력을 확인하고, 실패하는 항목을 고쳐라. "
      "정말 이미 충족된다면 그 사실을 검증하는 테스트를 추가하라. 저장소 루트에 보고서 파일만 추가하는 패치는 거부된다."),
+    ("done_check", ("done check failed",),
+     "이전 패치는 main에 병합됐지만 마일스톤 완료 확인 명령이 아직 실패한다. 피드백의 남은 항목 목록을 이어서 처리하고, "
+     "제출 전에 그 확인 명령을 직접 실행해 줄어든 것을 확인하라."),
     ("max_turns", ("error_max_turns", "max turns", "produced no change"),
      "이전 시도가 턴을 다 쓸 때까지 파일을 하나도 바꾸지 못했다. 저장소 탐색을 줄이고, 완료조건 중 하나만 만족하는 "
      "가장 작은 변경을 처음 10턴 안에 파일로 써라. 나머지 완료조건은 다음 작업으로 남겨도 된다."),
@@ -98,7 +101,7 @@ def instruction_for(cause: str) -> str | None:
     return next((text for name, _, text in CAUSES if name == cause), None)
 
 
-def record(task: dict[str, Any], note: str, kind: str, *, until: float | None = None) -> None:
+def record(task: dict[str, Any], note: str, kind: str, *, until: float | None = None, key: str | None = None) -> None:
     """Append one failed attempt to ``task['attempts']`` (in place; the caller saves).
 
     ``until`` ends the charged time early: an orphaned run stopped working at
@@ -114,6 +117,8 @@ def record(task: dict[str, Any], note: str, kind: str, *, until: float | None = 
              "sig": signature(note), "seconds": max(0, seconds),
              # the attempt's own words: claims and requeues overwrite note and last_error
              "note": str(note or "")[:400]}
+    if key:
+        entry["key"] = key  # a caller that knows the exact failure (e.g. the remaining gaps) names it
     task["attempts"] = ((task.get("attempts") or []) + [entry])[-HISTORY:]
 
 

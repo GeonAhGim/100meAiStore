@@ -73,6 +73,29 @@ class IntegrateTests(unittest.TestCase):
         self.assertEqual([], integrate.integrate_landed(self.root))                         # nothing left to do
         self.assertNotIn("integrate-", _git(self.root, "worktree", "list", "--porcelain"))  # scratch removed
 
+    def test_a_merge_is_progress_until_the_milestone_done_check_passes(self):
+        # M4.7, 2026-09-25: half the audit gaps fixed, merged, and marked done.
+        check = ["python", "-c", "import sys; t=open('mod.py').read().strip(); print('left:', t); sys.exit(0 if t == 'A = 3' else 1)"]
+        self.milestones.write_text(json.dumps({"milestones": [{"id": "M9", "status": "ready", "done_check": check}]}),
+                                   encoding="utf-8")
+        self._branch(1, "mod.py", "A = 2\n")
+        self._ledger(1)
+        [row] = integrate.integrate_landed(self.root)
+        self.assertEqual("A = 2\n", (self.root / "mod.py").read_text(encoding="utf-8"))  # the progress is kept
+        self.assertEqual(("ready", "done_check_failed"), (row["status"], row["phase"]))
+        self.assertIn("left: A = 2", row["last_error"])
+        self.assertEqual("done_check", row["attempts"][-1]["cause"])
+        self.assertEqual("ready", json.loads(self.milestones.read_text(encoding="utf-8"))["milestones"][0]["status"])
+        # the next run finishes the job: now the milestone completes
+        _git(self.root, "branch", "-D", "control/task-1")
+        self._branch(1, "mod.py", "A = 3\n")
+        data = json.loads(self.tasks.read_text(encoding="utf-8"))
+        data["tasks"][0].update({"status": "done", "phase": "landed"})
+        self.tasks.write_text(json.dumps(data), encoding="utf-8")
+        [row] = integrate.integrate_landed(self.root)
+        self.assertEqual("merged", row["phase"])
+        self.assertEqual("done", json.loads(self.milestones.read_text(encoding="utf-8"))["milestones"][0]["status"])
+
     def test_red_merge_leaves_main_alone_and_requeues_with_the_failure(self):
         self._branch(2, "tests/test_new.py", FAILING)
         self._ledger(2)
