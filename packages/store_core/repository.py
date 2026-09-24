@@ -11,7 +11,8 @@ from .domain import (AgentStatusSnapshot, Approval, ApprovalConfirmationNonce, A
                      Command, CommandState, Membership, OutboxEvent, OutboxState, Tenant, User)
 from .errors import ConflictError, NotFoundError, TenantBoundaryError
 from .domain import (AdapterCapabilityManifest, InboxMessage, InboxState, ApprovalIntent,
-                     ExecutionPreparation, NormalizedInboundPayload, AdapterPollCheckpoint)
+                     ExecutionPreparation, NormalizedInboundPayload, AdapterPollCheckpoint,
+                     ApprovalWindowConfig, SchedulerCheckpoint)
 from .domain import (ChannelOrder, OrderLine, RoutingDecision, SupplierPurchaseOrder, PurchaseLine,
                      ChannelOrderState, RoutingState, PurchaseOrderState)
 from .domain import TrackingObservation
@@ -87,6 +88,8 @@ class InMemoryRepository(BudgetRepositoryMixin):
         self.price_projections: dict[tuple[str, str], DemoPriceProjection] = {}
         self.browser_sessions: dict[str, BrowserSession] = {}
         self.approval_confirmation_nonces: dict[str, ApprovalConfirmationNonce] = {}
+        self.approval_window_configs: dict[tuple[str, str], ApprovalWindowConfig] = {}
+        self.scheduler_checkpoints: dict[tuple[str, str, int], SchedulerCheckpoint] = {}
 
     def save_browser_session(self, value: BrowserSession) -> None:
         if value.token_digest in self.browser_sessions:
@@ -810,3 +813,19 @@ class InMemoryRepository(BudgetRepositoryMixin):
 
     def agent_status_for(self, tenant_id: str) -> tuple[AgentStatusSnapshot, ...]:
         return tuple(status for (tid, _), status in sorted(self.agent_status.items()) if tid == tenant_id)
+
+    def save_approval_window_config(self, config: ApprovalWindowConfig) -> None:
+        self.approval_window_configs[(config.tenant_id, config.kind.value)] = deepcopy(config)
+
+    def get_approval_window_config(self, tenant_id: str, kind: str) -> ApprovalWindowConfig | None:
+        value = self.approval_window_configs.get((tenant_id, kind))
+        return deepcopy(value) if value else None
+
+    def save_scheduler_checkpoint(self, checkpoint: SchedulerCheckpoint) -> None:
+        key = (checkpoint.tenant_id, checkpoint.kind.value, checkpoint.hour)
+        self.scheduler_checkpoints[key] = deepcopy(checkpoint)
+
+    def get_scheduler_checkpoint(self, tenant_id: str, kind: str, hour: int) -> SchedulerCheckpoint | None:
+        key = (tenant_id, kind, hour)
+        value = self.scheduler_checkpoints.get(key)
+        return deepcopy(value) if value else None

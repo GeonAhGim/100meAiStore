@@ -833,3 +833,26 @@ class AttemptObservation:
     response_digest: str
     observed_at: datetime
     correlation_id: str
+
+
+class ApprovalWindowKind(str, Enum):
+    PRODUCT = "product"
+    PURCHASE = "purchase"
+    AGENT = "agent"
+
+
+@dataclass
+class ApprovalWindowConfig:
+    tenant_id: str
+    kind: ApprovalWindowKind
+    hours: tuple[int, ...]
+    version: int = 1
+
+
+@dataclass
+class SchedulerCheckpoint:
+    tenant_id: str
+    kind: ApprovalWindowKind
+    hour: int
+    last_executed_at: datetime
+    version: int = 1
