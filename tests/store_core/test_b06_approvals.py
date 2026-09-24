@@ -46,6 +46,7 @@ class B06ApprovalTests(unittest.TestCase):
         with self.assertRaises(AuthorizationError): self.app.decide_approval(self.ctx, approval.id, True, "late", "bad nonce!")
 
     def test_three_user_inbox_and_decision_are_scoped_by_approval_kind(self):
+        # P2-09-02: Delegated approval permissions by membership/kind; auditor read-only without decision actions; expired decisions durable
         funds = self.app.add_member(self.ctx, "funds@example.test", [Role.FUNDS])
         catalog = self.app.add_member(self.ctx, "catalog@example.test", [Role.CATALOG_CS])
         _, purchase = self.app.request_approval(self.ctx, ApprovalKind.PURCHASE, "po-1", {"amount_minor": 1000}, "po-1", 1, 1)

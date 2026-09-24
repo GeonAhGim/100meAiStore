@@ -14,6 +14,14 @@ Status: implementing partial local slice. No production deployment/migration.
 - GCP/host selection, actual quote, RPO/RTO, key backend, identity service and
   production-complete dependency inventory require G3/G5. Do not invent costs.
 
+## Acceptance evidence
+
+| ID | Acceptance criterion |
+|---|---|
+| P2-09-01 | PostgreSQL RLS with composite tenant/order identities; missing/wrong tenant context isolation with atomic rollback |
+| P2-09-02 | Delegated approval permissions by membership/kind; auditor read-only without decision actions; expired decisions durable |
+| P2-09-03 | Approval preview redacts secrets/authorization/contact; before/profit/after shown; missing profit visible as risk badge |
+
 ## First bounded proof
 
 Create a separate fixture SQL schema with composite tenant/order identities,

@@ -19,6 +19,7 @@ class B07SplitRestartRollbackTests(unittest.TestCase):
     def tearDown(self): self.repo.close(); self.temp.cleanup()
 
     def test_split_po_costs_and_settlement_survive_restart(self):
+        # B07-04: Batch, lines, match status, audit and outbox commit atomically and survive restart
         claim, _ = self.app.open_demo_claim(self.ctx, self.order.id, "delivery", 50, "claim-1")
         self.app.propose_routing(self.ctx, self.order.id, {"sku-a": [{"supplier_id": "supplier-a", "unit_cost_minor": 100, "available_quantity": 1}], "sku-b": [{"supplier_id": "supplier-b", "unit_cost_minor": 150, "available_quantity": 1}]})
         rows = [{"external_order_key": "order-1", "kind": "SALE", "amount_minor": 500, "currency": "KRW", "source_row_ref": "sale-1"}]

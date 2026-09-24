@@ -94,6 +94,7 @@ class ReadbackIdempotencyTest(unittest.TestCase):
         return journal, td
 
     def test_verify_readback_accepts_exact_duplicate(self):
+        # P2-03-02: Page journal persists page evidence/checkpoints only in atomic local SQLite transaction; replay cannot rewind cursor
         from packages.store_core.channel_order_contracts import (
             OfflineOrderPage, canonical_json,
         )
