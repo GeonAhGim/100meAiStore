@@ -14,6 +14,9 @@ class ReleaseReviewTest(unittest.TestCase):
         self.policy = {"finance": {"retention_days": 5, "fixture_approval_digest": "a" * 64}}
 
     def test_missing_or_unapproved_policy_never_proposes_deletion(self):
+        # P2-07-01: Data flow inventory documents intended consumers, sensitive values, and retention decisions
+        # P2-07-02: Dry-run deletion never invokes filesystem/database deletion; missing/invalid policy returns REVIEW_POLICY; legal hold always returns RETAIN
+        # P2-07-03: Masked export contains only allowlisted metadata; deletion_authorized is always false
         for policies in ({}, {"finance": {"retention_days": 1}},
                          {"finance": {"retention_days": True, "fixture_approval_digest": "a" * 64}},
                          {"finance": {"retention_days": 1, "fixture_approval_digest": ""}}):

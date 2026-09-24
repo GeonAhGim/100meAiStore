@@ -6,7 +6,9 @@ from packages.store_core import SQLiteRepository, StoreControlPlane, evaluate_de
 
 
 class B11ReadinessTests(unittest.TestCase):
-    def test_evaluator_is_fail_closed_without_external_gates(self):  # B11-01
+    def test_evaluator_is_fail_closed_without_external_gates(self):  # B11-01, B11-03
+        # B11-01: Stage evaluator enforces fail-closed mode
+        # B11-03: Promotion requires external-contract review, legal/retention decisions, operator exit record; absence is safe hold
         temp = tempfile.TemporaryDirectory(); repo = SQLiteRepository(Path(temp.name) / "readiness.sqlite3")
         try:
             result = evaluate_demo_readiness(repo, live_authorized=True)

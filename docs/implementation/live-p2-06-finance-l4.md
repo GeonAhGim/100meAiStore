@@ -27,6 +27,13 @@ the patch. Explicit field lookup and kind-type validation now pass the full
 153-test suite; compileall/diff/secret-pattern/forbidden-filename checks pass.
 Reordered input produces the same canonical batch and idempotent replay.
 
+## Acceptance evidence
+
+| ID | Acceptance criterion |
+|---|---|
+| P2-06-01 | Settlement rows with amounts and source hashes; reordered JSON produces identical batch and idempotent replay |
+| P2-06-02 | Unknown non-string kind/currency and unmatched/duplicate/wrong-currency ledger rows fail closed |
+
 ## Channel mapping evidence
 
 The [official Naver Markdown schema](https://apicenter.commerce.naver.com/llms/get-v1-pay-settle-settle-case.md)

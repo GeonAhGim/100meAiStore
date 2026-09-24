@@ -31,6 +31,15 @@ submission creates an outstanding human task, never a successful external PO.
 Excel formulas/macros and XML external entities must not execute. Import size,
 row limits and raw hashes are local safeguards, not vendor promises.
 
+## Acceptance evidence
+
+| ID | Acceptance criterion |
+|---|---|
+| P2-01 | Official evidence register documents unknowns, dependency backlog and separate DEMO/overall dashboard counts |
+| P2-06 | Synthetic channel settlement/ledger mapping with amounts, source hashes and safe conflict closure |
+| P2-07 | Privacy/license review packet with data-flow inventory, retention decisions, masked export and deletion-free dry run |
+| P2-08 | Offline offer/stock/price/tracking/claim contracts with exact-ID checks, source hashes and approval digest binding |
+
 ## Bounded work packages
 
 Each row is one tracked deliverable, not an equal estimate of engineering hours.

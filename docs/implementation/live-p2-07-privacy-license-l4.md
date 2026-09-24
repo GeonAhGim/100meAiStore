@@ -21,6 +21,14 @@ consolidated text, controller/processor roles, third parties, permitted purpose,
 cross-border transfers, retention, holds and incident obligations. This packet
 does not decide whether a particular statute or period applies to the business.
 
+## Acceptance evidence
+
+| ID | Acceptance criterion |
+|---|---|
+| P2-07-01 | Data flow inventory documents intended consumers, sensitive values, and retention decisions; all real decisions unresolved |
+| P2-07-02 | Dry-run deletion never invokes filesystem/database deletion; missing/invalid policy returns REVIEW_POLICY; legal hold always returns RETAIN |
+| P2-07-03 | Masked export contains only allowlisted metadata; deletion_authorized is always false |
+
 ## Dry-run contract
 
 Only opaque synthetic record references, class, timestamp and hold flag enter

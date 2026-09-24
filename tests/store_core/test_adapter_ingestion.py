@@ -40,6 +40,7 @@ class AdapterIngestionTests(unittest.TestCase):
         return FixtureDemoReadAdapter(pages, provider="demo", adapter_version="demo-v1")
 
     def test_ad01_two_pages_are_durable_and_advance_cursor(self):
+        # AD-01: two-page fixture persists two immutable payloads/receipts and advances cursor
         first = DemoPage((self.row(),), "p1", True, datetime.now(timezone.utc))
         second = DemoPage((self.row("e2"),), "p2", False, datetime.now(timezone.utc))
         fixture = self.adapter(first, second)
@@ -51,6 +52,7 @@ class AdapterIngestionTests(unittest.TestCase):
         self.assertEqual(2, len(self.app.inbox_for(self.ctx)))
 
     def test_ad02_replayed_page_has_stable_receipt_and_no_extra_event(self):
+        # AD-02: overlap replay returns the same receipt ID and no additional event
         page = DemoPage((self.row(),), "p1", False, datetime.now(timezone.utc))
         first = self.app.poll_demo_connection(self.ctx, "demo", "orders", 0, self.adapter(page))
         prior_id = first.inbox_ids[0]
@@ -60,6 +62,7 @@ class AdapterIngestionTests(unittest.TestCase):
         self.assertEqual(1, len(self.app.inbox_for(self.ctx)))
 
     def test_ad03_malformed_page_rolls_back_payloads_receipts_and_cursor(self):
+        # AD-03: unknown/malformed row rejects the complete page with no payload, receipt, or cursor
         malformed = self.row()
         malformed["unexpected"] = True
         page = DemoPage((malformed,), "p1", True, datetime.now(timezone.utc))
@@ -70,6 +73,7 @@ class AdapterIngestionTests(unittest.TestCase):
         self.assertIsNone(self.repo.get_poll_checkpoint(self.ctx.tenant_id, "demo", "orders"))
 
     def test_ad06_unsupported_manifest_fails_before_fixture_read(self):
+        # AD-06: unsupported manifest fails before fixture read or payload writes
         self.app.register_adapter_manifest(self.ctx, AdapterCapabilityManifest(
             self.ctx.tenant_id, "demo", "orders", "demo-v1",
             frozenset({AdapterCapability.INBOUND_EVENTS}), frozenset({1}), datetime.now(timezone.utc)))
@@ -79,6 +83,7 @@ class AdapterIngestionTests(unittest.TestCase):
         self.assertEqual([], fixture.calls)
 
     def test_ad08_retryable_read_and_empty_terminal_page_leave_no_cursor_loss(self):
+        # AD-08: typed transient read failure leaves storage unchanged; terminal empty page records success
         fixture = self.adapter(DemoPage((), None, False, datetime.now(timezone.utc)))
         fixture.fail_once = True
         with self.assertRaises(Exception):
@@ -89,6 +94,7 @@ class AdapterIngestionTests(unittest.TestCase):
         self.assertIsNotNone(result.checkpoint.last_success_at)
 
     def test_ad07_foreign_payload_reference_is_not_disclosed(self):
+        # AD-07: authenticated tenant payload lookup hides foreign refs as NotFound
         page = DemoPage((self.row(),), None, False, datetime.now(timezone.utc))
         result = self.app.poll_demo_connection(self.ctx, "demo", "orders", 0, self.adapter(page))
         other = self.app.bootstrap_tenant("OTHER", "other@example.test")
@@ -96,6 +102,7 @@ class AdapterIngestionTests(unittest.TestCase):
             self.app.get_normalized_payload(other, result.payload_refs[0])
 
     def test_ad04_restart_replays_committed_page_idempotently(self):
+        # AD-04: close/reopen replay preserves committed checkpoint and receipt identity
         page = DemoPage((self.row(),), "p1", False, datetime.now(timezone.utc))
         first = self.app.poll_demo_connection(self.ctx, "demo", "orders", 0, self.adapter(page))
         self.repo.close()
@@ -106,6 +113,7 @@ class AdapterIngestionTests(unittest.TestCase):
         self.assertEqual(1, len(self.app.inbox_for(self.ctx)))
 
     def test_ad05_concurrent_checkpoint_contenders_have_one_winner(self):
+        # AD-05: independent SQLite contenders produce one checkpoint winner
         path = Path(self.temp.name) / "adapter.sqlite3"
         barrier = threading.Barrier(2)
         outcomes = []
@@ -131,6 +139,7 @@ class AdapterIngestionTests(unittest.TestCase):
         self.assertEqual(1, len(self.app.inbox_for(self.ctx)))
 
     def test_ad09_revisions_are_immutable_and_modified_event_is_rejected(self):
+        # AD-09: out-of-order revisions remain immutable; modified event identity conflicts
         first = self.app.poll_demo_connection(self.ctx, "demo", "orders", 0,
             self.adapter(DemoPage((self.row("e2", 2),), "p1", False, datetime.now(timezone.utc))))
         second = self.app.poll_demo_connection(self.ctx, "demo", "orders", 1,
@@ -147,6 +156,7 @@ class AdapterIngestionTests(unittest.TestCase):
         self.assertEqual(2, len(self.app.normalized_payloads_for(self.ctx)))
 
     def test_ad10_migration_and_immutable_payload_triggers(self):
+        # AD-10: migration readiness is schema 8; update/delete payload triggers reject mutation; prior suite remains green
         self.assertEqual(LATEST_SCHEMA_VERSION, self.repo.readiness()["schema_version"])
         result = self.app.poll_demo_connection(self.ctx, "demo", "orders", 0,
             self.adapter(DemoPage((self.row(),), None, False, datetime.now(timezone.utc))))

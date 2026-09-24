@@ -28,6 +28,7 @@ class ChannelFinanceContractTest(unittest.TestCase):
                        "productName": "SYNTHETIC PRIVATE VALUE"}]}]}
 
     def test_naver_preserves_signed_refund_fees_and_expected_dates(self):
+        # P2-06-01: Settlement rows with amounts and source hashes; reordered JSON produces identical batch and idempotent replay
         page = parse_naver_settlement_page(self.naver)
         item = page.observations[0]
         self.assertEqual(-970, item.expected_minor)
@@ -54,6 +55,7 @@ class ChannelFinanceContractTest(unittest.TestCase):
         self.assertIn("items_unavailable_not_zero_revenue", page.warnings)
 
     def test_bad_money_unknown_kind_and_duplicate_source_quarantine(self):
+        # P2-06-02: Unknown non-string kind/currency and unmatched/duplicate/wrong-currency ledger rows fail closed
         for change in ("decimal", "kind", "duplicate", "size"):
             body = copy.deepcopy(self.naver)
             if change == "decimal": body["elements"][0]["settleExpectAmount"] = 1.5
