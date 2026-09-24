@@ -123,7 +123,7 @@ class OrderRoutingTests(unittest.TestCase):
         })
         return order, pos[0]
 
-    def test_order08_pending_cancel_is_cas_and_cancels_pending_po(self):
+    def test_order08_pending_cancel_is_cas_and_cancels_pending_po(self):  # B05-01
         order, po = self.routed_order()
         cancelled, replay = self.app.request_demo_cancel(self.ctx, order.id, "customer request", 2)
         self.assertFalse(replay)
@@ -132,7 +132,7 @@ class OrderRoutingTests(unittest.TestCase):
         same, replay = self.app.request_demo_cancel(self.ctx, order.id, "replay", 999)
         self.assertTrue(replay); self.assertEqual(cancelled.id, same.id)
 
-    def test_order09_submitted_cancel_keeps_evidence_and_requests_compensation(self):
+    def test_order09_submitted_cancel_keeps_evidence_and_requests_compensation(self):  # B05-02
         order, po = self.routed_order()
         self.app.approve_demo_po(self.ctx, po.id, True, "approve")
         self.app.submit_demo_po(self.ctx, po.id)
@@ -140,7 +140,7 @@ class OrderRoutingTests(unittest.TestCase):
         self.assertEqual(PurchaseOrderState.CANCEL_REQUESTED, self.app.purchase_orders(self.ctx, order.id)[0].status)
         self.assertTrue(any(event.topic == "purchase_order.cancel_requested" for event in self.repo.outbox_for(self.ctx.tenant_id)))
 
-    def test_order10_tracking_is_line_level_and_corrected_status_is_append_only(self):
+    def test_order10_tracking_is_line_level_and_corrected_status_is_append_only(self):  # B05-03
         order, _ = self.routed_order()
         line = self.app.order_lines(self.ctx, order.id)[0]
         first, replay = self.app.ingest_demo_tracking(self.ctx, line.id, "track-1", "IN_TRANSIT")

@@ -27,7 +27,15 @@ requires an explicit evidence digest and expected version; status becomes
 HUMAN_REPORTED, not provider-confirmed. Repeating the same evidence is idempotent;
 conflicting evidence/version is rejected. No submit/write/network method exists.
 
-Acceptance: quoted commas/newlines, BOM, leading-zero IDs, numeric/time errors,
+## Acceptance evidence
+
+| ID | Acceptance criterion |
+|---|---|
+| P2-05-01 | CSV parser rejects malformed quoting, duplicate columns, unsupported currency, control chars and formula cells; errors contain fixed codes only |
+| P2-05-02 | Any parse error makes whole report not ready; identical bytes yield same report; reparsing is idempotent |
+| P2-05-03 | Manual task status is AWAITING_HUMAN initially; confirmation requires explicit evidence digest and version; repeating same evidence is idempotent |
+
+Acceptance (prior): quoted commas/newlines, BOM, leading-zero IDs, numeric/time errors,
 formula cells, duplicate/oversized/malformed input, masked reports, stable
 reparse, manual no-false-success/replay/version checks. Run full gates and local
 commit; do not push. Integration of real samples/fulfillment remains G2/G4.

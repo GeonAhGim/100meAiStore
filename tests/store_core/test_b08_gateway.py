@@ -15,7 +15,7 @@ class B08GatewayTests(unittest.TestCase):
 
     def tearDown(self): self.repo.close(); self.temp.cleanup()
 
-    def test_opaque_byok_and_typed_tool_gate(self):
+    def test_opaque_byok_and_typed_tool_gate(self):  # B08-01
         ref = self.app.configure_demo_byok(self.ctx, "openai", "secret-ref:demo", "UNVERIFIED")
         self.assertEqual("secret-ref:demo", ref.secret_ref)
         blocked = self.app.submit_demo_tool(self.ctx, actor_type="agent", actor_id="agent-1", tool="update_price", target_type="offer", target_id="offer-1", input_value={"price_minor": 100}, idempotency_key="tool-1", requested_policy_version=1)
@@ -41,7 +41,7 @@ class B08GatewayTests(unittest.TestCase):
         self.assertEqual("accepted", opaque["state"])
         self.assertFalse(any(row.topic == "tool.command" for row in self.repo.outbox_for(self.ctx.tenant_id)))
 
-    def test_agent_run_budget_stops_without_charge(self):
+    def test_agent_run_budget_stops_without_charge(self):  # B08-02
         run = self.app.record_demo_agent_run(self.ctx, agent_id="agent-1", goal="inspect", policy_version=1, model="economy", prompt_version="p1", input_value={"sku": "sku-1"}, decision={"state": "proposed"}, confidence="high", tool_calls=1, estimated_cost_minor=6, idempotency_key="run-1")
         self.assertEqual("RECORDED", run.outcome)
         blocked = self.app.record_demo_agent_run(self.ctx, agent_id="agent-1", goal="inspect-2", policy_version=1, model="economy", prompt_version="p1", input_value={"sku": "sku-2"}, decision={"state": "proposed"}, confidence="high", tool_calls=1, estimated_cost_minor=6, idempotency_key="run-2")
@@ -53,7 +53,7 @@ class B08GatewayTests(unittest.TestCase):
         self.app.decide(self.ctx, command.id, True, "gateway reviewed")
         return approval
 
-    def test_mutating_tool_binds_exact_approval_intent_and_is_single_use(self):
+    def test_mutating_tool_binds_exact_approval_intent_and_is_single_use(self):  # B08-03, B08-04
         approval = self.approved(ApprovalKind.PRODUCT, "offer:offer-1", {"price_minor": 100})
         accepted = self.app.submit_demo_tool(
             self.ctx, actor_type="agent", actor_id="agent-1", tool="update_price",
@@ -85,7 +85,7 @@ class B08GatewayTests(unittest.TestCase):
         restored = next(row for row in self.repo.tool_commands_for(self.ctx.tenant_id) if row.id == accepted["command_id"])
         self.assertEqual((approval.command_id, row.intent_digest), (restored.approval_command_id, restored.intent_digest))
 
-    def test_unrelated_or_stale_approval_never_authorizes_tool(self):
+    def test_unrelated_or_stale_approval_never_authorizes_tool(self):  # B08-03
         cases = [
             (ApprovalKind.PURCHASE, "offer:offer-1", {"price_minor": 100}, "update_price", "offer", "offer-1", {"price_minor": 100}, 1),
             (ApprovalKind.PRODUCT, "offer:other", {"price_minor": 100}, "update_price", "offer", "offer-1", {"price_minor": 100}, 1),

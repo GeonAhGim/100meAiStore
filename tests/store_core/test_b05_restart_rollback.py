@@ -34,7 +34,7 @@ class B05RestartRollbackTests(unittest.TestCase):
         ack, replay = self.app.reconcile_demo_po(restored, first.id, {"status": "ACKNOWLEDGED", "provider_reference": "ack-1", "observed_at": datetime.now(timezone.utc)})
         self.assertFalse(replay); self.assertEqual(PurchaseOrderState.ACKNOWLEDGED, ack.status)
 
-    def test_routing_failure_rolls_back_all_order_and_po_writes(self):
+    def test_routing_failure_rolls_back_all_order_and_po_writes(self):  # B05-04
         original = self.repo.append_outbox
         self.repo.append_outbox = lambda event: (_ for _ in ()).throw(RuntimeError("simulated crash"))
         with self.assertRaises(RuntimeError): self.route()

@@ -28,6 +28,13 @@ All fixture values are authored synthetic placeholders. Only documented error
 codes/request parameter names are modeled; there is no claim of full response
 schema compatibility, account permission or end-to-end channel verification.
 
+## Acceptance evidence
+
+| ID | Acceptance criterion |
+|---|---|
+| P2-02-01 | Offline channel request plan (coupang_day_page_plan) has no URL/HTTP/auth/executor/database binding; mode is OFFLINE_CONTRACT with live_authorized=false |
+| P2-02-02 | Error classification (classify_naver_read_error) uses exact status/code pairs and never retains vendor messages or blindly retries |
+
 ## Verification
 
 - Targeted contract tests: 5 passed.

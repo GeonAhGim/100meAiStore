@@ -12,7 +12,14 @@ Identical source digest replay is idempotent; changed content under the same
 key conflicts. `project_demo_offer` creates a local channel projection linked
 to the canonical product and source lineage; it does not publish externally.
 
-Acceptance evidence (local DEMO only): SQLite schema 14 stores immutable source
+## Acceptance evidence
+
+| ID | Acceptance criterion |
+|---|---|
+| B02-01 | Source catalog snapshot, canonical product, and channel projection are created and stored durably across database close/reopen |
+| B02-02 | Catalog ingestion is idempotent on identical source digest and rejects unknown/PII fields before writes |
+
+Implementation (local DEMO only): SQLite schema 14 stores immutable source
 snapshots, canonical products, one-to-one source lineage, and channel offers;
 the InMemory repository provides the same tenant-scoped contract. Import and
 projection each emit an internal audit event and durable outbox intent only;

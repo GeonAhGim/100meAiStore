@@ -24,7 +24,7 @@ class SupplierFileContractTest(unittest.TestCase):
         writer.writerows([self.row] if rows is None else rows)
         return stream.getvalue().encode("utf-8")
 
-    def test_csv_bom_quotes_newlines_identity_and_source_hash(self):
+    def test_csv_bom_quotes_newlines_identity_and_source_hash(self):  # P2-05-01
         payload = b"\xef\xbb\xbf" + self.payload()
         with patch("socket.socket", side_effect=AssertionError("network prohibited")):
             report = parse_supplier_csv(payload, supplier_ref="fixture-supplier")
@@ -39,7 +39,7 @@ class SupplierFileContractTest(unittest.TestCase):
                                             row.quantity, row.unit_cost_minor))
         self.assertEqual(report, parse_supplier_csv(payload, supplier_ref="fixture-supplier"))
 
-    def test_duplicate_sku_blocks_whole_report_and_masked_errors(self):
+    def test_duplicate_sku_blocks_whole_report_and_masked_errors(self):  # P2-05-02
         report = parse_supplier_csv(self.payload([self.row, self.row]), supplier_ref="fixture-supplier")
         self.assertFalse(report.ready)
         self.assertEqual("duplicate_supplier_sku", report.errors[0].code)
@@ -90,7 +90,7 @@ class SupplierFileContractTest(unittest.TestCase):
         report = parse_supplier_csv(self.payload([list(reversed(self.row))], tuple(reversed(HEADERS))), supplier_ref="s")
         self.assertEqual(3400, report.rows[0].unit_cost_minor)
 
-    def test_manual_confirmation_is_human_report_not_provider_success(self):
+    def test_manual_confirmation_is_human_report_not_provider_success(self):  # P2-05-03
         arguments = dict(tenant_ref="t1", supplier_ref="s1", idempotency_key="manual1", request_digest="a" * 64)
         task = create_manual_supplier_task(**arguments)
         self.assertEqual(task, create_manual_supplier_task(**arguments))

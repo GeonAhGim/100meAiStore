@@ -19,7 +19,7 @@ class Finance01Tests(unittest.TestCase):
 
     def tearDown(self): self.repo.close(); self.temp.cleanup()
 
-    def test_finance01_reconciles_sale_fee_and_refund_and_preserves_realized_separately(self):
+    def test_finance01_reconciles_sale_fee_and_refund_and_preserves_realized_separately(self):  # B07-01
         rows = [{"external_order_key": "order-1", "kind": "SALE", "amount_minor": 500, "currency": "KRW", "source_row_ref": "row-sale"},
                 {"external_order_key": "order-1", "kind": "FEE", "amount_minor": -50, "currency": "KRW", "source_row_ref": "row-fee"}]
         batch, replay = self.app.import_demo_settlement(self.ctx, "demo-channel", "2026-09", rows, "file-1")
@@ -29,7 +29,7 @@ class Finance01Tests(unittest.TestCase):
         same, replay = self.app.import_demo_settlement(self.ctx, "demo-channel", "2026-09", rows, "file-1")
         self.assertTrue(replay); self.assertEqual(batch.id, same.id)
 
-    def test_finance02_missing_or_currency_mismatch_is_exception(self):
+    def test_finance02_missing_or_currency_mismatch_is_exception(self):  # B07-02
         rows = [{"external_order_key": "missing", "kind": "SALE", "amount_minor": 1, "currency": "KRW", "source_row_ref": "row-1"}]
         batch, _ = self.app.import_demo_settlement(self.ctx, "demo-channel", "2026-09", rows, "file-2")
         self.assertEqual(SettlementStatus.EXCEPTION, batch.status)
@@ -37,7 +37,7 @@ class Finance01Tests(unittest.TestCase):
         batch, _ = self.app.import_demo_settlement(self.ctx, "demo-channel", "2026-09", bad, "file-3")
         self.assertEqual(SettlementStatus.EXCEPTION, batch.status)
 
-    def test_finance03_duplicate_source_and_changed_idempotency_are_rejected(self):
+    def test_finance03_duplicate_source_and_changed_idempotency_are_rejected(self):  # B07-03
         row = {"external_order_key": "order-1", "kind": "SALE", "amount_minor": 500, "currency": "KRW", "source_row_ref": "same"}
         self.app.import_demo_settlement(self.ctx, "demo-channel", "2026-09", [row], "file-4")
         with self.assertRaises(ConflictError): self.app.import_demo_settlement(self.ctx, "demo-channel", "2026-09", [row, row], "file-5")

@@ -13,7 +13,16 @@ tool-call limits; exhausted budgets record `BLOCKED_BUDGET` without charging.
 BYOK stores only an opaque `secret-ref:` identifier and validation status. Raw
 keys are rejected from inputs and never enter the database, audit, or outbox.
 
-Acceptance is local SQLite/InMemory persistence, idempotent commands, approved
+## Acceptance evidence
+
+| ID | Acceptance criterion |
+|---|---|
+| B08-01 | BYOK stores opaque `secret-ref:` identifier only; raw keys are rejected and never enter database/audit/outbox |
+| B08-02 | Agent budget policy atomically gates daily/monthly cost/generation/run/token/tool-call limits and records BLOCKED_BUDGET without charging |
+| B08-03 | Mutating tool binds exact approved command and is single-use; unrelated/stale approval never authorizes tool |
+| B08-04 | Commands are idempotent and tenant-scoped; exact idempotent replay is only reuse |
+
+Acceptance (prior): local SQLite/InMemory persistence, idempotent commands, approved
 tool gate, tenant isolation, budget stop, opaque-reference validation, restart
 recovery, and no OpenAI/provider/network invocation.
 

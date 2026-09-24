@@ -12,7 +12,7 @@ class B09NotificationTests(unittest.TestCase):
 
     def tearDown(self): self.repo.close(); self.temp.cleanup()
 
-    def test_fallback_is_local_and_idempotent(self):
+    def test_fallback_is_local_and_idempotent(self):  # B09-01, B09-02
         self.app.set_demo_notification_preference(self.ctx, "incident-1", ("app_push", "email", "chatgpt"))
         result = self.app.notify_demo(self.ctx, "incident-1", {"message": "degraded"}, "notice-1", ("app_push", "email"))
         self.assertEqual("DELIVERED", result["state"]); self.assertEqual("chatgpt", result["channel"])
@@ -20,7 +20,7 @@ class B09NotificationTests(unittest.TestCase):
         replay = self.app.notify_demo(self.ctx, "incident-1", {"message": "degraded"}, "notice-1", ("app_push", "email"))
         self.assertTrue(replay["replayed"])
 
-    def test_mute_ack_and_invalid_inputs(self):
+    def test_mute_ack_and_invalid_inputs(self):  # B09-02
         self.app.set_demo_notification_preference(self.ctx, "incident-2", ("app_push", "email"), True)
         result = self.app.notify_demo(self.ctx, "incident-2", {"message": "muted"}, "notice-2")
         self.assertEqual("MUTED", result["state"])

@@ -24,7 +24,7 @@ class OfflineChannelContractTest(unittest.TestCase):
         self.args["start"] = date.fromisoformat(self.args["start"])
         self.args["end"] = date.fromisoformat(self.args["end"])
 
-    def test_encoded_page_cursor_roundtrip_and_fixed_offline_scope(self):
+    def test_encoded_page_cursor_roundtrip_and_fixed_offline_scope(self):  # P2-02-01
         with patch("socket.socket", side_effect=AssertionError("network prohibited")):
             plan = coupang_day_page_plan(**self.args)
         parsed = parse_qs(plan.encoded_query)
@@ -60,7 +60,7 @@ class OfflineChannelContractTest(unittest.TestCase):
         plan = coupang_day_page_plan(**{**self.args, "end": self.args["start"], "max_per_page": 1})
         self.assertEqual("1", dict(plan.query)["maxPerPage"])
 
-    def test_documented_error_pairs_do_not_blindly_retry_or_expose_body(self):
+    def test_documented_error_pairs_do_not_blindly_retry_or_expose_body(self):  # P2-02-02
         for fixture in self.fixtures["naver_errors"]:
             body = {**fixture["body"], "message": "sensitive-fixture-message"}
             with patch("socket.socket", side_effect=AssertionError("network prohibited")):

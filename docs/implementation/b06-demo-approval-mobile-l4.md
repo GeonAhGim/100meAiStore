@@ -14,7 +14,16 @@ Approved DEMO purchase orders still require `submit_demo_po` to revalidate
 current order state, expiry, approval state, and intent digest immediately
 before the local submission checkpoint.
 
-Acceptance: pending approvals list with detail evidence; approve/reject with
+## Acceptance evidence
+
+| ID | Acceptance criterion |
+|---|---|
+| B06-01 | Approval inbox lists pending approvals with detail evidence and respects tenant/user scope |
+| B06-02 | Decision with nonce validation succeeds; invalid nonce, stale session, or missing capability fails closed |
+| B06-03 | Pending approvals expire at 24 hours; expired approval decision commits expiry evidence before raising |
+| B06-04 | Material preview redacts secrets and contacts without changing intent digest |
+
+Acceptance (prior): pending approvals list with detail evidence; approve/reject with
 nonce validation; 24-hour expiry and durable expiry evidence; changed intent,
 stale session, missing capability, cross-tenant id, and duplicate decision
 fail closed; restart persistence; no external notification or write.

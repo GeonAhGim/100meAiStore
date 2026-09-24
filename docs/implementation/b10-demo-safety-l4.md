@@ -10,7 +10,14 @@ temporary path, verifies `PRAGMA integrity_check`, and records a schema/digest
 manifest. It never deletes or overwrites a path. Restart tests reopen the
 copied database and re-check readiness, tenant state, and safety rows.
 
-Acceptance covers scope stop gates, explicit resume, tenant isolation,
+## Acceptance evidence
+
+| ID | Acceptance criterion |
+|---|---|
+| B10-01 | DEMO stop (global/tenant/connection scoped) is tenant-owned and durable; active stops fail closed; explicit resume is audited |
+| B10-02 | Backup copies SQLite to caller-supplied path, verifies integrity and manifest, never deletes; restore reopens with same tenant/safety state |
+
+Acceptance (prior): covers scope stop gates, explicit resume, tenant isolation,
 versioned stop state, backup integrity and restore persistence, invalid input
 rejection, and regression checks that raw secrets, network calls, and unsafe
 paths are not introduced.

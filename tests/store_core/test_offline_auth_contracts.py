@@ -22,7 +22,7 @@ class OfflineAuthContractTest(unittest.TestCase):
                          attempts_used=1, fixture_refresh_used=False, now=self.now,
                          deadline=self.now + timedelta(seconds=30))
 
-    def test_naver_public_vector_input_and_base64_contract(self):
+    def test_naver_public_vector_input_and_base64_contract(self):  # P2-04-02
         expected = "JDJhJDEwJGFiY2RlZmdoaWprbG1ub3BxcnN0dXVCVldZSk42T0VPdEx1OFY0cDQxa2IuTnpVaUEzbmsy"
         def fixture_hash(password, salt):
             self.assertEqual(b"aaaabbbbcccc_1643961623299", password)
@@ -60,7 +60,7 @@ class OfflineAuthContractTest(unittest.TestCase):
             return base64.b64decode(expected)
         self.assertEqual(expected, naver_canonical_fixture_signature(fixture_hash).digest)
 
-    def test_rate_retry_budget_and_deadline(self):
+    def test_rate_retry_budget_and_deadline(self):  # P2-04-01
         first = plan_naver_fixture_retry(**self.args)
         self.assertEqual(("RETRY_FIXTURE_AFTER_DELAY", 2, 1), (first.action, first.next_attempt, first.delay_seconds))
         self.assertFalse(first.executes_network)
