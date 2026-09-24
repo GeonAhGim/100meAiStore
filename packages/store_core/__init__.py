@@ -28,7 +28,7 @@ from .catalog import ingest_demo_catalog, project_demo_offer
 from .approvals import (ApprovalExpiryWorker, approval_detail, approval_inbox,
                         decide_approval)
 from .gateway import configure_demo_byok, set_demo_budget_policy, record_demo_agent_run, submit_demo_tool
-from .notifications import set_demo_notification_preference, notify_demo, acknowledge_demo_incident
+from .notifications import set_demo_notification_preference, notify_demo, acknowledge_demo_incident, notify_urgent_demo, check_and_escalate_incidents
 from .safety import set_demo_stop, backup_demo_sqlite
 from .readiness import evaluate_demo_readiness
 from .contract_demo_bridge import ContractFixtureReadAdapter
@@ -94,6 +94,8 @@ __all__ = [
     "set_demo_notification_preference",
     "notify_demo",
     "acknowledge_demo_incident",
+    "notify_urgent_demo",
+    "check_and_escalate_incidents",
     "set_demo_stop",
     "backup_demo_sqlite",
     "evaluate_demo_readiness",

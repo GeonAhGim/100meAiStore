@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import timedelta
 from typing import Any, Mapping, Sequence
 from uuid import uuid4
 
-from .domain import Capability, DemoIncidentAcknowledgement, DemoNotificationDelivery, DemoNotificationPreference, OutboxEvent, OutboxState
+from .domain import Capability, DemoIncidentAcknowledgement, DemoNotificationDelivery, DemoNotificationPreference, OutboxEvent, OutboxState, UrgentNotificationCategory
 from .errors import ConflictError
 
 _OPAQUE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,254}\Z")
@@ -97,3 +98,106 @@ def query_notifications(
         records = [r for r in records if r.state == state]
     records.sort(key=lambda r: r.sent_at, reverse=True)
     return records[:limit]
+
+
+def notify_urgent_demo(service: Any, context: Any, incident_key: str, category: str,
+                       payload: Mapping[str, Any], idempotency_key: str) -> dict[str, Any]:
+    """Send urgent notification immediately via primary channel (app_push).
+
+    Category must be one of UrgentNotificationCategory values. The notification is sent
+    immediately to app_push; if unacknowledged after 5 minutes, check_and_escalate_incidents()
+    will escalate to email. Multiple senders of the same incident_key are deduplicated;
+    acknowledgement by any tenant member blocks further escalations.
+    """
+    service.require(context, Capability.TENANT_ADMIN)
+    incident_key, idempotency_key = _opaque(incident_key, "incident_key"), _opaque(idempotency_key, "idempotency_key")
+
+    if category not in (c.value for c in UrgentNotificationCategory):
+        raise ConflictError(f"invalid urgent notification category: {category}")
+    if not isinstance(payload, Mapping):
+        raise ConflictError("notification payload must be a dict")
+
+    payload_with_category = dict(payload)
+    payload_with_category["category"] = category
+    try:
+        encoded = json.dumps(payload_with_category, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        raise ConflictError("notification payload must be finite JSON") from exc
+    if len(encoded.encode()) > 16 * 1024:
+        raise ConflictError("notification payload too large")
+
+    with service.repo.transaction():
+        existing_deliveries = [d for d in service.repo.notification_deliveries_for(context.tenant_id) if d.notification_key == incident_key]
+        if existing_deliveries:
+            first = min(existing_deliveries, key=lambda d: d.created_at)
+            return {"state": first.state, "channel": first.channel, "deliveries": [first], "replayed": True}
+
+        pref = service.repo.get_notification_preference(context.tenant_id, incident_key)
+        if pref is None:
+            pref = DemoNotificationPreference(context.tenant_id, incident_key, ("app_push", "email"), False)
+            service.repo.save_notification_preference(pref)
+
+        delivery = DemoNotificationDelivery(
+            str(uuid4()), context.tenant_id, incident_key, "app_push", encoded,
+            "DELIVERED", 1, None, f"{idempotency_key}:app_push", service._clock()
+        )
+        delivery, replay = service.repo.save_notification_delivery(delivery)
+
+        if not replay:
+            service._audit(
+                context.tenant_id, context.user_id, "notification.urgent_sent",
+                incident_key, "succeeded", {"category": category, "channel": "app_push"}
+            )
+
+        return {"state": delivery.state, "channel": delivery.channel, "deliveries": [delivery], "replayed": replay}
+
+
+def check_and_escalate_incidents(service: Any, tenant_id: str, current_time: Any) -> dict[str, Any]:
+    """Escalate unacknowledged urgent notifications to secondary channel (email) after 5 minutes.
+
+    For each unacknowledged urgent incident created more than 5 minutes ago, send via email.
+    This is typically called by a background scheduler. Returns count of escalations.
+    """
+    with service.repo.transaction():
+        all_deliveries = list(service.repo.notification_deliveries_for(tenant_id))
+
+        escalated_count = 0
+        escalation_cutoff = current_time - timedelta(minutes=5)
+
+        for delivery in all_deliveries:
+            if delivery.state != "DELIVERED" or delivery.channel != "app_push":
+                continue
+
+            try:
+                payload = json.loads(delivery.payload_json)
+            except (json.JSONDecodeError, ValueError):
+                continue
+
+            category = payload.get("category")
+            if category not in (c.value for c in UrgentNotificationCategory):
+                continue
+
+            if delivery.created_at > escalation_cutoff:
+                continue
+
+            acks = list(service.repo.acknowledgements_for(tenant_id, delivery.notification_key))
+            if acks:
+                continue
+
+            escalated_deliveries = list(service.repo.notification_deliveries_for(tenant_id))
+            email_sent = any(
+                d.notification_key == delivery.notification_key and d.channel == "email"
+                for d in escalated_deliveries
+            )
+            if email_sent:
+                continue
+
+            escalation_delivery = DemoNotificationDelivery(
+                str(uuid4()), tenant_id, delivery.notification_key, "email",
+                delivery.payload_json, "DELIVERED", 2, "app_push",
+                f"{delivery.idempotency_key}:email", current_time
+            )
+            escalation_delivery, _ = service.repo.save_notification_delivery(escalation_delivery)
+            escalated_count += 1
+
+        return {"escalated_count": escalated_count, "cutoff_time": escalation_cutoff}

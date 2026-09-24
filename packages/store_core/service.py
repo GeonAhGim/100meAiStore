@@ -338,6 +338,17 @@ class StoreControlPlane:
         from .notifications import acknowledge_demo_incident
         return acknowledge_demo_incident(self, context, incident_id, note, idempotency_key)
 
+    def notify_urgent_demo(self, context: TenantContext, incident_key: str, category: str,
+                           payload: Mapping[str, Any], idempotency_key: str) -> dict[str, Any]:
+        from .notifications import notify_urgent_demo
+        return notify_urgent_demo(self, context, incident_key, category, payload, idempotency_key)
+
+    def check_and_escalate_incidents(self, tenant_id: str, current_time: Any = None) -> dict[str, Any]:
+        from .notifications import check_and_escalate_incidents
+        if current_time is None:
+            current_time = self._clock()
+        return check_and_escalate_incidents(self, tenant_id, current_time)
+
     def notification_deliveries(self, context: TenantContext) -> tuple[Any, ...]:
         self.require(context, Capability.TENANT_ADMIN)
         return self.repo.notification_deliveries_for(context.tenant_id)
