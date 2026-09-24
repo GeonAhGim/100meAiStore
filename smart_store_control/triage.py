@@ -36,7 +36,7 @@ from typing import Any
 
 from . import loopguard
 from .escalation import codex_outcome, hand_to_codex, withdraw_codex, write_handoff
-from .pm import _CLAIM_LOCK, _load, _save, now
+from .pm import _CLAIM_LOCK, _load, _save, claude_lane, now
 from .state import CONTROL_DIR, read_json, write_json
 
 INTERVAL_SECONDS = 600
@@ -66,7 +66,21 @@ def classify(task: dict[str, Any]) -> tuple[str, str | None]:
 
 
 def _escalate(task: dict[str, Any], cause: str, actions: list[dict[str, Any]], *, codex: bool = True) -> None:
-    """Ladder: Codex pipeline when it can do the work, otherwise Claude Code."""
+    """Ladder: the Claude lane once, then the Codex pipeline, otherwise Claude Code.
+
+    Adopted from the AIOS fleet (ND-1, 2026-09-24): a task the local model
+    cannot finish goes to a Claude model before anything slower. Codex had no
+    worker for days and a job sat unclaimed while the milestone waited.
+    """
+    lane = claude_lane() if codex else None
+    if lane and not task.get("claude_lane_at") and task.get("preferred_lane") != lane:
+        stamp = now()
+        task.update({"status": "ready", "phase": "claude_lane", "preferred_lane": lane, "worker": "", "reviewer": "",
+                     "retry_count": 0, "loop_guard": None, "guard_reset_at": stamp, "claude_lane_at": stamp,
+                     "last_error": task.get("note") or task.get("last_error"),
+                     "note": f"{cause}: local pool spent, handed to the {lane} lane", "updated_at": stamp})
+        actions.append({"task": task["id"], "cause": cause, "action": "claude_lane"})
+        return
     record = hand_to_codex(task) if codex else None
     if record:
         task.update({"status": "escalated", "phase": "codex", "escalation": record, "worker": "", "reviewer": "",

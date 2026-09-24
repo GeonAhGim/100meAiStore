@@ -154,6 +154,13 @@ def implementer_lanes() -> list[str]:
             if name == IMPL_ROLE or str(pool.get("engine", "")) in EXTERNAL_ENGINES]
 
 
+def claude_lane() -> str | None:
+    """The configured Claude lane (engine "claude", size > 0), or None."""
+    pools = read_json(POOLS_PATH, {}).get("pools", {})
+    return next((name for name, pool in pools.items()
+                 if pool.get("engine") == "claude" and int(pool.get("size", 0)) > 0), None)
+
+
 def claim(worker: str, role: str = "local-impl") -> dict[str, Any] | None:
     """Claim a ready implementation task for ``worker`` in lane ``role``.
 
@@ -420,7 +427,11 @@ def claim_review(worker: str = "local-review-1") -> dict[str, Any] | None:
         data = _load()
         tasks = data.get("tasks", [])
         cap = effective_capacity("local-impl")
-        active = sum(1 for t in tasks if t.get("status") in {"in_progress", "reviewing"})
+        # Reviews run on the local slots: count local implementations and
+        # reviews only. A task running on the Claude, cursor or gemini lane
+        # holds no local slot, and counting it stopped every review with one slot.
+        active = sum(1 for t in tasks if t.get("status") == "reviewing"
+                     or (t.get("status") == "in_progress" and lane_of(str(t.get("worker") or "")) == IMPL_ROLE))
         if cap["effective"] <= active:
             return None
         candidates = [t for t in tasks if t.get("status") == "needs_review"]

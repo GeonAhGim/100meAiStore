@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from . import loopguard
-from .local_llm import complete
+from .local_llm import LOCAL_LLM_GATE, complete
 from .pm import _CLAIM_LOCK, _load, _save, now
 from .state import CONTROL_DIR, ROOT, read_json
 
@@ -179,6 +179,11 @@ def _key_of(found: dict[str, Any]) -> str:
 
 
 def _ask_model(task: dict[str, Any], text: str, found: dict[str, Any]) -> dict[str, Any] | None:
+    # With one reserved stream the gate is held for a whole agent run; a
+    # diagnosis must not queue behind it (the rule fallback is used instead).
+    if not LOCAL_LLM_GATE.acquire(blocking=False):
+        return None
+    LOCAL_LLM_GATE.release()
     endpoint = read_json(CONTROL_DIR / "runtime.json", {}).get("local_llm", {}).get("endpoint", "http://127.0.0.1:8081")
     prompt = ("smart_store 작업이 실패했다. 원인과 다음 시도가 할 조치를 한국어로 짧게 답하라. "
               'JSON 한 줄만 출력: {"cause": "근본 원인 한 문장", "fix": "다음 시도가 할 구체적 조치 1~3문장"}\n\n'

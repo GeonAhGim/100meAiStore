@@ -26,6 +26,24 @@ def extract_patch(text: str) -> str:
     return (match.group(1) if match else text).strip() + "\n"
 
 
+_DIFF_FILE = re.compile(r"^diff --git a/(\S+) b/(\S+)$", re.MULTILINE)
+
+
+def report_only_patch(diff: str) -> str | None:
+    """A reason to reject a patch that only adds a completion report, else None.
+
+    A done claim with no work behind it needs a verified reason (AIOS fleet:
+    noop_reason). M4.7 landed as a single root-level report saying "no gaps"
+    while the audit it cited still failed 20 of 24 items.
+    """
+    files = [b for _, b in _DIFF_FILE.findall(diff)]
+    if files and all(f.lower().endswith(".md") and "/" not in f for f in files):
+        return ("report-only patch rejected: it adds only " + ", ".join(files)[:120]
+                + " at the repository root and changes no code, test or evidence document; "
+                  "a completion claim must be backed by the checks it names")
+    return None
+
+
 def run_once(worker: str, apply_patch: bool = False) -> dict:
     lane = lane_of(worker)
     task = claim(worker, lane)
@@ -82,7 +100,11 @@ def run_once(worker: str, apply_patch: bool = False) -> dict:
                 until = pause_lane(lane, f"{engine}: wall clock {summary.get('wall_seconds')}s exceeded (congested)", seconds=10 * 60)
                 stop.set()
                 return finish(task["id"], "blocked", note=f"lane paused until {until}: {engine} wall clock exceeded, model congested")
-            if engine in EXTERNAL_ENGINES and not diff.strip():
+            # Claude reports failure structurally; its normal result text can name
+            # "authentication" or "429" as subject matter. Only an error run is a
+            # lane fault (AIOS fleet 2026-09-24: a phrase match paused a healthy lane).
+            errored = engine != "claude" or bool(summary.get("is_error")) or summary.get("returncode") not in (0, None)
+            if engine in EXTERNAL_ENGINES and not diff.strip() and errored:
                 fault = lane_fault(str(summary.get("result", "")) + " " + str(summary.get("stderr", "")))
                 if fault:
                     # Provider quota, login or trust problem: the lane, not the task.
@@ -101,6 +123,10 @@ def run_once(worker: str, apply_patch: bool = False) -> dict:
             # Bytes, not text: Path.write_text would turn the diff's LF into
             # CRLF on Windows and git apply would then reject every hunk.
             artifact.write_bytes(diff.encode("utf-8"))
+            report_only = report_only_patch(diff)
+            if report_only:
+                stop.set()
+                return finish(task["id"], "blocked", str(artifact), report_only)
             rewrite = rewrite_violation(PROJECT_ROOT, artifact)
             if rewrite:
                 stop.set()

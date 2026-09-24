@@ -21,8 +21,9 @@ REQUEST_HEADERS = {
 }
 # smart_store's share of the shared model, whether a stream is an agent lane,
 # a review read or a diagnosis. AIOS reserves this many llama.cpp slots for
-# the smart_store client at the proxy (2 since 2026-09-22, user decision).
-RESERVED_STREAMS = 2
+# the smart_store client at the proxy (2 from 2026-09-22; 1 from 2026-09-25,
+# user decision, matching AIOS llama.cpp --parallel 6 with one smart_store slot).
+RESERVED_STREAMS = 1
 LOCAL_LLM_GATE = threading.BoundedSemaphore(RESERVED_STREAMS)
 
 
@@ -52,17 +53,20 @@ def complete(prompt: str, *, endpoint: str = "http://127.0.0.1:8081", model: str
     parsed = urlsplit(endpoint)
     if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost"}:
         raise ValueError("local LLM endpoint must be http on localhost")
-    connection = HTTPConnection(parsed.hostname, parsed.port or 80, timeout=timeout)
-    expired = threading.Event()
-
-    def _abort() -> None:
-        expired.set()
-        connection.close()  # unblocks a pending recv in the calling thread
-
-    watchdog = threading.Timer(timeout, _abort)
-    watchdog.daemon = True
-    watchdog.start()
     with LOCAL_LLM_GATE:
+        # The deadline covers the call, not the wait for the gate: with one
+        # reserved stream a review waits for a whole agent run, and a deadline
+        # spent queueing turned into "model review unavailable" (a pass).
+        connection = HTTPConnection(parsed.hostname, parsed.port or 80, timeout=timeout)
+        expired = threading.Event()
+
+        def _abort() -> None:
+            expired.set()
+            connection.close()  # unblocks a pending recv in the calling thread
+
+        watchdog = threading.Timer(timeout, _abort)
+        watchdog.daemon = True
+        watchdog.start()
         try:
             connection.request("POST", "/v1/messages", body=payload, headers=REQUEST_HEADERS)
             response = connection.getresponse()

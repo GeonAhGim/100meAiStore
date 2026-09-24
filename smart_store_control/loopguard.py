@@ -39,6 +39,13 @@ CAUSES: tuple[tuple[str, tuple[str, ...], str | None], ...] = (
     ("stray_edits", ("outside its worktree", "live checkout denied"),
      "이전 시도가 작업 worktree 밖(C:\\smart_store 본 체크아웃)의 파일을 수정했다. 현재 작업 디렉터리 안의 "
      "상대 경로 파일만 편집하고 절대 경로로 쓰지 마라."),
+    # A run that changed nothing because it judged the work already done. Checked
+    # before max_turns, whose "produced no change" marker it also carries.
+    ("noop_claim", ("already complete", "already satisfied", "already implemented", "report-only patch",
+                    "이미 완료", "이미 만족", "이미 충족", "이미 구현", "이미 완성"),
+     "이전 시도는 완료조건이 이미 충족됐다고 판단하고 아무것도 바꾸지 않았다. 완료 주장은 증거로만 인정된다. "
+     "완료조건을 검증하는 명령(감사 함수, 관련 테스트)을 직접 실행해 그 출력을 확인하고, 실패하는 항목을 고쳐라. "
+     "정말 이미 충족된다면 그 사실을 검증하는 테스트를 추가하라. 저장소 루트에 보고서 파일만 추가하는 패치는 거부된다."),
     ("max_turns", ("error_max_turns", "max turns", "produced no change"),
      "이전 시도가 턴을 다 쓸 때까지 파일을 하나도 바꾸지 못했다. 저장소 탐색을 줄이고, 완료조건 중 하나만 만족하는 "
      "가장 작은 변경을 처음 10턴 안에 파일로 써라. 나머지 완료조건은 다음 작업으로 남겨도 된다."),
