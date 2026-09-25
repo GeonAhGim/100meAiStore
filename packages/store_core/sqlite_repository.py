@@ -25,6 +25,7 @@ from .domain import (
     DemoNotificationPreference, DemoNotificationDelivery, DemoIncidentAcknowledgement,
     DemoStopControl, DemoBackupManifest,
     DemoInventorySnapshot, DemoPriceProjection, BrowserSession, ApprovalConfirmationNonce,
+    ApprovalWindowConfig, ApprovalWindowKind, SchedulerCheckpoint,
 )
 from .errors import ConflictError, NotFoundError, TenantBoundaryError
 from .domain import DemoBudgetRequest
@@ -420,6 +421,14 @@ CREATE TRIGGER demo_budget_ledger_no_update BEFORE UPDATE ON demo_budget_ledger
  BEGIN SELECT RAISE(ABORT,'budget ledger is immutable'); END;
 CREATE TRIGGER demo_budget_ledger_no_delete BEFORE DELETE ON demo_budget_ledger
  BEGIN SELECT RAISE(ABORT,'budget ledger is immutable'); END;
+"""), (23, """
+CREATE TABLE approval_window_configs(
+ tenant_id TEXT NOT NULL, kind TEXT NOT NULL, hours_json TEXT NOT NULL, version INTEGER NOT NULL CHECK(version>0),
+ PRIMARY KEY(tenant_id,kind), FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT);
+CREATE TABLE scheduler_checkpoints(
+ tenant_id TEXT NOT NULL, kind TEXT NOT NULL, hour INTEGER NOT NULL CHECK(hour>=0 AND hour<=23),
+ last_executed_at TEXT NOT NULL, version INTEGER NOT NULL CHECK(version>0),
+ PRIMARY KEY(tenant_id,kind,hour), FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT);
 """))
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -1508,3 +1517,65 @@ class SQLiteRepository(BudgetRepositoryMixin):
             self.connection.execute("UPDATE outbox SET state=?,available_at=?,last_error=?,lease_owner=NULL,lease_until=NULL WHERE tenant_id=? AND id=?",(state.value,available.isoformat(),safe,tenant_id,event_id))
             e.state,e.available_at,e.last_error,e.lease_owner,e.lease_until=state,available,safe,None,None
             return e
+
+    def save_approval_window_config(self, config: ApprovalWindowConfig) -> None:
+        self.connection.execute(
+            """INSERT INTO approval_window_configs (tenant_id, kind, hours_json, version)
+               VALUES (?,?,?,?) ON CONFLICT(tenant_id,kind) DO UPDATE SET
+               hours_json=excluded.hours_json, version=excluded.version""",
+            (config.tenant_id, config.kind.value, json.dumps(config.hours), config.version)
+        )
+
+    def get_approval_window_config(self, tenant_id: str, kind: str) -> ApprovalWindowConfig | None:
+        row = self.connection.execute(
+            "SELECT * FROM approval_window_configs WHERE tenant_id=? AND kind=?",
+            (tenant_id, kind)
+        ).fetchone()
+        if row is None:
+            return None
+        return ApprovalWindowConfig(
+            tenant_id=row['tenant_id'],
+            kind=ApprovalWindowKind(row['kind']),
+            hours=tuple(json.loads(row['hours_json'])),
+            version=row['version']
+        )
+
+    def save_scheduler_checkpoint(self, checkpoint: SchedulerCheckpoint) -> None:
+        with self.transaction():
+            row = self.connection.execute(
+                "SELECT version FROM scheduler_checkpoints WHERE tenant_id=? AND kind=? AND hour=?",
+                (checkpoint.tenant_id, checkpoint.kind.value, checkpoint.hour)
+            ).fetchone()
+            if row:
+                changed = self.connection.execute(
+                    """UPDATE scheduler_checkpoints SET last_executed_at=?, version=?
+                       WHERE tenant_id=? AND kind=? AND hour=? AND version=?""",
+                    (checkpoint.last_executed_at.isoformat(), checkpoint.version,
+                     checkpoint.tenant_id, checkpoint.kind.value, checkpoint.hour, checkpoint.version - 1)
+                ).rowcount
+                if changed != 1:
+                    raise ConflictError('scheduler checkpoint version conflict')
+            else:
+                try:
+                    self.connection.execute(
+                        "INSERT INTO scheduler_checkpoints VALUES (?,?,?,?,?)",
+                        (checkpoint.tenant_id, checkpoint.kind.value, checkpoint.hour,
+                         checkpoint.last_executed_at.isoformat(), checkpoint.version)
+                    )
+                except sqlite3.IntegrityError as exc:
+                    raise ConflictError('scheduler checkpoint conflict') from exc
+
+    def get_scheduler_checkpoint(self, tenant_id: str, kind: str, hour: int) -> SchedulerCheckpoint | None:
+        row = self.connection.execute(
+            "SELECT * FROM scheduler_checkpoints WHERE tenant_id=? AND kind=? AND hour=?",
+            (tenant_id, kind, hour)
+        ).fetchone()
+        if row is None:
+            return None
+        return SchedulerCheckpoint(
+            tenant_id=row['tenant_id'],
+            kind=ApprovalWindowKind(row['kind']),
+            hour=row['hour'],
+            last_executed_at=_dt(row['last_executed_at']),
+            version=row['version']
+        )

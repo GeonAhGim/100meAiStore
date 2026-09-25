@@ -109,7 +109,7 @@ class BudgetRepositoryTests(unittest.TestCase):
                 repo.save_budget_entry(DemoBudgetLedgerEntry('entry', ctx.tenant_id, run.id, 5, NOW, 'legacy'))
                 repo.close()
             repo = SQLiteRepository(path)
-            self.assertEqual(22, repo.readiness()['schema_version'])
+            self.assertEqual(23, repo.readiness()['schema_version'])
             with self.assertRaisesRegex(ConflictError, 'legacy'):
                 repo.get_budget_request(ctx.tenant_id, 'legacy', 'a' * 64)
             self.assertEqual(5, repo.platform_monthly_budget_total(NOW))
