@@ -16,6 +16,14 @@ backup integrity.
 | Assisted | human approval intent, mobile evidence, expiry and submit re-check | local DEMO command checkpoint only | evidenced by B06/B08/B09 |
 | Bounded | approved policy/cost/stop limits plus recovery/backup drills and explicit operator exit | not enabled by this repository | pending completion of B04/B05/B07 and DEC gates |
 
+## Acceptance evidence
+
+| ID | Acceptance criterion |
+|---|---|
+| B11-01 | Stage evaluator enforces fail-closed mode; requires explicit Boolean true evidence; missing, false or non-Boolean evidence blocks dependent stages |
+| B11-02 | Storage readiness is verified as Boolean true before stages are permitted |
+| B11-03 | Promotion requires external-contract review, legal/retention decisions, operator exit record; absence is safe hold |
+
 Each stage exits only after its listed evidence is durable and replayable:
 Discovery exits on normalized source/audit proof; Shadow exits on deterministic
 proposal and no-write replay; Assisted exits on one-decider approval,

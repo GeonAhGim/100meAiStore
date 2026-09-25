@@ -27,6 +27,9 @@ from .state import CONTROL_DIR, read_json, write_text
 HANDOFF_PATH = CONTROL_DIR / "handoff.md"
 
 CODEX_WAIT_SECONDS = 24 * 3600
+# A job nobody claims (Codex daemon down, quota spent) is not "in progress":
+# task 18 sat queued with zero attempts for 20 hours and held M4.7 behind it.
+CODEX_PICKUP_SECONDS = 2 * 3600
 _EXIT = re.compile(r"Exit criteria:\s*(.+?)(?:\.\s|\. Evidence|$)", re.IGNORECASE | re.DOTALL)
 _FILES = re.compile(r"files to inspect:\s*(.+?)(?:\.(?:\s|$)|\n|$)", re.IGNORECASE)
 
@@ -100,11 +103,25 @@ def codex_outcome(record: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         started = datetime.fromisoformat(str(record.get("at")).replace("Z", "+00:00")).timestamp()
     except ValueError:
         started = datetime.now(timezone.utc).timestamp()
+    try:
+        ready_at = datetime.fromisoformat(str(job.get("available_at")).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        ready_at = started
+    waited = datetime.now(timezone.utc).timestamp() - max(started, ready_at)
+    if job["status"] == "queued" and not int(job.get("attempts") or 0) and waited > CODEX_PICKUP_SECONDS:
+        return "timeout", {"reason": f"codex job {job['id']} was never picked up in {int(waited // 3600)}h "
+                                     "(no Codex worker running or quota spent)", "available_at": job.get("available_at")}
     if datetime.now(timezone.utc).timestamp() - started > CODEX_WAIT_SECONDS:
         return "timeout", {"reason": f"codex job {job['id']} still {job['status']} after {CODEX_WAIT_SECONDS // 3600}h",
                            "available_at": job.get("available_at")}
     return "waiting", {"status": job["status"], "available_at": job.get("available_at"),
                        "stage": checkpoint.get("stage"), "last_error": str(job.get("last_error") or "")[:160]}
+
+
+def withdraw_codex(record: dict[str, Any], reason: str) -> bool:
+    """Take an unclaimed Codex job back so a Codex worker started later does not duplicate Claude Code's work."""
+    db = _db() if record.get("engine") == "codex" and record.get("job_id") else None
+    return bool(db and db.withdraw(int(record["job_id"]), reason))
 
 
 def _owner(task: dict[str, Any]) -> str:
@@ -143,6 +160,10 @@ def handoff_markdown(tasks: list[dict[str, Any]]) -> str:
             last_error = " ".join(str(t.get("last_error") or "").split())
             if last_error and last_error != note:
                 out.append(f"- 직전 오류: {last_error[:400]}")
+            diagnosis = t.get("diagnosis") or {}
+            if diagnosis.get("fix"):
+                out.append(f"- 진단({diagnosis.get('source')}{', 반복' if diagnosis.get('repeat') else ''}): "
+                           f"{diagnosis.get('cause', '')} → {diagnosis['fix'][:400]}")
             if codex.get("job_id"):
                 state = (codex.get("codex") or {}).get("status", "queued")
                 out.append(f"- Codex job {codex['job_id']} ({codex.get('task_id')}) · {state}")

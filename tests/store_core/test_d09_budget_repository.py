@@ -66,6 +66,36 @@ class BudgetRepositoryTests(unittest.TestCase):
                         self.assertEqual(request, reopened.get_budget_request(ctx.tenant_id, 'key', 'b' * 64))
                         reopened.close()
 
+    def test_platform_budget_warning_level_at_24000_and_below_30000(self):
+        with tempfile.TemporaryDirectory() as folder:
+            for repo in (InMemoryRepository(), SQLiteRepository(Path(folder) / 'warning.db')):
+                with self.subTest(repository=type(repo).__name__):
+                    app = StoreControlPlane(repo, lambda: NOW)
+                    ctx = app.bootstrap_tenant('Warning', 'warning@example.test')
+                    run = DemoAgentRun('run', ctx.tenant_id, 'agent', 'inspect', 1, 'economy', 'p1',
+                                       'a' * 64, '{}', 'high', 0, None, 0, 0, 'RECORDED', NOW)
+                    repo.save_agent_run(run)
+
+                    # Below warning level
+                    entry1 = DemoBudgetLedgerEntry('entry1', ctx.tenant_id, run.id, 12000, NOW, 'key1')
+                    repo.reserve_budget_entry(entry1)
+                    self.assertFalse(repo.platform_budget_warning_level(NOW))
+
+                    # At warning level
+                    entry2 = DemoBudgetLedgerEntry('entry2', ctx.tenant_id, run.id, 12000, NOW, 'key2')
+                    repo.reserve_budget_entry(entry2)
+                    self.assertTrue(repo.platform_budget_warning_level(NOW))
+                    self.assertEqual(24000, repo.platform_monthly_budget_total(NOW))
+
+                    # Still within warning, below hard cap
+                    entry3 = DemoBudgetLedgerEntry('entry3', ctx.tenant_id, run.id, 5999, NOW, 'key3')
+                    repo.reserve_budget_entry(entry3)
+                    self.assertTrue(repo.platform_budget_warning_level(NOW))
+                    self.assertEqual(29999, repo.platform_monthly_budget_total(NOW))
+
+                    if isinstance(repo, SQLiteRepository):
+                        repo.close()
+
     def test_v21_legacy_keys_fail_closed_and_upgrade_is_forward_only(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'legacy.db'
@@ -79,7 +109,7 @@ class BudgetRepositoryTests(unittest.TestCase):
                 repo.save_budget_entry(DemoBudgetLedgerEntry('entry', ctx.tenant_id, run.id, 5, NOW, 'legacy'))
                 repo.close()
             repo = SQLiteRepository(path)
-            self.assertEqual(22, repo.readiness()['schema_version'])
+            self.assertEqual(23, repo.readiness()['schema_version'])
             with self.assertRaisesRegex(ConflictError, 'legacy'):
                 repo.get_budget_request(ctx.tenant_id, 'legacy', 'a' * 64)
             self.assertEqual(5, repo.platform_monthly_budget_total(NOW))

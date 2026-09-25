@@ -19,8 +19,12 @@ try {
             # The server runs its workers in-process, so it is started hidden (no console
             # window to close by accident) and its output is kept for post-mortems.
             $server = "`"$Python`" -m smart_store_control.server --host 127.0.0.1 --port $Port >> `"$Log`" 2>&1"
+            # Wait on the cmd wrapper alone. Start-Process -Wait also waits for every
+            # descendant, so an agent or test process the server left behind kept the
+            # watchdog blocked with no server running (2026-09-25, 09:04 to 09:20).
             $proc = Start-Process -FilePath "cmd.exe" -ArgumentList "/d /s /c `"$server`"" `
-                -WorkingDirectory $ProjectRoot -WindowStyle Hidden -PassThru -Wait
+                -WorkingDirectory $ProjectRoot -WindowStyle Hidden -PassThru
+            $proc.WaitForExit()
             Add-Content -LiteralPath $ExitLog -Value ("{0} exit={1} (watchdog restarts)" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $proc.ExitCode)
         }
         Start-Sleep -Seconds 10

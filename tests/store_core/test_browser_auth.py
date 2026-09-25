@@ -30,6 +30,8 @@ class BrowserAuthTests(unittest.TestCase):
             self.master, ApprovalKind.PRODUCT, key, {"sku": key}, key, 1, 1)[1]
 
     def test_session_is_hash_only_durable_and_revocation_invalidates_it(self):
+        # P2-09-01: PostgreSQL RLS with composite tenant/order identities; missing/wrong tenant context isolation with atomic rollback
+        # P2-09-03: Approval preview redacts secrets/authorization/contact; before/profit/after shown; missing profit visible as risk badge
         issued = self.app.issue_browser_session(
             self.catalog, identity_assertion_ref="fixture-email-mfa")
         token = issued.token

@@ -54,6 +54,7 @@ class InboxTests(unittest.TestCase):
         self.assertEqual(count + 1, len(self.repo.audits_for(self.ctx.tenant_id)))
 
     def test_in04_tenant_isolation(self):
+        # IN-04: same external identity in two tenants; foreign read/process indistinguishable from missing
         msg, _ = self.receive()
         other = self.app.bootstrap_tenant('other', 'other@example.test')
         self.register(self.app, other)
@@ -65,6 +66,7 @@ class InboxTests(unittest.TestCase):
             self.app.process_inbound(other, msg.id, 1)
 
     def test_in05_manifest_and_validation(self):
+        # IN-05: missing manifest, unsupported capability/schema, URL/path raw references rejected
         with self.assertRaises(NotFoundError):
             self.app.receive_inbound(self.ctx, 'missing', 'conn', 'event', 1, 'a' * 64)
         for capabilities, versions in ((set(), {1}), ({AdapterCapability.INBOUND_EVENTS}, {2})):
@@ -78,6 +80,7 @@ class InboxTests(unittest.TestCase):
         self.assertEqual((), self.app.inbox_for(self.ctx))
 
     def test_in06_master_and_revoked(self):
+        # IN-06: ordinary and revoked member rejected
         member = self.app.add_member(self.ctx, 'member@example.test', [Role.CATALOG_CS])
         with self.assertRaises(AuthorizationError):
             self.receive(ctx=member)
@@ -86,6 +89,7 @@ class InboxTests(unittest.TestCase):
             self.app.inbox_for(member)
 
     def test_in07_process_cas_and_replay(self):
+        # IN-07: stale CAS rejected; accepted once; processed replay adds nothing
         msg, _ = self.receive()
         with self.assertRaises(ConflictError):
             self.app.process_inbound(self.ctx, msg.id, 2)
@@ -97,6 +101,7 @@ class InboxTests(unittest.TestCase):
         self.assertTrue(self.app.verify_audit_chain(self.ctx.tenant_id))
 
     def test_in08_both_repositories_rollback_and_detached_reads(self):
+        # IN-08: audit and outbox exceptions roll back receipt and processing on both repositories; detached reads
         for repo in (self.repo, InMemoryRepository()):
             app = StoreControlPlane(repo)
             ctx = self.ctx if repo is self.repo else app.bootstrap_tenant('mem', 'mem@example.test')
@@ -120,6 +125,7 @@ class InboxTests(unittest.TestCase):
                 self.assertEqual(1, len(repo.outbox_for(ctx.tenant_id)))
 
     def test_in09_independent_connections(self):
+        # IN-09: 8 concurrent requests over independent SQLite connections produce one receipt and one acceptance
         def run(_):
             repo = SQLiteRepository(self.path)
             try:
@@ -136,6 +142,7 @@ class InboxTests(unittest.TestCase):
         self.assertEqual(2, len(self.repo.outbox_for(self.ctx.tenant_id)))
 
     def test_in10_process_crash_before_and_after_commit(self):
+        # IN-10: subprocess `os._exit` before/after receipt commit and processing commit; restart/replay verifies no partial or duplicated effect
         script = '''
 import os, sys
 from packages.store_core.sqlite_repository import SQLiteRepository

@@ -26,6 +26,15 @@ class Capability(str, Enum):
     RECOVERY = "recovery"
 
 
+class UrgentNotificationCategory(str, Enum):
+    ACCOUNT_SUSPENSION_SECURITY = "account_suspension_security"
+    MASS_STOCKOUT = "mass_stockout"
+    NEGATIVE_MARGIN = "negative_margin"
+    PO_DEADLINE = "po_deadline"
+    PRIVACY_RISK = "privacy_risk"
+    EMERGENCY_STOP = "emergency_stop"
+
+
 ROLE_CAPABILITIES: Mapping[Role, frozenset[Capability]] = {
     Role.MASTER: frozenset(Capability),
     Role.FUNDS: frozenset(
@@ -114,9 +123,19 @@ class BrowserSession:
     identity_assertion_ref: str
     issued_at: datetime
     expires_at: datetime
+    channel_key_ref: str = ""
+    ai_key_ref: str = ""
+
+    def __repr__(self) -> str:
+        return (
+            f"BrowserSession(token_digest={self.token_digest!r}, "
+            f"tenant_id={self.tenant_id!r}, user_id={self.user_id!r}, "
+            f"channel_key_ref={self.channel_key_ref!r}, "
+            f"ai_key_ref={self.ai_key_ref!r})"
+        )
 
 
-@dataclass
+@dataclass(frozen=True)
 class ApprovalConfirmationNonce:
     token_digest: str
     session_digest: str
@@ -126,6 +145,13 @@ class ApprovalConfirmationNonce:
     issued_at: datetime
     expires_at: datetime
     consumed_at: datetime | None = None
+
+    def __repr__(self) -> str:
+        return (
+            f"ApprovalConfirmationNonce(token_digest={self.token_digest!r}, "
+            f"session_digest={self.session_digest!r}, "
+            f"tenant_id={self.tenant_id!r}, approval_id={self.approval_id!r})"
+        )
 
 
 @dataclass
@@ -428,6 +454,7 @@ class ClaimStatus(str, Enum):
     REFUND_PENDING = "REFUND_PENDING"
     REFUNDED = "REFUNDED"
     CLOSED = "CLOSED"
+    PARTIAL_APPROVED = "PARTIAL_APPROVED"
 
 
 @dataclass
@@ -815,3 +842,26 @@ class AttemptObservation:
     response_digest: str
     observed_at: datetime
     correlation_id: str
+
+
+class ApprovalWindowKind(str, Enum):
+    PRODUCT = "product"
+    PURCHASE = "purchase"
+    AGENT = "agent"
+
+
+@dataclass
+class ApprovalWindowConfig:
+    tenant_id: str
+    kind: ApprovalWindowKind
+    hours: tuple[int, ...]
+    version: int = 1
+
+
+@dataclass
+class SchedulerCheckpoint:
+    tenant_id: str
+    kind: ApprovalWindowKind
+    hour: int
+    last_executed_at: datetime
+    version: int = 1

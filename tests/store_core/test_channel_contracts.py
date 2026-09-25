@@ -1,4 +1,6 @@
+import copy
 import json
+import tempfile
 import unittest
 from dataclasses import asdict
 from datetime import date, datetime
@@ -7,7 +9,10 @@ from unittest.mock import patch
 from urllib.parse import parse_qs
 
 from packages.store_core.channel_contracts import (
-    COUPANG_STATES, classify_naver_read_error, coupang_day_page_plan,
+    COUPANG_STATES,
+    ReadBackConflict,
+    classify_naver_read_error,
+    coupang_day_page_plan,
 )
 
 
@@ -19,7 +24,7 @@ class OfflineChannelContractTest(unittest.TestCase):
         self.args["start"] = date.fromisoformat(self.args["start"])
         self.args["end"] = date.fromisoformat(self.args["end"])
 
-    def test_encoded_page_cursor_roundtrip_and_fixed_offline_scope(self):
+    def test_encoded_page_cursor_roundtrip_and_fixed_offline_scope(self):  # P2-02-01
         with patch("socket.socket", side_effect=AssertionError("network prohibited")):
             plan = coupang_day_page_plan(**self.args)
         parsed = parse_qs(plan.encoded_query)
@@ -55,7 +60,7 @@ class OfflineChannelContractTest(unittest.TestCase):
         plan = coupang_day_page_plan(**{**self.args, "end": self.args["start"], "max_per_page": 1})
         self.assertEqual("1", dict(plan.query)["maxPerPage"])
 
-    def test_documented_error_pairs_do_not_blindly_retry_or_expose_body(self):
+    def test_documented_error_pairs_do_not_blindly_retry_or_expose_body(self):  # P2-02-02
         for fixture in self.fixtures["naver_errors"]:
             body = {**fixture["body"], "message": "sensitive-fixture-message"}
             with patch("socket.socket", side_effect=AssertionError("network prohibited")):
@@ -70,6 +75,145 @@ class OfflineChannelContractTest(unittest.TestCase):
         for status in (True, 200, 600, "401"):
             with self.assertRaises(ValueError):
                 classify_naver_read_error(status, {"code": "GW.AUTHN"})
+
+
+class ReadbackIdempotencyTest(unittest.TestCase):
+    """M3.2 – 채널 readback · 멱등성.
+
+    Duplicate retransmissions must raise ReadBackConflict without
+    re-executing the channel request.  Partial / mismatched payloads
+    must fail closed.
+    """
+
+    def _make_journal(self):
+        """Create a temporary journal and return (journal, tempdir)."""
+        import tempfile as tf
+        td = tf.TemporaryDirectory()
+        from packages.store_core.offline_contract_journal import OfflineContractJournal
+        journal = OfflineContractJournal(Path(td.name) / "test.sqlite")
+        return journal, td
+
+    def test_verify_readback_accepts_exact_duplicate(self):
+        # P2-03-02: Page journal persists page evidence/checkpoints only in atomic local SQLite transaction; replay cannot rewind cursor
+        from packages.store_core.channel_order_contracts import (
+            OfflineOrderPage, canonical_json,
+        )
+        from dataclasses import asdict
+        journal, td = self._make_journal()
+        try:
+            page = OfflineOrderPage(
+                provider="coupang",
+                snapshots=(),
+                next_cursor=None,
+                source_digest="abc123",
+            )
+            journal.record("t1", "c1", "pk1", page, expected_version=0)
+            # Exact duplicate — should return True (idempotent)
+            self.assertTrue(journal.verify_readback("t1", "c1", "coupang", "pk1", page))
+        finally:
+            journal.close()
+            td.cleanup()
+
+    def test_verify_readback_rejects_modified_payload(self):
+        from packages.store_core.channel_order_contracts import (
+            OfflineOrderPage,
+        )
+        journal, td = self._make_journal()
+        try:
+            page1 = OfflineOrderPage(
+                provider="coupang",
+                snapshots=(),
+                next_cursor=None,
+                source_digest="abc123",
+            )
+            journal.record("t1", "c1", "pk1", page1, expected_version=0)
+            # Modified digest — should raise ReadBackConflict
+            page2 = OfflineOrderPage(
+                provider="coupang",
+                snapshots=(),
+                next_cursor=None,
+                source_digest="different",
+            )
+            with self.assertRaises(ReadBackConflict) as ctx:
+                journal.verify_readback("t1", "c1", "coupang", "pk1", page2)
+            self.assertEqual("page_identity_content_conflict", str(ctx.exception))
+        finally:
+            journal.close()
+            td.cleanup()
+
+    def test_verify_readback_raises_when_no_record(self):
+        journal, td = self._make_journal()
+        try:
+            from packages.store_core.channel_order_contracts import OfflineOrderPage
+            page = OfflineOrderPage(
+                provider="coupang", snapshots=(), next_cursor=None,
+                source_digest="abc",
+            )
+            with self.assertRaises(ReadBackConflict) as ctx:
+                journal.verify_readback("t1", "c1", "coupang", "nonexistent", page)
+            self.assertEqual("no_recorded_page_for_key", str(ctx.exception))
+        finally:
+            journal.close()
+            td.cleanup()
+
+    def test_detect_partial_response_rejects_non_dict(self):
+        journal, td = self._make_journal()
+        try:
+            from packages.store_core.channel_order_contracts import ContractQuarantine
+            for bad in (None, [], "not json", 42, True):
+                with self.subTest(bad=type(bad).__name__):
+                    with self.assertRaises(ContractQuarantine) as ctx:
+                        journal.detect_partial_response(bad)
+                    self.assertEqual("object_required", str(ctx.exception))
+        finally:
+            journal.close()
+            td.cleanup()
+
+    def test_detect_partial_response_rejects_missing_data(self):
+        journal, td = self._make_journal()
+        try:
+            from packages.store_core.channel_order_contracts import ContractQuarantine
+            with self.assertRaises(ContractQuarantine) as ctx:
+                journal.detect_partial_response({"traceId": "x"})
+            self.assertEqual("partial_response_missing_data", str(ctx.exception))
+        finally:
+            journal.close()
+            td.cleanup()
+
+    def test_detect_partial_response_rejects_truncated_string_data(self):
+        journal, td = self._make_journal()
+        try:
+            from packages.store_core.channel_order_contracts import ContractQuarantine
+            with self.assertRaises(ContractQuarantine) as ctx:
+                journal.detect_partial_response({"data": "truncated json{"})
+            self.assertEqual("partial_response_truncated_data", str(ctx.exception))
+        finally:
+            journal.close()
+            td.cleanup()
+
+    def test_detect_partial_response_accepts_valid_body(self):
+        journal, td = self._make_journal()
+        try:
+            body = {"data": [{"id": "1"}], "traceId": "ok"}
+            self.assertTrue(journal.detect_partial_response(body))
+        finally:
+            journal.close()
+            td.cleanup()
+
+    def test_detect_partial_response_accepts_settlement_body(self):
+        journal, td = self._make_journal()
+        try:
+            body = {"elements": [{"id": "1"}], "pagination": {}}
+            self.assertTrue(journal.detect_partial_response(body))
+        finally:
+            journal.close()
+            td.cleanup()
+
+    def test_readback_conflict_is_not_contract_quarantine(self):
+        """ReadBackConflict must be distinct from ContractQuarantine."""
+        from packages.store_core.channel_order_contracts import ContractQuarantine
+        self.assertFalse(issubclass(ReadBackConflict, ContractQuarantine))
+        self.assertTrue(issubclass(ReadBackConflict, ValueError))
 
 
 if __name__ == "__main__":

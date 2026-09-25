@@ -18,7 +18,7 @@ class B02CatalogTests(unittest.TestCase):
     def tearDown(self):
         self.repo.close(); self.temp.cleanup()
 
-    def test_source_canonical_lineage_and_local_offer_are_durable(self):
+    def test_source_canonical_lineage_and_local_offer_are_durable(self):  # B02-01
         batch, replay = self.app.ingest_demo_catalog(self.ctx, "supplier", self.rows, "catalog-1")
         self.assertFalse(replay)
         snapshot = self.app.catalog_snapshots(self.ctx, batch.id)[0]
@@ -34,7 +34,7 @@ class B02CatalogTests(unittest.TestCase):
         self.assertEqual(product.id, self.repo.get_canonical_product(restored.tenant_id, product.id).id)
         self.assertEqual(1, len(self.app.channel_offers(restored, product.id)))
 
-    def test_idempotency_and_strict_rejection_happen_before_writes(self):
+    def test_idempotency_and_strict_rejection_happen_before_writes(self):  # B02-02
         batch, _ = self.app.ingest_demo_catalog(self.ctx, "supplier", self.rows, "catalog-1")
         same, replay = self.app.ingest_demo_catalog(self.ctx, "supplier", self.rows, "catalog-1")
         self.assertTrue(replay); self.assertEqual(batch.id, same.id)

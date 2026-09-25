@@ -158,3 +158,26 @@ def run_final_audit(root: Path) -> AuditReport:
         return AuditReport(stamp, items, restart, ready, None)
     except Exception as exc:  # noqa: BLE001 - fail closed with the error class
         return AuditReport(stamp, (), None, None, f"{type(exc).__name__}: {exc}"[:300])
+
+
+def main(argv: list[str] | None = None) -> int:
+    """``python -m packages.store_core.final_audit [root]``: exit 0 only when the audit is ready.
+
+    Prints the remaining gaps one per line, so a caller (the control plane's
+    milestone done check) can hand them to the next attempt.
+    """
+    import sys
+    args = sys.argv[1:] if argv is None else argv
+    report = run_final_audit(Path(args[0]) if args else Path("."))
+    print(f"ready={report.ready} gaps={len(report.gaps)}/{len(report.items)}"
+          + (f" error={report.error}" if report.error else ""))
+    for item in report.gaps:
+        detail = f" untested: {', '.join(item.untested_ids)}" if item.untested_ids else ""
+        print(f"- {item.item_id} ({item.evidence}): {', '.join(item.gaps)}{detail}")
+    if report.restart is not None and not report.restart.passed:
+        print(f"- restart: {report.restart.detail}")
+    return 0 if report.ready else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

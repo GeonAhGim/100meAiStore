@@ -14,7 +14,7 @@ class B10SafetyTests(unittest.TestCase):
 
     def tearDown(self): self.repo.close(); self.temp.cleanup()
 
-    def test_stop_scope_blocks_gateway_and_explicit_resume_recovers(self):
+    def test_stop_scope_blocks_gateway_and_explicit_resume_recovers(self):  # B10-01
         self.app.set_demo_stop(self.ctx, "connection", "channel-1", True, "incident")
         blocked = self.app.submit_demo_tool(self.ctx, actor_type="workflow", actor_id="workflow-1", tool="reconcile", target_type="channel", target_id="channel-1", input_value={}, idempotency_key="stop-1", requested_policy_version=1)
         self.assertEqual("blocked", blocked["state"]); self.assertEqual("stop_active", blocked["next_action"])
@@ -23,7 +23,7 @@ class B10SafetyTests(unittest.TestCase):
         self.assertEqual("accepted", accepted["state"])
         with self.assertRaises(ConflictError): self.app.set_demo_stop(self.ctx, "global", "wrong", True, "bad")
 
-    def test_new_path_backup_reopens_with_integrity_and_manifest(self):
+    def test_new_path_backup_reopens_with_integrity_and_manifest(self):  # B10-02
         backup = Path(self.temp.name) / "backup.sqlite3"
         manifest = self.app.backup_demo_sqlite(str(backup), self.ctx.tenant_id)
         self.assertTrue(backup.exists()); self.assertEqual(LATEST_SCHEMA_VERSION, manifest.schema_version)

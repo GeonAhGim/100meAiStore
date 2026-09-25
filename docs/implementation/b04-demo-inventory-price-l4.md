@@ -11,6 +11,14 @@ negative quantities and naive timestamps. `calculate_demo_price(selling_price,
 supply_cost, variable_cost, fee_rate)` returns the projected contribution and
 margin with a `READY`/`BLOCKED` guard; no automatic price mutation occurs.
 
+## Acceptance evidence
+
+| ID | Acceptance criterion |
+|---|---|
+| B04-01 | Inventory observations reject negative quantities and naive timestamps |
+| B04-02 | Price calculation blocks sell prices with projected margin below 10% and allows 10% or above |
+| B04-03 | Price inputs (selling_price, supply_cost, fee_rate) are validated and fail closed |
+
 Implementation evidence: `tests/store_core/test_b04_inventory_price.py` covers
 inventory validation, projected contribution, and the 10% guard. Full
 verification: `python -B -m pytest -q -p no:cacheprovider` — 100 passed on

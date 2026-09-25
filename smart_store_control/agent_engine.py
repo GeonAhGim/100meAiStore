@@ -68,7 +68,10 @@ def build_argv(exe: str, model: str, max_turns: int, settings: Path = SETTINGS_P
 
 def rule_path(path: Path) -> str:
     """C:/smart_store/packages -> //c/smart_store/packages (Claude Code's absolute-path rule form)."""
-    posix = path.resolve().as_posix()
+    raw = str(path).replace("\\", "/")
+    # A drive-letter path is already absolute; resolve() on POSIX would treat it
+    # as relative and prefix the working directory.
+    posix = raw if len(raw) > 2 and raw[1] == ":" and raw[2] == "/" else path.resolve().as_posix()
     if len(posix) > 1 and posix[1] == ":":
         posix = "/" + posix[0].lower() + posix[2:]
     return "/" + posix
@@ -103,7 +106,14 @@ def checkout_guard_settings(root: Path) -> Path:
 # Both read the prompt from stdin and edit files in the task worktree like the
 # claude-local lane; only argv, environment and output parsing differ.
 CURSOR_EXE = Path.home() / "AppData" / "Local" / "cursor-agent" / "cursor-agent.cmd"
-EXTERNAL_ENGINES = ("cursor", "gemini")
+EXTERNAL_ENGINES = ("cursor", "gemini", "claude")
+
+
+def claude_env() -> dict[str, str]:
+    """The operator's own Claude login (no proxy, no inherited ANTHROPIC_*): the paid Claude lane."""
+    env = {key: os.environ[key] for key in BASE_ENV_KEYS if key in os.environ}
+    env.update({"CLAUDE_CODE_ATTRIBUTION_HEADER": "0", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"})
+    return env
 
 
 def engine_command(engine: str, model: str, max_turns: int) -> tuple[list[str], dict[str, str], str]:
@@ -135,7 +145,25 @@ def task_prompt(task: dict) -> str:
     if instructions:
         extra = "\n\n## 운영자 추가 지시 (가장 우선한다)\n" + "\n".join(
             f"- ({i.get('at', '')}) {i.get('text', '')}" for i in instructions[-5:])
-    return template + "\n\n## task\n```json\n" + json.dumps(body, ensure_ascii=False, indent=2) + "\n```\n" + extra
+    return (template + "\n\n## task\n```json\n" + json.dumps(body, ensure_ascii=False, indent=2) + "\n```\n"
+            + diagnosis_note(task) + extra)
+
+
+def diagnosis_note(task: dict) -> str:
+    """The doctor's diagnosis of the previous failure (doctor.py), the first thing the next attempt must fix."""
+    d = task.get("diagnosis") or {}
+    if not d.get("fix"):
+        return ""
+    lines = ["", "", "## 이전 시도 실패 진단 (먼저 해결하라)", f"- 원인: {d.get('cause', '')}", f"- 조치: {d['fix']}"]
+    if d.get("errors"):
+        lines.append("- 오류: " + " | ".join(str(e) for e in d["errors"][:3]))
+    if d.get("tests"):
+        lines.append("- 실패 테스트: " + ", ".join(d["tests"][:5]))
+    if d.get("raised_at"):
+        lines.append("- 위치: " + ", ".join(d["raised_at"]))
+    if d.get("repeat"):
+        lines.append("- 주의: 같은 오류가 이미 한 번 진단됐는데 다시 났다. 이전과 다른 방법으로 고쳐라.")
+    return "\n".join(lines) + "\n"
 
 
 def worktree_note(root: Path, worktree: Path) -> str:
@@ -168,15 +196,29 @@ def worktree_diff(path: Path) -> str:
     return diff.stdout
 
 
+def run_marker(argv: list[str]) -> str | None:
+    """The smart_store-only settings file on the command line, which only this pool's agent runs carry."""
+    if "--settings" in argv[:-1]:
+        value = argv[argv.index("--settings") + 1]
+        if "smart_store" in value.replace("\\", "/") and value.endswith(".json"):
+            return value
+    return None
+
+
 def kill_agent_tree(argv: list[str]) -> None:
     """Kill every process started for this agent run.
 
     On Windows the CLI is launched through a .cmd shim; killing only the shim
     leaves the real process (claude.exe, node) running, holding the local LLM
-    slot and still able to write files. Match by the run's own settings path or
-    binary so nothing outside this run is touched.
+    slot and still able to write files. Match by the run's own settings file so
+    nothing outside this run is touched; an engine without one (cursor,
+    gemini) is left to subprocess's own kill of the shim.
     """
-    marker = next((a for a in argv if a.endswith("worker_settings_local.json") and "smart_store_control" in a), None) or argv[0]
+    marker = run_marker(argv)
+    if not marker:
+        # Never fall back to argv[0]: every Claude CLI on the machine (AIOS
+        # agents, operator sessions) shares that path, and /T /F kills them all.
+        return
     try:
         listing = subprocess.run(["powershell", "-NoProfile", "-Command",
                                   "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }"],
@@ -232,9 +274,11 @@ def run_agent(root: Path, task: dict, *, model: str, base_url: str, max_turns: i
     worktree = prepare_worktree(root, int(task["id"]))
     summary: dict = {"engine": engine, "model": model, "max_turns": max_turns}
     try:
-        if engine == "claude-local":
+        if engine in ("claude-local", "claude"):
+            # Same CLI, tools and checkout guard; claude-local talks to the local
+            # model through the AIOS proxy, claude to Anthropic on the operator's login.
             argv = build_argv(claude_executable(), model, max_turns, checkout_guard_settings(root))
-            env, kind = local_env(model, base_url), "json"
+            env, kind = (local_env(model, base_url) if engine == "claude-local" else claude_env()), "json"
         else:
             argv, env, kind = engine_command(engine, model, max_turns)
         try:

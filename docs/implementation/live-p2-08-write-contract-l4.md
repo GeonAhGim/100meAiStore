@@ -20,6 +20,14 @@ requires receiver recheck after preparation and product-description consistency
 before dispatch. Fixture evidence records an explicit review digest, not PII.
 This cannot establish that a real address or product was verified.
 
+## Acceptance evidence
+
+| ID | Acceptance criterion |
+|---|---|
+| P2-08-01 | Tracking/offer/stock/price/claim contracts with exact-ID checks, source hashes, approval digest binding tenant/connection/source/time/payload |
+| P2-08-02 | Unknown/timeout/partial/mismatched results require reconciliation, never resend; unknown results never permit retry |
+| P2-08-03 | Tests cover immutability, altered digest/context, expiry, stale source, ID mismatch, cancellation, partial results, no-network execution |
+
 Bound the first slice to a single-item, whole shipment, no split/direct delivery.
 Match exact IDs to a normalized page; stop on claims, zero quantity, stale/future
 observation or missing post-preparation review. Build immutable canonical fields

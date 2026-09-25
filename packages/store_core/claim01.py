@@ -1,11 +1,17 @@
-"""Local DEMO claim intake with independent party status checkpoints."""
+"""Local DEMO claim intake with independent party status checkpoints.
+
+Functions:
+  open_demo_claim – create a DemoClaim in OPEN state
+  record_demo_claim_status – transition a DemoClaim status per party
+  submit_partial_claim – submit a partial claim for a PENDING claim (M1.6)
+"""
 from __future__ import annotations
 
 import hashlib
 import json
 import re
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 from uuid import uuid4
 
 from .domain import (Capability, ClaimStatus, ClaimStatusObservation, DemoClaim,
@@ -59,4 +65,85 @@ def record_demo_claim_status(service: Any, context: Any, claim_id: str, status_k
         service._audit(context.tenant_id, context.user_id, "claim.status_observed", claim.id, "succeeded", {"status_kind": status_kind, "status": status, "response_digest": digest})
         service.repo.append_outbox(OutboxEvent(str(uuid4()), context.tenant_id, "claim.status_observed", claim.id,
             {"claim_id": claim.id, "status_kind": status_kind, "status": status, "response_digest": digest}, f"claim:{claim.id}:{status_kind}:{status}", OutboxState.PENDING, observed))
+        return claim, False
+
+
+def submit_partial_claim(
+    service: Any,
+    context: Any,
+    claim_id: str,
+    partial_amount_minor: int,
+    reason: str,
+) -> tuple[Any, bool]:
+    """Submit a partial claim for an existing claim (M1.6).
+
+    Rules:
+    - Only OPEN or PENDING claims can receive a partial submission
+    - partial_amount_minor must be > 0 and <= claim.amount_minor
+    - Sets consumer_status to PARTIAL_APPROVED after recording
+
+    Returns (claim, was_replay) tuple.
+    Raises ConflictError on invalid state or amount.
+    """
+    service.require(context, Capability.TENANT_ADMIN)
+    if type(partial_amount_minor) is not int or partial_amount_minor <= 0:
+        raise ConflictError("partial_amount_minor must be a positive integer")
+    if not isinstance(reason, str) or not reason.strip():
+        raise ConflictError("reason must be a non-empty string")
+
+    with service.repo.transaction():
+        claim = service.repo.get_claim(context.tenant_id, claim_id)
+        if partial_amount_minor > claim.amount_minor:
+            raise ConflictError(
+                f"partial amount {partial_amount_minor} exceeds claim {claim.amount_minor}"
+            )
+        if claim.consumer_status not in (ClaimStatus.OPEN, ClaimStatus.EVIDENCE_PENDING):
+            raise ConflictError(
+                f"cannot submit partial claim for {claim.consumer_status.value} claim"
+            )
+
+        observed = service._clock()
+        digest = _digest({
+            "claim_id": claim.id,
+            "partial_amount_minor": partial_amount_minor,
+            "reason": reason,
+        })
+
+        # Record observation for the partial claim
+        service.repo.save_claim_observation(
+            ClaimStatusObservation(
+                str(uuid4()), context.tenant_id, claim.id,
+                "consumer", ClaimStatus.PARTIAL_APPROVED, observed, digest
+            )
+        )
+
+        claim.consumer_status = ClaimStatus.PARTIAL_APPROVED
+        claim.version += 1
+        service.repo.update_claim(claim, claim.version - 1)
+
+        service._audit(
+            context.tenant_id, context.user_id, "claim.partial_submitted", claim.id,
+            "succeeded",
+            {
+                "claim_id": claim.id,
+                "partial_amount_minor": partial_amount_minor,
+                "reason": reason,
+                "response_digest": digest,
+            }
+        )
+
+        service.repo.append_outbox(
+            OutboxEvent(
+                str(uuid4()), context.tenant_id, "claim.partial_submitted", claim.id,
+                {
+                    "claim_id": claim.id,
+                    "partial_amount_minor": partial_amount_minor,
+                    "reason": reason,
+                    "response_digest": digest,
+                },
+                f"claim:{claim.id}:partial",
+                OutboxState.PENDING,
+                observed,
+            )
+        )
         return claim, False

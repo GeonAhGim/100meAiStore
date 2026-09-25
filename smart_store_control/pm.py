@@ -114,7 +114,7 @@ def status() -> dict[str, Any]:
     }
 
 
-EXTERNAL_ENGINES = ("cursor", "gemini")
+EXTERNAL_ENGINES = ("cursor", "gemini", "claude")
 IMPL_ROLE = "local-impl"  # every implementation task carries this role; any implementer lane may claim it
 
 
@@ -125,6 +125,7 @@ def lane_of(worker: str) -> str:
 
 LANE_PAUSE_SECONDS = 30 * 60
 LANE_FAULT_MARKERS = ("usage limit", "quota", "rate limit", "not trusted", "not logged in", "unauthorized",
+                      "can't reach the api server", "enotfound", "econnrefused",
                       "authentication", "429", "actionrequirederror",
                       "503", "high demand", "overloaded", "temporarily unavailable", "resource_exhausted")
 
@@ -154,6 +155,13 @@ def implementer_lanes() -> list[str]:
             if name == IMPL_ROLE or str(pool.get("engine", "")) in EXTERNAL_ENGINES]
 
 
+def claude_lane() -> str | None:
+    """The configured Claude lane (engine "claude", size > 0), or None."""
+    pools = read_json(POOLS_PATH, {}).get("pools", {})
+    return next((name for name, pool in pools.items()
+                 if pool.get("engine") == "claude" and int(pool.get("size", 0)) > 0), None)
+
+
 def claim(worker: str, role: str = "local-impl") -> dict[str, Any] | None:
     """Claim a ready implementation task for ``worker`` in lane ``role``.
 
@@ -172,7 +180,9 @@ def claim(worker: str, role: str = "local-impl") -> dict[str, Any] | None:
         if cap["effective"] <= active:
             return None
         candidates = [t for t in tasks if t.get("role") == IMPL_ROLE and t.get("status") == "ready"
-                      and (not t.get("preferred_lane") or t.get("preferred_lane") == role)]
+                      and (not t.get("preferred_lane") or t.get("preferred_lane") == role)
+                      # the doctor diagnoses a failure before the task runs again (doctor.py)
+                      and not loopguard.awaiting_diagnosis(t)]
         if not candidates:
             return None
         task = sorted(candidates, key=lambda t: (-int(t.get("priority", 0)), int(t["id"])))[0]
@@ -199,6 +209,24 @@ def finish(task_id: int, status_name: str, artifact: str = "", note: str = "") -
                     loopguard.record(task, note, "implement")
                 task.update({"status": status_name, "artifact": artifact, "note": note,
                              "phase": "finished" if status_name != "blocked" else "error",
+                             "heartbeat_at": now(), "updated_at": now()})
+                _save(data)
+                return task
+    raise KeyError(f"unknown task {task_id}")
+
+
+def release(task_id: int, note: str) -> dict[str, Any]:
+    """Hand a task back to the queue because its lane failed, not the task.
+
+    A provider quota or login fault used to finish the task as blocked, which
+    recorded the lane's fault as the task's failed attempt and replaced the
+    task's real last error in the next prompt. Nothing is charged here.
+    """
+    with _CLAIM_LOCK:
+        data = _load()
+        for task in data.get("tasks", []):
+            if str(task["id"]) == str(task_id):
+                task.update({"status": "ready", "worker": "", "phase": "lane_released", "note": note,
                              "heartbeat_at": now(), "updated_at": now()})
                 _save(data)
                 return task
@@ -257,7 +285,7 @@ def add_instruction(task_id: int, text: str) -> dict[str, Any]:
     raise KeyError(f"unknown task {task_id}")
 
 
-def operator_action(task_id: int, action: str, reason: str = "") -> dict[str, Any]:
+def operator_action(task_id: int, action: str, reason: str = "", lane: str | None = None) -> dict[str, Any]:
     """One explicit operator decision on a task, recorded in the ledger.
 
     retry:    blocked/needs_decision/planned -> ready with a fresh retry budget
@@ -265,9 +293,15 @@ def operator_action(task_id: int, action: str, reason: str = "") -> dict[str, An
     reject:   needs_decision -> blocked, retry budget spent, reason kept
     rereview: blocked with a patch artifact -> needs_review (objective gate again)
     park:     any non-active -> planned (out of the queue, nothing lost)
+
+    ``lane`` (retry only) routes the task to one implementer lane, e.g. the
+    Claude lane for work the local model could not finish.
     """
     if action not in OPERATOR_ACTIONS:
         raise ValueError(f"unknown action {action}")
+    if lane and (action != "retry" or lane not in implementer_lanes()):
+        raise ValueError(f"lane {lane} applies to retry on a configured implementer lane only")
+    withdrawn = None
     with _CLAIM_LOCK:
         data = _load()
         for task in data.get("tasks", []):
@@ -279,7 +313,13 @@ def operator_action(task_id: int, action: str, reason: str = "") -> dict[str, An
             stamp = now()
             who = f"operator: {reason}".strip(": ") if reason else "operator"
             if action == "retry":
+                # A human decided to try again: a fresh retry budget and a fresh
+                # loop-guard window, or the old history would escalate it at once.
+                withdrawn = task.get("escalation") if status == "escalated" else None
+                if lane:
+                    task["preferred_lane"] = lane
                 task.update({"status": "ready", "worker": "", "reviewer": "", "phase": "retry_queued", "retry_count": 0,
+                             "loop_guard": None, "escalation": None, "guard_reset_at": stamp,
                              "last_error": task.get("note"), "note": f"{who} requested retry", "updated_at": stamp})
             elif action == "approve":
                 if status != "needs_decision":
@@ -305,6 +345,10 @@ def operator_action(task_id: int, action: str, reason: str = "") -> dict[str, An
                 task.update({"status": "superseded", "worker": "", "reviewer": "", "phase": "superseded",
                              "note": f"{who} superseded", "updated_at": stamp})
             _save(data)
+            if withdrawn and withdrawn.get("engine") == "codex":
+                # The operator took the task back: a Codex worker started later must not redo it.
+                from .escalation import withdraw_codex  # local import: escalation imports pm
+                withdraw_codex(withdrawn, f"control: operator retried task {task_id} locally")
             return dict(task)
     raise KeyError(f"unknown task {task_id}")
 
@@ -338,7 +382,7 @@ def requeue_stale(stale_after_seconds: int = STALE_AFTER_SECONDS, note: str = "s
             next_status = "needs_review" if task.get("status") == "reviewing" else "ready"
             # A task whose holder keeps dying (it may be what kills the server)
             # must show up as a loop too, so an orphaning counts as an attempt.
-            loopguard.record(task, note, "orphaned")
+            loopguard.record(task, note, "orphaned", until=beat or None)
             task.update({"status": next_status, "worker": "", "reviewer": "", "phase": "requeued",
                          "note": note, "updated_at": now()})
             recovered.append(int(task["id"]))
@@ -384,7 +428,11 @@ def claim_review(worker: str = "local-review-1") -> dict[str, Any] | None:
         data = _load()
         tasks = data.get("tasks", [])
         cap = effective_capacity("local-impl")
-        active = sum(1 for t in tasks if t.get("status") in {"in_progress", "reviewing"})
+        # Reviews run on the local slots: count local implementations and
+        # reviews only. A task running on the Claude, cursor or gemini lane
+        # holds no local slot, and counting it stopped every review with one slot.
+        active = sum(1 for t in tasks if t.get("status") == "reviewing"
+                     or (t.get("status") == "in_progress" and lane_of(str(t.get("worker") or "")) == IMPL_ROLE))
         if cap["effective"] <= active:
             return None
         candidates = [t for t in tasks if t.get("status") == "needs_review"]

@@ -6,7 +6,7 @@ module; the API is:
 
 GET  /api/control          full snapshot (runtime, capacity, tasks, milestones, autopilot, recovery)
 GET  /api/task/<id>        one task with its artifacts (patch head, review, agent summary)
-POST /api/task/<id>/<act>  act in retry|approve|reject|rereview|park, JSON body {"reason": "..."} optional
+POST /api/task/<id>/<act>  act in retry|approve|reject|rereview|park, JSON body {"reason": "...", "lane": "..."} optional
 POST /api/handoff/grant|revoke, /api/pm/run, /api/pm/recover   (unchanged)
 """
 from __future__ import annotations
@@ -49,8 +49,33 @@ def milestone_progress(view: dict) -> dict:
         row = parents.setdefault(key, {"id": key, "total": 0, "done": 0})
         row["total"] += 1
         row["done"] += 1 if m.get("status") == "done" else 0
-    return {"total": len(items), "done": done, "percent": round(done * 100 / len(items)) if items else None,
-            "groups": sorted(parents.values(), key=lambda r: r["id"])}
+    # Build a lookup for dependency resolution
+    by_id = {str(m["id"]): m for m in items}
+
+    def _dep_labels(m: dict) -> list[str]:
+        deps = m.get("depends_on") or []
+        return [str(d) for d in deps if d in by_id and by_id[d].get("status") == "done"]
+
+    enriched = []
+    for m in items:
+        enriched.append({
+            "id": m.get("id", ""),
+            "title": m.get("title", ""),
+            "status": m.get("status", "planned"),
+            "priority": m.get("priority", 50),
+            "depends_on": m.get("depends_on") or [],
+            "satisfied_deps": _dep_labels(m),
+            "exit_criteria": m.get("exit_criteria", ""),
+        })
+    # Sort by priority (highest first), then by id for stability
+    enriched.sort(key=lambda x: (-x["priority"], x["id"]))
+    return {
+        "total": len(items),
+        "done": done,
+        "percent": round(done * 100 / len(items)) if items else None,
+        "groups": sorted(parents.values(), key=lambda r: r["id"]),
+        "items": enriched,
+    }
 
 
 def task_progress(tasks: list[dict]) -> dict:
@@ -139,7 +164,8 @@ class Handler(BaseHTTPRequestHandler):
             elif len(parts) == 5 and parts[1:3] == ["api", "task"] and parts[4] == "instruct":
                 result = add_instruction(parts[3], str(payload.get("text") or ""))
             elif len(parts) == 5 and parts[1:3] == ["api", "task"]:
-                result = operator_action(parts[3], parts[4], str(payload.get("reason") or "")[:200])
+                result = operator_action(parts[3], parts[4], str(payload.get("reason") or "")[:200],
+                                         lane=str(payload.get("lane") or "") or None)
             else:
                 self.send_error(404)
                 return

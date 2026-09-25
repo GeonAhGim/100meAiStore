@@ -19,7 +19,7 @@ class B06ApprovalTests(unittest.TestCase):
     def tearDown(self):
         self.repo.close(); self.temp.cleanup()
 
-    def test_mobile_inbox_detail_decision_and_one_decider(self):
+    def test_mobile_inbox_detail_decision_and_one_decider(self):  # B06-01
         command, approval = self.app.request_approval(self.ctx, ApprovalKind.PRODUCT, "product-1", {"sku": "sku-1", "price_minor": 1000}, "approval-1", 1, 1, ({"label": "fixture", "ref": "source-1", "observed_at": self.now.isoformat()},))
         inbox = self.app.approval_inbox(self.ctx)
         self.assertEqual(approval.id, inbox["items"][0]["approval_id"])
@@ -34,7 +34,7 @@ class B06ApprovalTests(unittest.TestCase):
         with self.assertRaises(AuthorizationError):
             self.app.decide_approval(self.ctx, approval.id, False, "second", "nonce-2")
 
-    def test_expiry_is_durable_and_changed_nonce_or_tenant_fails(self):
+    def test_expiry_is_durable_and_changed_nonce_or_tenant_fails(self):  # B06-02
         _, approval = self.app.request_approval(self.ctx, ApprovalKind.PRODUCT, "product-2", {}, "approval-2", 1, 1)
         self.now += timedelta(hours=24)
         inbox = self.app.approval_inbox(self.ctx)
@@ -46,6 +46,7 @@ class B06ApprovalTests(unittest.TestCase):
         with self.assertRaises(AuthorizationError): self.app.decide_approval(self.ctx, approval.id, True, "late", "bad nonce!")
 
     def test_three_user_inbox_and_decision_are_scoped_by_approval_kind(self):
+        # P2-09-02: Delegated approval permissions by membership/kind; auditor read-only without decision actions; expired decisions durable
         funds = self.app.add_member(self.ctx, "funds@example.test", [Role.FUNDS])
         catalog = self.app.add_member(self.ctx, "catalog@example.test", [Role.CATALOG_CS])
         _, purchase = self.app.request_approval(self.ctx, ApprovalKind.PURCHASE, "po-1", {"amount_minor": 1000}, "po-1", 1, 1)
@@ -83,7 +84,7 @@ class B06ApprovalTests(unittest.TestCase):
         with self.assertRaises(TenantBoundaryError):
             self.app.decide(foreign, approval.command_id, True, "foreign")
 
-    def test_expired_direct_decision_commits_expiry_before_raising(self):
+    def test_expired_direct_decision_commits_expiry_before_raising(self):  # B06-03
         command, approval = self.app.request_approval(self.ctx, ApprovalKind.PRODUCT, "expired", {}, "expired-direct", 1, 1)
         self.now += timedelta(hours=24)
         with self.assertRaises(ConflictError):
@@ -104,7 +105,7 @@ class B06ApprovalTests(unittest.TestCase):
             self.assertEqual(baseline, (len(self.repo.outbox_for(self.ctx.tenant_id)), len(self.repo.audits_for(self.ctx.tenant_id))))
         self.assertEqual(ApprovalState.REJECTED, self.app.decide(self.ctx, command.id, False, 'explicit rejection').state)
 
-    def test_material_preview_redacts_secrets_and_contacts_without_changing_intent(self):
+    def test_material_preview_redacts_secrets_and_contacts_without_changing_intent(self):  # B06-04
         auditor = self.app.add_member(self.ctx, "preview-auditor@example.test", [Role.AUDITOR])
         catalog = self.app.add_member(self.ctx, "preview-catalog@example.test", [Role.CATALOG_CS])
         payload = {

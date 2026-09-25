@@ -22,7 +22,7 @@ class OfflineAuthContractTest(unittest.TestCase):
                          attempts_used=1, fixture_refresh_used=False, now=self.now,
                          deadline=self.now + timedelta(seconds=30))
 
-    def test_naver_public_vector_input_and_base64_contract(self):
+    def test_naver_public_vector_input_and_base64_contract(self):  # P2-04-02
         expected = "JDJhJDEwJGFiY2RlZmdoaWprbG1ub3BxcnN0dXVCVldZSk42T0VPdEx1OFY0cDQxa2IuTnpVaUEzbmsy"
         def fixture_hash(password, salt):
             self.assertEqual(b"aaaabbbbcccc_1643961623299", password)
@@ -60,7 +60,7 @@ class OfflineAuthContractTest(unittest.TestCase):
             return base64.b64decode(expected)
         self.assertEqual(expected, naver_canonical_fixture_signature(fixture_hash).digest)
 
-    def test_rate_retry_budget_and_deadline(self):
+    def test_rate_retry_budget_and_deadline(self):  # P2-04-01
         first = plan_naver_fixture_retry(**self.args)
         self.assertEqual(("RETRY_FIXTURE_AFTER_DELAY", 2, 1), (first.action, first.next_attempt, first.delay_seconds))
         self.assertFalse(first.executes_network)
@@ -100,6 +100,66 @@ class OfflineAuthContractTest(unittest.TestCase):
             ("naver_public_fixture_bcrypt_incompatible", "coupang_requested_by_header_unresolved"),
             boundary.unresolved_reasons,
         )
+
+    def test_404_and_500_unknown_status_go_to_manual_review(self):
+        """404/500/unknown HTTP status codes must NOT trigger retry; they go to MANUAL_REVIEW."""
+        for status, body in (
+            (404, {"code": "GW.NOT_FOUND"}),
+            (500, {"code": "GW.UNRECOGNIZED"}),
+            (503, {"code": "GW.SERVICE_UNAVAILABLE"}),
+            (400, {"code": "GW.OTHER"}),
+            (499, {"code": "GW.UNKNOWN"}),
+        ):
+            args = {**self.args, "http_status": status, "body": body}
+            result = plan_naver_fixture_retry(**args)
+            self.assertEqual("MANUAL_REVIEW", result.action,
+                             f"status={status} should not retry")
+
+    def test_cursor_boundary_and_encoded_query_in_retry_flow(self):
+        """Cursor (next_token/encoded_query) must survive retry planning without leaking."""
+        # Build a plan with a large opaque cursor near the 4096 limit
+        big_cursor = "a" * 4096
+        plan = coupang_day_page_plan(tenant_ref="fixture", connection_ref="fixture",
+                                     vendor_id="fixture", start=date(2026, 9, 1),
+                                     end=date(2026, 9, 1), status="INSTRUCT",
+                                     max_per_page=50, next_token=big_cursor)
+        sig = coupang_fixture_signature(plan, at=self.now)
+        # Cursor must not appear in signature digest or repr
+        self.assertNotIn(big_cursor, repr(sig))
+        self.assertNotIn(big_cursor, sig.digest)
+        # Different cursors must produce different signatures
+        plan2 = coupang_day_page_plan(tenant_ref="fixture", connection_ref="fixture",
+                                      vendor_id="fixture", start=date(2026, 9, 1),
+                                      end=date(2026, 9, 1), status="INSTRUCT",
+                                      max_per_page=50, next_token="different_cursor")
+        sig2 = coupang_fixture_signature(plan2, at=self.now)
+        self.assertNotEqual(sig.digest, sig2.digest)
+        # Empty cursor (None) produces different digest than non-empty
+        plan3 = coupang_day_page_plan(tenant_ref="fixture", connection_ref="fixture",
+                                      vendor_id="fixture", start=date(2026, 9, 1),
+                                      end=date(2026, 9, 1), status="INSTRUCT",
+                                      max_per_page=50, next_token=None)
+        sig3 = coupang_fixture_signature(plan3, at=self.now)
+        self.assertNotEqual(sig.digest, sig3.digest)
+
+    def test_retry_budget_validation_edge_cases(self):
+        """Retry budget must reject invalid inputs and enforce stop conditions."""
+        args = {**self.args, "http_status": 429, "body": {"code": "GW.RATE_LIMIT"}}
+        # attempts_used=0 should fail
+        with self.assertRaises(ContractQuarantine):
+            plan_naver_fixture_retry(**{**args, "attempts_used": 0})
+        # attempts_used=3 (max) should STOP
+        result = plan_naver_fixture_retry(**{**args, "attempts_used": 3})
+        self.assertEqual("STOP", result.action)
+        # max_attempts=0 should fail
+        with self.assertRaises(ContractQuarantine):
+            plan_naver_fixture_retry(**{**args, "max_attempts": 0})
+        # method != GET should STOP
+        result = plan_naver_fixture_retry(**{**args, "method": "POST"})
+        self.assertEqual("STOP", result.action)
+        # Deadline already passed should STOP
+        result = plan_naver_fixture_retry(**{**args, "now": self.now + timedelta(hours=1)})
+        self.assertEqual("STOP", result.action)
 
 
 if __name__ == "__main__":

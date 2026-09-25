@@ -123,7 +123,7 @@ class OrderRoutingTests(unittest.TestCase):
         })
         return order, pos[0]
 
-    def test_order08_pending_cancel_is_cas_and_cancels_pending_po(self):
+    def test_order08_pending_cancel_is_cas_and_cancels_pending_po(self):  # B05-01
         order, po = self.routed_order()
         cancelled, replay = self.app.request_demo_cancel(self.ctx, order.id, "customer request", 2)
         self.assertFalse(replay)
@@ -132,7 +132,7 @@ class OrderRoutingTests(unittest.TestCase):
         same, replay = self.app.request_demo_cancel(self.ctx, order.id, "replay", 999)
         self.assertTrue(replay); self.assertEqual(cancelled.id, same.id)
 
-    def test_order09_submitted_cancel_keeps_evidence_and_requests_compensation(self):
+    def test_order09_submitted_cancel_keeps_evidence_and_requests_compensation(self):  # B05-02
         order, po = self.routed_order()
         self.app.approve_demo_po(self.ctx, po.id, True, "approve")
         self.app.submit_demo_po(self.ctx, po.id)
@@ -140,7 +140,7 @@ class OrderRoutingTests(unittest.TestCase):
         self.assertEqual(PurchaseOrderState.CANCEL_REQUESTED, self.app.purchase_orders(self.ctx, order.id)[0].status)
         self.assertTrue(any(event.topic == "purchase_order.cancel_requested" for event in self.repo.outbox_for(self.ctx.tenant_id)))
 
-    def test_order10_tracking_is_line_level_and_corrected_status_is_append_only(self):
+    def test_order10_tracking_is_line_level_and_corrected_status_is_append_only(self):  # B05-03
         order, _ = self.routed_order()
         line = self.app.order_lines(self.ctx, order.id)[0]
         first, replay = self.app.ingest_demo_tracking(self.ctx, line.id, "track-1", "IN_TRANSIT")
@@ -315,6 +315,277 @@ class OrderRoutingTests(unittest.TestCase):
         self.assertEqual(("ack-9", acknowledged.last_response_digest), (cancelled.provider_reference, cancelled.last_response_digest))
         self.assertEqual(PurchaseOrderState.CANCELLED, self.po(order.id, "supplier-b").status)  # never submitted
         self.assertEqual(1, sum(event.topic == "purchase_order.cancel_requested" for event in self.repo.outbox_for(self.ctx.tenant_id)))
+
+
+class OrderToPurchaseOrderE2ETests(unittest.TestCase):
+    """End-to-end DEMO order-to-PO flow with negative checks.
+
+    Covers: ingest → route → approve → submit → reconcile → tracking/cancel.
+    """
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.path = Path(self.temp.name) / "e2e.sqlite3"
+        self.repo = SQLiteRepository(self.path)
+        self.app = StoreControlPlane(self.repo)
+        self.ctx = self.app.bootstrap_tenant("E2E", "e2e@example.test")
+        self.app.register_adapter_manifest(self.ctx, AdapterCapabilityManifest(
+            self.ctx.tenant_id, "demo", "orders", "demo-v1",
+            frozenset({AdapterCapability.ORDERS_READ, AdapterCapability.INBOUND_EVENTS}),
+            frozenset({1}), datetime.now(timezone.utc)))
+
+    def tearDown(self):
+        self.repo.close()
+        self.temp.cleanup()
+
+    def _ingest_and_route(self):
+        """Helper: ingest a 2-line order and route to a single supplier."""
+        row = {"external_order_id": "e2e-1", "event_id": "e2e-evt-1", "revision": 1,
+               "currency": "KRW", "total_minor": 5000,
+               "lines": [{"sku": "SKU-A", "quantity": 2, "unit_minor": 2000},
+                         {"sku": "SKU-B", "quantity": 1, "unit_minor": 1000}]}
+        result = self.app.poll_demo_connection(self.ctx, "demo", "orders", 0,
+            FixtureDemoReadAdapter([DemoPage((row,), None, False, datetime.now(timezone.utc))], adapter_version="demo-v1"))
+        payload_ref = result.payload_refs[0]
+        order, _ = self.app.ingest_order(self.ctx, "demo-channel", payload_ref)
+        pos = self.app.propose_routing(self.ctx, order.id, {
+            "SKU-A": [{"supplier_id": "SUP-1", "unit_cost_minor": 1000, "available_quantity": 2}],
+            "SKU-B": [{"supplier_id": "SUP-1", "unit_cost_minor": 500, "available_quantity": 1}],
+        })
+        return order, pos[0]
+
+    def test_e2e_happy_path_ingest_route_approve_submit_reconcile(self):
+        """Full happy path: order accepted → PO approved → submitted → ACKNOWLEDGED."""
+        order, po = self._ingest_and_route()
+        # Refresh order: routing bumps status to PO_PENDING and version to 2
+        order = self.app.order(self.ctx, order.id)
+        self.assertEqual(ChannelOrderState.PO_PENDING, order.status)
+        self.assertEqual(PurchaseOrderState.APPROVAL_PENDING, po.status)
+
+        # Approve the PO
+        approved = self.app.approve_demo_po(self.ctx, po.id, True, "e2e approve")
+        self.assertEqual(PurchaseOrderState.APPROVED, approved.status)
+
+        # Submit the PO
+        submitted = self.app.submit_demo_po(self.ctx, approved.id)
+        self.assertEqual(PurchaseOrderState.SUBMITTED, submitted.status)
+
+        # Reconcile with ACKNOWLEDGED (fixed timestamp for idempotency)
+        now = datetime.now(timezone.utc)
+        acknowledged, replay = self.app.reconcile_demo_po(self.ctx, submitted.id, {
+            "status": "ACKNOWLEDGED", "provider_reference": "SUP-REF-1",
+            "observed_at": now,
+        })
+        self.assertFalse(replay)
+        self.assertEqual(PurchaseOrderState.ACKNOWLEDGED, acknowledged.status)
+        self.assertEqual("SUP-REF-1", acknowledged.provider_reference)
+
+        # Replay with same data returns same PO (idempotent)
+        same, replay2 = self.app.reconcile_demo_po(self.ctx, submitted.id, {
+            "status": "ACKNOWLEDGED", "provider_reference": "SUP-REF-1",
+            "observed_at": now,
+        })
+        self.assertTrue(replay2)
+        self.assertEqual(acknowledged.id, same.id)
+
+    def test_e2e_rejected_po_becomes_exception(self):
+        """REJECTED response should set PO status to EXCEPTION."""
+        order, po = self._ingest_and_route()
+        approved = self.app.approve_demo_po(self.ctx, po.id, True, "approve")
+        submitted = self.app.submit_demo_po(self.ctx, approved.id)
+
+        rejected, _ = self.app.reconcile_demo_po(self.ctx, submitted.id, {
+            "status": "REJECTED", "provider_reference": "SUP-REJ-1",
+            "observed_at": datetime.now(timezone.utc),
+        })
+        self.assertEqual(PurchaseOrderState.EXCEPTION, rejected.status)
+        self.assertEqual("SUP-REJ-1", rejected.provider_reference)
+
+        # Cannot reconcile again with different reference (evidence conflict)
+        with self.assertRaises(ConflictError):
+            self.app.reconcile_demo_po(self.ctx, submitted.id, {
+                "status": "ACKNOWLEDGED", "provider_reference": "SUP-NEW-1",
+                "observed_at": datetime.now(timezone.utc),
+            })
+
+    def test_e2e_tracking_in_transit_then_delivered(self):
+        """Tracking observations can advance from IN_TRANSIT to DELIVERED."""
+        order, po = self._ingest_and_route()
+        approved = self.app.approve_demo_po(self.ctx, po.id, True, "approve")
+        submitted = self.app.submit_demo_po(self.ctx, approved.id)
+        acknowledged, _ = self.app.reconcile_demo_po(self.ctx, submitted.id, {
+            "status": "ACKNOWLEDGED", "provider_reference": "TRACK-1",
+            "observed_at": datetime.now(timezone.utc),
+        })
+
+        # Get an order line to track
+        lines = self.app.order_lines(self.ctx, order.id)
+        line = lines[0]
+
+        # Track IN_TRANSIT
+        now = datetime.now(timezone.utc)
+        tracked, _ = self.app.ingest_demo_tracking(self.ctx, line.id, "TRACK-1",
+                                                      "IN_TRANSIT", now)
+        self.assertFalse(_)
+        self.assertEqual("IN_TRANSIT", tracked.tracking_status)
+
+        # Track DELIVERED (append-only)
+        delivered, _ = self.app.ingest_demo_tracking(self.ctx, line.id, "TRACK-1",
+                                                        "DELIVERED", now)
+        self.assertFalse(_)
+        self.assertEqual("DELIVERED", delivered.tracking_status)
+
+        # Replay DELIVERED is idempotent
+        delivered_replay, replay = self.app.ingest_demo_tracking(self.ctx, line.id, "TRACK-1",
+                                                                    "DELIVERED", now)
+        self.assertTrue(replay)
+        self.assertEqual("DELIVERED", delivered_replay.tracking_status)
+
+    def test_e2e_cancel_after_submit_becomes_cancel_requested_on_po(self):
+        """Cancelling an order after PO submit should set PO to CANCEL_REQUESTED."""
+        order, po = self._ingest_and_route()
+        approved = self.app.approve_demo_po(self.ctx, po.id, True, "approve")
+        submitted = self.app.submit_demo_po(self.ctx, approved.id)
+
+        # Order is still PO_PENDING (submit doesn't change order status)
+        self.assertEqual(PurchaseOrderState.SUBMITTED, submitted.status)
+
+        # Refresh order to get current version (routing bumped it to 2)
+        order = self.app.order(self.ctx, order.id)
+        self.assertEqual(ChannelOrderState.PO_PENDING, order.status)
+
+        # Cancel the order (version must match current)
+        cancelled, is_replay = self.app.request_demo_cancel(self.ctx, order.id,
+                                                             "buyer changed mind", order.version)
+        self.assertFalse(is_replay)
+        self.assertEqual(ChannelOrderState.CANCELLED, cancelled.status)
+
+        # PO should now be CANCEL_REQUESTED
+        pos = self.app.purchase_orders(self.ctx, order.id)
+        self.assertEqual(1, len(pos))
+        self.assertEqual(PurchaseOrderState.CANCEL_REQUESTED, pos[0].status)
+
+    def test_e2e_submit_without_approval_raises(self):
+        """Submitting a PO that has not been approved must raise ConflictError."""
+        order, po = self._ingest_and_route()
+        # Skip approval, go straight to submit
+        with self.assertRaises(ConflictError):
+            self.app.submit_demo_po(self.ctx, po.id)
+        # PO remains APPROVAL_PENDING
+        self.assertEqual(PurchaseOrderState.APPROVAL_PENDING,
+                         self.app.purchase_orders(self.ctx, order.id)[0].status)
+
+    def test_e2e_approve_after_order_cancelled_raises(self):
+        """Approving a PO after the order is cancelled must raise ConflictError."""
+        order, po = self._ingest_and_route()
+        # Refresh order: routing bumps status to PO_PENDING and version
+        order = self.app.order(self.ctx, order.id)
+        self.assertEqual(ChannelOrderState.PO_PENDING, order.status)
+
+        # Cancel the order first
+        self.app.request_demo_cancel(self.ctx, order.id, "stale order", order.version)
+        self.assertEqual(ChannelOrderState.CANCELLED, self.app.order(self.ctx, order.id).status)
+
+        # PO is now CANCELLED too (was APPROVAL_PENDING)
+        pos = self.app.purchase_orders(self.ctx, order.id)
+        self.assertEqual(PurchaseOrderState.CANCELLED, pos[0].status)
+
+        # Approving a cancelled PO should fail
+        with self.assertRaises(ConflictError):
+            self.app.approve_demo_po(self.ctx, po.id, True, "too late")
+
+    def test_e2e_unknown_response_does_not_change_status(self):
+        """UNKNOWN response should leave PO status as SUBMITTED (no state change)."""
+        order, po = self._ingest_and_route()
+        approved = self.app.approve_demo_po(self.ctx, po.id, True, "approve")
+        submitted = self.app.submit_demo_po(self.ctx, approved.id)
+        self.assertEqual(PurchaseOrderState.SUBMITTED, submitted.status)
+
+        unknown, _ = self.app.reconcile_demo_po(self.ctx, submitted.id, {
+            "status": "UNKNOWN",
+            "observed_at": datetime.now(timezone.utc),
+        })
+        # UNKNOWN does not change status, no digest recorded
+        self.assertEqual(PurchaseOrderState.SUBMITTED, unknown.status)
+        self.assertIsNone(unknown.last_response_digest)
+
+
+class OrderToPurchaseOrderNegativeTests(unittest.TestCase):
+    """Negative tests for edge cases in the order-to-PO flow."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.path = Path(self.temp.name) / "neg.sqlite3"
+        self.repo = SQLiteRepository(self.path)
+        self.app = StoreControlPlane(self.repo)
+        self.ctx = self.app.bootstrap_tenant("NEG", "neg@example.test")
+        self.app.register_adapter_manifest(self.ctx, AdapterCapabilityManifest(
+            self.ctx.tenant_id, "demo", "orders", "demo-v1",
+            frozenset({AdapterCapability.ORDERS_READ, AdapterCapability.INBOUND_EVENTS}),
+            frozenset({1}), datetime.now(timezone.utc)))
+
+    def tearDown(self):
+        self.repo.close()
+        self.temp.cleanup()
+
+    def test_submit_po_from_different_tenant_raises(self):
+        """A PO from tenant A cannot be submitted by tenant B."""
+        tenant_a = self.app.bootstrap_tenant("TenantA", "a@example.test")
+        self.app.register_adapter_manifest(tenant_a, AdapterCapabilityManifest(
+            tenant_a.tenant_id, "demo", "orders", "demo-v1",
+            frozenset({AdapterCapability.ORDERS_READ, AdapterCapability.INBOUND_EVENTS}),
+            frozenset({1}), datetime.now(timezone.utc)))
+        row = {"external_order_id": "neg-1", "event_id": "neg-evt-1", "revision": 1,
+               "currency": "KRW", "total_minor": 1000,
+               "lines": [{"sku": "SKU-X", "quantity": 1, "unit_minor": 1000}]}
+        result = self.app.poll_demo_connection(tenant_a, "demo", "orders", 0,
+            FixtureDemoReadAdapter([DemoPage((row,), None, False, datetime.now(timezone.utc))], adapter_version="demo-v1"))
+        order, _ = self.app.ingest_order(tenant_a, "ch", result.payload_refs[0])
+        pos = self.app.propose_routing(tenant_a, order.id, {
+            "SKU-X": [{"supplier_id": "S1", "unit_cost_minor": 500, "available_quantity": 1}],
+        })
+        approved = self.app.approve_demo_po(tenant_a, pos[0].id, True, "approve")
+
+        # Tenant B tries to submit tenant A's PO
+        tenant_b = self.app.bootstrap_tenant("TenantB", "b@example.test")
+        with self.assertRaises(Exception):
+            self.app.submit_demo_po(tenant_b, approved.id)
+
+    def test_reconcile_unsubmitted_po_raises(self):
+        """Reconciling a PO that hasn't been submitted must raise ConflictError."""
+        tenant = self.app.bootstrap_tenant("NegRej", "nr@example.test")
+        self.app.register_adapter_manifest(tenant, AdapterCapabilityManifest(
+            tenant.tenant_id, "demo", "orders", "demo-v1",
+            frozenset({AdapterCapability.ORDERS_READ, AdapterCapability.INBOUND_EVENTS}),
+            frozenset({1}), datetime.now(timezone.utc)))
+        row = {"external_order_id": "nr-1", "event_id": "nr-evt-1", "revision": 1,
+               "currency": "KRW", "total_minor": 500,
+               "lines": [{"sku": "SKU-R", "quantity": 1, "unit_minor": 500}]}
+        result = self.app.poll_demo_connection(tenant, "demo", "orders", 0,
+            FixtureDemoReadAdapter([DemoPage((row,), None, False, datetime.now(timezone.utc))], adapter_version="demo-v1"))
+        order, _ = self.app.ingest_order(tenant, "ch", result.payload_refs[0])
+        pos = self.app.propose_routing(tenant, order.id, {
+            "SKU-R": [{"supplier_id": "S1", "unit_cost_minor": 200, "available_quantity": 1}],
+        })
+        # Skip approval and submission — try to reconcile directly
+        with self.assertRaises(ConflictError):
+            self.app.reconcile_demo_po(tenant, pos[0].id, {
+                "status": "ACKNOWLEDGED", "observed_at": datetime.now(timezone.utc),
+            })
+
+    def test_tracking_on_unrouted_line_raises(self):
+        """Tracking an order line that hasn't been routed must raise ConflictError."""
+        row = {"external_order_id": "tr-1", "event_id": "tr-evt-1", "revision": 1,
+               "currency": "KRW", "total_minor": 100,
+               "lines": [{"sku": "SKU-T", "quantity": 1, "unit_minor": 100}]}
+        result = self.app.poll_demo_connection(self.ctx, "demo", "orders", 0,
+            FixtureDemoReadAdapter([DemoPage((row,), None, False, datetime.now(timezone.utc))], adapter_version="demo-v1"))
+        order, _ = self.app.ingest_order(self.ctx, "ch", result.payload_refs[0])
+        # Do not route — just ingest
+        lines = self.app.order_lines(self.ctx, order.id)
+        with self.assertRaises(ConflictError):
+            self.app.ingest_demo_tracking(self.ctx, lines[0].id, "TRACK-1",
+                                           "IN_TRANSIT", datetime.now(timezone.utc))
 
 
 if __name__ == "__main__": unittest.main()

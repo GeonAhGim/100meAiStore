@@ -9,13 +9,13 @@ import threading
 import time
 from pathlib import Path
 
-from .agent_engine import run_agent
+from .agent_engine import diagnosis_note, run_agent
 from .context import check_patch, file_tree, rewrite_violation
 from .filepatch import SYSTEM, build_patch, looks_like_refusal, parse_files, parse_plan, plan_prompt, write_prompt
 from contextlib import nullcontext
 
 from .local_llm import LOCAL_LLM_GATE, complete
-from .pm import EXTERNAL_ENGINES, POOLS_PATH, claim, finish, heartbeat_loop, lane_fault, lane_of, pause_lane, touch
+from .pm import EXTERNAL_ENGINES, POOLS_PATH, claim, finish, heartbeat_loop, lane_fault, lane_of, pause_lane, release, touch
 from .state import CONTROL_DIR, read_json
 
 PROJECT_ROOT = CONTROL_DIR.parents[1]
@@ -24,6 +24,24 @@ PROJECT_ROOT = CONTROL_DIR.parents[1]
 def extract_patch(text: str) -> str:
     match = re.search(r"```(?:diff|patch)?\s*\n(.*?)```", text, re.DOTALL | re.IGNORECASE)
     return (match.group(1) if match else text).strip() + "\n"
+
+
+_DIFF_FILE = re.compile(r"^diff --git a/(\S+) b/(\S+)$", re.MULTILINE)
+
+
+def report_only_patch(diff: str) -> str | None:
+    """A reason to reject a patch that only adds a completion report, else None.
+
+    A done claim with no work behind it needs a verified reason (AIOS fleet:
+    noop_reason). M4.7 landed as a single root-level report saying "no gaps"
+    while the audit it cited still failed 20 of 24 items.
+    """
+    files = [b for _, b in _DIFF_FILE.findall(diff)]
+    if files and all(f.lower().endswith(".md") and "/" not in f for f in files):
+        return ("report-only patch rejected: it adds only " + ", ".join(files)[:120]
+                + " at the repository root and changes no code, test or evidence document; "
+                  "a completion claim must be backed by the checks it names")
+    return None
 
 
 def run_once(worker: str, apply_patch: bool = False) -> dict:
@@ -41,6 +59,8 @@ def run_once(worker: str, apply_patch: bool = False) -> dict:
         review = task.get("review_artifact")
         if review and Path(str(review)).is_file():
             feedback = (feedback or "") + "\n" + Path(str(review)).read_text(encoding="utf-8", errors="replace")[:1500]
+    if diagnosis_note(task):
+        feedback = diagnosis_note(task).strip() + "\n\n" + (feedback or "")
     try:
         stop = threading.Event()
         threading.Thread(target=heartbeat_loop, args=(stop, task["id"], worker, "llm_request"), daemon=True).start()
@@ -51,8 +71,8 @@ def run_once(worker: str, apply_patch: bool = False) -> dict:
         engine = str(llm.get("engine", "claude-local"))
         model = str(llm.get("model", "qwen3.6-35b-a3b"))
         if str(lane_pool.get("engine", "")) in EXTERNAL_ENGINES:
-            # cursor / gemini spare-capacity lane: same worktree-and-diff flow,
-            # different CLI; the pool entry names the engine and optional model.
+            # cursor / gemini / claude lane: same worktree-and-diff flow, its
+            # own CLI or account; the pool entry names the engine and model.
             engine, model = str(lane_pool["engine"]), str(lane_pool.get("model") or "")
 
         if engine in ("claude-local", *EXTERNAL_ENGINES):
@@ -66,7 +86,7 @@ def run_once(worker: str, apply_patch: bool = False) -> dict:
             gate = LOCAL_LLM_GATE if engine == "claude-local" else nullcontext()
             with gate:
                 diff, summary = run_agent(PROJECT_ROOT, task, model=model, base_url=endpoint,
-                                          max_turns=int(llm.get("max_turns", 45)),
+                                          max_turns=int(lane_pool.get("max_turns", llm.get("max_turns", 45))),
                                           wall_seconds=int(lane_pool.get("wall_seconds", llm.get("wall_seconds", 1500))),
                                           artifact_dir=artifact.parent, engine=engine)
             if summary.get("stray_edits"):
@@ -80,13 +100,17 @@ def run_once(worker: str, apply_patch: bool = False) -> dict:
                 until = pause_lane(lane, f"{engine}: wall clock {summary.get('wall_seconds')}s exceeded (congested)", seconds=10 * 60)
                 stop.set()
                 return finish(task["id"], "blocked", note=f"lane paused until {until}: {engine} wall clock exceeded, model congested")
-            if engine in EXTERNAL_ENGINES and not diff.strip():
+            # Claude reports failure structurally; its normal result text can name
+            # "authentication" or "429" as subject matter. Only an error run is a
+            # lane fault (AIOS fleet 2026-09-24: a phrase match paused a healthy lane).
+            errored = engine != "claude" or bool(summary.get("is_error")) or summary.get("returncode") not in (0, None)
+            if engine in EXTERNAL_ENGINES and not diff.strip() and errored:
                 fault = lane_fault(str(summary.get("result", "")) + " " + str(summary.get("stderr", "")))
                 if fault:
                     # Provider quota, login or trust problem: the lane, not the task.
                     until = pause_lane(lane, f"{engine}: {fault}")
                     stop.set()
-                    return finish(task["id"], "blocked", note=f"lane paused until {until}: {engine} {fault}")
+                    return release(task["id"], f"lane paused until {until}: {engine} {fault}; task returned to the queue")
             if not diff.strip():
                 stop.set()
                 reason = summary.get("result") or summary.get("stderr") or "agent produced no change"
@@ -99,6 +123,10 @@ def run_once(worker: str, apply_patch: bool = False) -> dict:
             # Bytes, not text: Path.write_text would turn the diff's LF into
             # CRLF on Windows and git apply would then reject every hunk.
             artifact.write_bytes(diff.encode("utf-8"))
+            report_only = report_only_patch(diff)
+            if report_only:
+                stop.set()
+                return finish(task["id"], "blocked", str(artifact), report_only)
             rewrite = rewrite_violation(PROJECT_ROOT, artifact)
             if rewrite:
                 stop.set()

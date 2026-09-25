@@ -6,7 +6,9 @@ from packages.store_core import SQLiteRepository, StoreControlPlane, evaluate_de
 
 
 class B11ReadinessTests(unittest.TestCase):
-    def test_evaluator_is_fail_closed_without_external_gates(self):
+    def test_evaluator_is_fail_closed_without_external_gates(self):  # B11-01, B11-03
+        # B11-01: Stage evaluator enforces fail-closed mode
+        # B11-03: Promotion requires external-contract review, legal/retention decisions, operator exit record; absence is safe hold
         temp = tempfile.TemporaryDirectory(); repo = SQLiteRepository(Path(temp.name) / "readiness.sqlite3")
         try:
             result = evaluate_demo_readiness(repo, live_authorized=True)
@@ -19,7 +21,7 @@ class B11ReadinessTests(unittest.TestCase):
         finally:
             repo.close(); temp.cleanup()
 
-    def test_each_missing_false_or_non_boolean_gate_blocks_dependents(self):
+    def test_each_missing_false_or_non_boolean_gate_blocks_dependents(self):  # B11-01
         class ReadyStorage:
             def readiness(self):
                 return {"ready": True}
@@ -37,7 +39,7 @@ class B11ReadinessTests(unittest.TestCase):
             del missing[key]
             self.assertFalse(evaluate_demo_readiness(repo, evidence=missing)["stages"]["bounded"])
 
-    def test_storage_and_evidence_shape_fail_closed(self):
+    def test_storage_and_evidence_shape_fail_closed(self):  # B11-02
         class UntrustedStorage:
             def readiness(self):
                 return {"ready": "false"}

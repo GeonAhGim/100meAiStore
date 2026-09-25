@@ -9,8 +9,8 @@ from datetime import datetime, timezone
 from .land import land_reviewed
 from .triage import run_triage
 from .pm import ensure_workflow_tasks, requeue_blocked, status as pm_status
-from .recovery import current as recovery_status, start as start_recovery
-from .state import CONTROL_DIR, grant_handoff, read_json, write_json
+from .recovery import current as recovery_status, dispatch, start as start_recovery, start_doctor, start_integrator
+from .state import CONTROL_DIR, grant_handoff, read_json
 
 _STOP = threading.Event()
 _THREAD: threading.Thread | None = None
@@ -50,10 +50,17 @@ def tick() -> dict:
     queued = []
     reopened = []
     landed = land_reviewed()
+    # Landed work reaches main (full suite on the merge first) and completes its
+    # milestone; without this the milestone graph never advanced and the pool idled.
+    # In its own thread: the suite takes minutes and, run inline, it held this
+    # tick, so no slot was refilled while a merge was being tested.
+    start_integrator()
     triaged = run_triage()  # self-throttled to every 10 minutes
     if landed or triaged.get("actions"):
         pm = pm_status()
-    if not any(task.get("status") in {"ready", "needs_review", "in_progress", "reviewing"} for task in pm["tasks"]):
+    # Retry blocked work whenever the queue has nothing ready, not only when every
+    # slot is idle: one long run no longer holds the other slots empty.
+    if not any(task.get("status") in {"ready", "needs_review"} for task in pm["tasks"]):
         reopened = requeue_blocked(limit=2)
         if reopened:
             pm = pm_status()
@@ -65,6 +72,8 @@ def tick() -> dict:
         queued = ensure_workflow_tasks(limit=max(1, lane_capacity - ready_count))
         if queued:
             pm = pm_status()
+    # A failed attempt is diagnosed before its task runs again (doctor.py).
+    start_doctor()
     recovery = recovery_status()
     if recovery.get("status") in {"diagnosing", "running"}:
         recovery_updated = _parse(recovery.get("updated_at") or recovery.get("started_at"))
@@ -75,27 +84,19 @@ def tick() -> dict:
         recovery = {"status": "stale"}
     running = [task for task in pm["tasks"] if task.get("status") in {"in_progress", "reviewing"}]
     stale_running = [task for task in running if task.get("health") == "stale"]
-    if running and not stale_running:
-        return {"action": "waiting", "reason": "worker active", "tasks": [task["id"] for task in running]}
     if stale_running:
         result = start_recovery()
         return {"action": "stale-recovery", "result": result, "tasks": [task["id"] for task in stale_running]}
-    review_pending = int(pm.get("review_pending", 0))
     ready = [task for task in pm["tasks"] if task.get("status") in {"ready", "needs_review"}]
-    last = _parse(config.get("last_started_at"))
-    cooldown = int(config.get("cooldown_seconds", 1800))
-    # A review queue is actionable work, not a repeated diagnostic storm. Keep
-    # draining it one item at a time even while the normal PM cooldown is active.
-    if not review_pending and not ready and not queued and last and (_now() - last).total_seconds() < cooldown:
-        return {"action": "cooldown", "until_seconds": cooldown - int((_now() - last).total_seconds())}
-    has_stale_worker = any(task.get("health") == "stale" for task in pm["tasks"])
-    if not ready and not has_stale_worker:
+    if not ready:
+        if running:
+            return {"action": "waiting", "reason": "worker active", "tasks": [task["id"] for task in running]}
         return {"action": "idle", "reason": "no eligible milestone or warning", "queued": queued, "reopened": [task["id"] for task in reopened]}
-    result = start_recovery()
-    if result.get("status") in {"diagnosing", "running"}:
-        config["last_started_at"] = _now().isoformat().replace("+00:00", "Z")
-        write_json(CONTROL_DIR / "autopilot.json", config)
-    return {"action": "recovery", "result": result, "queued": [task["id"] for task in queued], "reopened": [task["id"] for task in reopened]}
+    # Fill every free slot now. Dispatch makes no model call, so it needs no
+    # cooldown; the model diagnosis stays with stale recovery.
+    started = dispatch()
+    return {"action": "dispatch", "started": started, "queued": [task["id"] for task in queued],
+            "reopened": [task["id"] for task in reopened]}
 
 
 def _loop() -> None:

@@ -45,6 +45,9 @@ class OfflineTrackingContractTest(unittest.TestCase):
              "resultCode": "OK", "retryRequired": False}]}}
 
     def test_fixture_roundtrip_never_authorizes_real_write(self):
+        # P2-08-01: Tracking/offer/stock/price/claim contracts with exact-ID checks, source hashes, approval digest binding tenant/connection/source/time/payload
+        # P2-08-02: Unknown/timeout/partial/mismatched results require reconciliation, never resend; unknown results never permit retry
+        # P2-08-03: Tests cover immutability, altered digest/context, expiry, stale source, ID mismatch, cancellation, partial results, no-network execution
         with patch("socket.socket", side_effect=AssertionError("network prohibited")):
             plan = self.build()
             self.assertEqual("FIXTURE_REVIEW_ONLY", self.verify(plan))

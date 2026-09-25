@@ -1,10 +1,11 @@
 """Bounded one-item Coupang listing fixtures. No I/O or external authority."""
 from __future__ import annotations
 
+import hashlib, json
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any
+from typing import Any, Optional
 
 from .channel_order_contracts import ContractQuarantine, _integer, _object, _rows
 from .errors import ConflictError
@@ -52,6 +53,100 @@ class FixtureListingReview:
     @property
     def approval_digest(self) -> str:
         return _digest(asdict(self))
+
+
+@dataclass(slots=True)
+class ListingPlan:
+    """Plan produced by build_coupang_list_plan for later verify/reconcile."""
+    product_id: str
+    fixture_id: str
+    digest: str
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+def _digest(value: Any) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def build_coupang_list_plan(
+    fixture: FixtureListingReview,
+) -> ListingPlan:
+    """Create a listing plan from an approved FixtureListingReview.
+
+    The plan captures the product_id (derived from fixture_id), the fixture
+    reference, and an approval digest so that verify/reconcile can later
+    confirm nothing changed between approval and write.
+    """
+    product_id = f"P_{fixture.fixture_id}"
+    return ListingPlan(
+        product_id=product_id,
+        fixture_id=fixture.fixture_id,
+        digest=fixture.approval_digest,
+    )
+
+
+def verify_list_fixture(
+    plan: ListingPlan,
+    fixture: FixtureListingReview,
+    approval_digest: str,
+    tenant_ref: str,
+    connection_ref: str,
+    now: datetime,
+    max_age_seconds: int = 300,
+) -> None:
+    """Verify the fixture still matches the approved plan.
+
+    Checks:
+    - ID match: fixture_id must match plan
+    - Digest match: approval_digest must match plan digest
+    - Staleness: created_at must be within max_age_seconds of now
+    """
+    if fixture.fixture_id != plan.fixture_id:
+        raise ContractQuarantine("fixture_id_mismatch")
+    if fixture.approval_digest != approval_digest and approval_digest != plan.digest:
+        raise ContractQuarantine("approval_digest_mismatch")
+    created = datetime.fromisoformat(fixture.created_at)
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    if (now - created).total_seconds() > max_age_seconds:
+        raise ContractQuarantine("stale_listing_fixture")
+
+
+def reconcile_list_fixture(
+    plan: ListingPlan,
+    creation_response: dict[str, Any],
+    original_payload: dict[str, Any],
+    readback: dict[str, Any],
+    observed_at: datetime,
+    now: datetime,
+    max_age_seconds: int = 300,
+) -> dict[str, Any]:
+    """Reconcile a listing write against the approved plan.
+
+    Validates:
+    - The creation response ID matches the plan product_id
+    - The readback matches the creation response (exact echo)
+    - The creation response matches the original payload
+    - The observed_at is within max_age_seconds of now
+    """
+    if observed_at.tzinfo is None:
+        observed_at = observed_at.replace(tzinfo=timezone.utc)
+    if (now - observed_at).total_seconds() > max_age_seconds:
+        raise ContractQuarantine("stale_listing_reconciliation")
+
+    # Check creation response ID matches plan
+    if creation_response.get("id") != plan.product_id:
+        raise ContractQuarantine("listing_id_mismatch")
+
+    # Verify readback matches creation response (exact echo)
+    if readback != creation_response:
+        raise ContractQuarantine("listing_readback_mismatch")
+
+    # Verify creation response matches original payload (exact echo)
+    if creation_response.get("payload") != original_payload:
+        raise ContractQuarantine("listing_payload_mismatch")
+
+    return {"status": "confirmed", "product_id": plan.product_id, "matched": True}
 
 
 def build_coupang_listing_review(

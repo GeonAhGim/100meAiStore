@@ -4,7 +4,9 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 from pathlib import Path
+from typing import Any
 
+from .channel_contracts import ReadBackConflict
 from .channel_order_contracts import (
     ContractQuarantine, OfflineOrderPage, _cursor, _identifier, _integer,
 )
@@ -102,3 +104,61 @@ class OfflineContractJournal:
         return self.db.execute(
             "SELECT count(*) FROM pages WHERE tenant=? AND connection=? AND provider=?", scope
         ).fetchone()[0]
+
+    def verify_readback(self, tenant: str, connection: str, provider: str,
+                        page_key: str, page: OfflineOrderPage | OfflineSettlementPage) -> bool:
+        """Verify that *page* matches the previously recorded digest.
+
+        Returns ``True`` when the page is an exact duplicate (idempotent
+        readback).  Raises ``ReadBackConflict`` when the stored digest
+        differs from the supplied page's digest — the external state has
+        changed since the original read, or a partial/corrupt payload was
+        retransmitted.
+        """
+        if not isinstance(page, (OfflineOrderPage, OfflineSettlementPage)):
+            raise ContractQuarantine("normalized_page_required")
+        provider_scope = page.provider + "_settlement" if isinstance(page, OfflineSettlementPage) else page.provider
+        scope = self._scope(tenant, connection, provider_scope)
+        _identifier(page_key)
+        payload = page.canonical_payload()
+        # Match the exact digest format used in record():
+        # sha256(payload + "\\n" + continuation_or_empty)
+        continuation = page.next_cursor if isinstance(page, OfflineOrderPage) else None
+        digest = hashlib.sha256((payload + "\n" + (continuation or "")).encode("utf-8")).hexdigest()
+        existing = self.db.execute(
+            "SELECT digest FROM pages WHERE tenant=? AND connection=? AND provider=? AND page_key=?",
+            (*scope, page_key),
+        ).fetchone()
+        if existing is None:
+            raise ReadBackConflict("no_recorded_page_for_key")
+        if existing[0] != digest:
+            raise ReadBackConflict("page_identity_content_conflict")
+        return True
+
+    def detect_partial_response(self, raw_body: Any) -> bool:
+        """Return ``True`` when *raw_body* looks like a complete page.
+
+        Heuristic checks that catch obviously truncated or partial
+        responses before they reach the parser.  A response is partial
+        when:
+
+        - it is not a dict (not a JSON object)
+        - its ``data``/``elements`` key exists but is a string (truncated
+          JSON)
+        - it is missing both ``data`` and ``elements`` keys
+
+        This is a lightweight pre-filter; the parser still enforces
+        strict invariants.
+        """
+        if not isinstance(raw_body, dict):
+            raise ContractQuarantine("object_required")
+        # Check for truncated string values BEFORE checking missing keys.
+        if "data" in raw_body and isinstance(raw_body["data"], str):
+            raise ContractQuarantine("partial_response_truncated_data")
+        if "elements" in raw_body and isinstance(raw_body["elements"], str):
+            raise ContractQuarantine("partial_response_truncated_elements")
+        has_data = "data" in raw_body and isinstance(raw_body.get("data"), (list, dict))
+        has_elements = "elements" in raw_body and isinstance(raw_body.get("elements"), list)
+        if not has_data and not has_elements:
+            raise ContractQuarantine("partial_response_missing_data")
+        return True

@@ -18,6 +18,13 @@ rate vs quota headers and unknown errors remain distinct; missing/malformed
 limits or unknown quota periods require manual review. Local exponential delays
 are client policy, not vendor reset-time claims. No plan sleeps or calls a URL.
 
+## Acceptance evidence
+
+| ID | Acceptance criterion |
+|---|---|
+| P2-04-01 | Retry planning is pure and bounded by attempt count, deadline and at most one reauthentication; only GET plans qualify |
+| P2-04-02 | Signing inputs use injected bcrypt (Naver) or synthetic fixed key (Coupang); no raw credentials in repr |
+
 P2-03 already supplies durable opaque/page-sequence checkpoint evidence. Add
 tests for encoded cursor preservation, UTC conversion, malformed headers,
 deadline/retry exhaustion and no-secret repr. Do not represent fixture signatures

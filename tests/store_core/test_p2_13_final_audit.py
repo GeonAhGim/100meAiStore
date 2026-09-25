@@ -64,5 +64,21 @@ class FinalAuditTests(unittest.TestCase):
         self.assertIsNotNone(broken.error)
 
 
+class FinalAuditCliTests(unittest.TestCase):
+    """The milestone done check runs the audit as a command: exit 0 only when ready."""
+
+    def test_cli_fails_closed_and_lists_what_is_missing(self):
+        import contextlib
+        import io
+        from packages.store_core import final_audit
+        with tempfile.TemporaryDirectory() as tmp:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = final_audit.main([tmp])  # no progress file: the audit errors, so it is not ready
+        self.assertEqual(1, code)
+        self.assertIn("ready=False", out.getvalue())
+        self.assertIn("error=", out.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()
