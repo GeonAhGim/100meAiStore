@@ -26,6 +26,15 @@ class Capability(str, Enum):
     RECOVERY = "recovery"
 
 
+class UrgentNotificationCategory(str, Enum):
+    ACCOUNT_SUSPENSION_SECURITY = "account_suspension_security"
+    MASS_STOCKOUT = "mass_stockout"
+    NEGATIVE_MARGIN = "negative_margin"
+    PO_DEADLINE = "po_deadline"
+    PRIVACY_RISK = "privacy_risk"
+    EMERGENCY_STOP = "emergency_stop"
+
+
 ROLE_CAPABILITIES: Mapping[Role, frozenset[Capability]] = {
     Role.MASTER: frozenset(Capability),
     Role.FUNDS: frozenset(
