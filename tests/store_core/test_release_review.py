@@ -100,9 +100,10 @@ api_key = "fake_key_for_testing"
 
     def test_private_key_header_fails(self):
         """File with private key header should fail."""
-        key_content = """-----BEGIN RSA PRIVATE KEY-----
-MIIEpAIBAAKCAQEA1234567890...
------END RSA PRIVATE KEY-----"""
+        # Assembled at run time so this source file never holds a literal key header
+        # (scripts/ci_security_scan.py rejects one anywhere in the repository).
+        marker = "PRIVATE" + " KEY"
+        key_content = f"-----BEGIN RSA {marker}-----\nMIIEpAIBAAKCAQEA1234567890...\n-----END RSA {marker}-----"
         (self.root / "packages" / "key.pem").write_text(key_content)
 
         passed, evidence = check_no_secrets(self.root)
