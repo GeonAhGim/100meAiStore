@@ -67,7 +67,11 @@ def run_gate(root: Path, patch_path: Path, task_id: int) -> tuple[bool, str]:
         modules = _test_modules(touched_paths(patch_text))
         report = []
         for label, argv in ((f"touched tests ({len(modules)})", ["python", "-m", "unittest", *modules]) if modules else (None, None),
-                            ("full suite", ["python", "-m", "unittest", "discover", "-s", "tests", "-t", "."])):
+                            ("full suite", ["python", "-m", "unittest", "discover", "-s", "tests", "-t", "."]),
+                            # CI runs this scan too; a patch that fails it here would fail the PR
+                            # (task 26 landed a literal key header in a test, 2026-09-25).
+                            ("security scan", ["python", "scripts/ci_security_scan.py"])
+                            if (scratch / "scripts" / "ci_security_scan.py").is_file() else (None, None)):
             if label is None:
                 continue
             try:

@@ -56,6 +56,17 @@ class ReviewGateTests(unittest.TestCase):
         self.assertFalse(passed)
         self.assertIn("3 != 2", report)
 
+    def test_the_repository_security_scan_is_part_of_the_gate(self):
+        # CI runs scripts/ci_security_scan.py; a patch that fails it must not pass the local gate.
+        (self.root / "scripts").mkdir()
+        (self.root / "scripts" / "ci_security_scan.py").write_text(
+            "import sys\nprint('possible private key: tests/x.py')\nsys.exit(1)\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(self.root), "add", "-A"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(self.root), "commit", "-q", "-m", "scan"], check=True, capture_output=True)
+        passed, report = review.run_gate(self.root, self._patch("good.patch", GOOD_PATCH), 3)
+        self.assertFalse(passed)
+        self.assertIn("security scan: rc=1", report)
+
     def test_review_prompt_shows_pre_patch_files_as_before_and_the_task(self):
         prompt = review.review_prompt(GOOD_PATCH, "full suite: rc=0", self.root, "Exit criteria: B is 2.")
         self.assertIn("<<<BEFORE pkg/mod.py>>>", prompt)
