@@ -48,6 +48,11 @@ class BudgetRepositoryMixin:
         now = budget_time(now)
         return {'reserved_minor': self.platform_monthly_budget_total(now), 'computed_at': now}
 
+    def platform_budget_warning_level(self, now):
+        now = budget_time(now)
+        total = self.platform_monthly_budget_total(now)
+        return total >= PLATFORM_WARNING_MINOR
+
     def reserve_budget_entry(self, value):
         validate_ledger_amount(value.amount_minor)
         with self.transaction():
